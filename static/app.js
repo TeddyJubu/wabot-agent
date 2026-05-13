@@ -233,6 +233,8 @@ function renderRunItem(run) {
 
   const ts = resolveRunTimestamp(run);
   item.dataset.ts = String(ts);
+  // Stored so prependRun's overflow-eviction can free the dedup slot too.
+  if (run.run_id) item.dataset.runId = run.run_id;
 
   const header = document.createElement("div");
   header.className = "run-item-header";
@@ -278,16 +280,38 @@ function refreshRelativeTimes() {
 
 function paintRuns(runs) {
   runCount.textContent = `${runs.length}`;
-  runsList.replaceChildren(...runs.map(renderRunItem));
+  // Reset dedup state — paintRuns is a wholesale snapshot replacement; any
+  // subsequent SSE agent_run_complete with a run_id already in `runs` will
+  // be filtered by prependRun's dedup Set.
+  renderedRunIds.clear();
+  const items = [];
+  for (const run of runs) {
+    if (run.run_id) renderedRunIds.add(run.run_id);
+    items.push(renderRunItem(run));
+  }
+  runsList.replaceChildren(...items);
 }
 
+// Track the run_ids currently in the panel so SSE reconnects (where the
+// ready_snapshot's `runs` array and the backlog replay can both include the
+// same agent_run_complete) don't double-prepend or over-increment the KPI.
+const renderedRunIds = new Set();
+
 function prependRun(run) {
+  if (run.run_id && renderedRunIds.has(run.run_id)) return false;
+  if (run.run_id) renderedRunIds.add(run.run_id);
   runsList.prepend(renderRunItem(run));
   // Trim to keep the list bounded; SSE deltas are append-only.
   while (runsList.children.length > MAX_RUNS_IN_LIST) {
-    runsList.lastElementChild?.remove();
+    const dropped = runsList.lastElementChild;
+    dropped?.remove();
+    // Free the dedup slot too — if the run rolls back into view later
+    // (unlikely but possible), it'll re-prepend cleanly.
+    const droppedId = dropped?.dataset.runId;
+    if (droppedId) renderedRunIds.delete(droppedId);
   }
   runCount.textContent = `${runsList.children.length}`;
+  return true;
 }
 
 async function loadRuns() {
@@ -740,10 +764,12 @@ function handleSseEvent(name, data) {
     case "pairing_changed":
       paintPairing(data);
       break;
-    case "agent_run_complete":
-      // The event carries enough to render the run inline. Bump the runs KPI
-      // optimistically too — the next ready_snapshot will reconcile.
-      prependRun({
+    case "agent_run_complete": {
+      // The event carries enough to render the run inline. Only bump the
+      // Memory KPI when prependRun actually added a new card (dedup keeps
+      // SSE reconnects from over-incrementing when the run already painted
+      // from ready_snapshot.runs).
+      const added = prependRun({
         run_id: data.run_id,
         sender: data.sender,
         user_input: data.user_input,
@@ -752,8 +778,9 @@ function handleSseEvent(name, data) {
         // reflects whether a real model produced the response.
         live_model: data.live_model,
       });
-      setMemoryRunCount(memoryRunCount + 1);
+      if (added) setMemoryRunCount(memoryRunCount + 1);
       break;
+    }
     case "inbound_message":
       // Visible hint that something just arrived from WhatsApp. The follow-up
       // agent_run_complete will append the actual run card.

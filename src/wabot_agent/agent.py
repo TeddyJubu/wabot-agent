@@ -243,6 +243,12 @@ async def run_agent_streamed(
             "run_id": run_id,
             "session_id": session_key,
             "live_model": settings.live_model_enabled,
+            # Match the non-streaming run_agent payload so the dashboard SSE
+            # handler can render the run card without a follow-up /api/runs
+            # fetch on the streaming path too. EventLog.write redacts.
+            "sender": inbound.sender if inbound else None,
+            "user_input": prompt,
+            "final_output": final_output,
         },
     )
     yield {
