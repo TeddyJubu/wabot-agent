@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+import hashlib
 import io
+import json
 import secrets
 from pathlib import Path
 from typing import Any
@@ -9,14 +12,14 @@ from urllib.parse import urlparse
 import qrcode
 import uvicorn
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from qrcode.image.svg import SvgPathImage
 
 from .agent import run_agent
 from .config import Settings, get_settings
-from .events import EventLog
+from .events import EventHub, EventLog
 from .memory import InboundMessage, MemoryStore
 from .redaction import redact
 from .runtime_overrides import (
@@ -89,14 +92,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         else:
             apply_overrides(settings, overrides)
     memory = MemoryStore(settings.db_path)
-    event_log = EventLog(settings.log_path)
+    hub = EventHub()
+    event_log = EventLog(settings.log_path, hub=hub)
     wabot = WabotClient(settings.wabot_endpoint, settings.resolved_wabot_token)
 
     app = FastAPI(title="wabot-agent", version="0.1.0")
     app.state.settings = settings
     app.state.memory = memory
     app.state.event_log = event_log
+    app.state.event_hub = hub
     app.state.wabot = wabot
+
+    @app.on_event("startup")
+    async def _bind_event_loop() -> None:
+        # Capture the running uvicorn loop so sync publishers (EventLog.write
+        # called from inside tools, threads, etc.) can dispatch safely via
+        # call_soon_threadsafe.
+        hub.bind_loop(asyncio.get_running_loop())
 
     static_dir = Path(__file__).resolve().parents[2] / "static"
     if static_dir.exists():
@@ -278,9 +290,96 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def recent_runs(limit: int = Query(default=20, ge=0, le=100)) -> list[dict[str, Any]]:
         return memory.recent_runs(limit=limit)
 
+    async def _build_initial_snapshot() -> dict[str, Any]:
+        """Initial payload pushed when an SSE client connects.
+
+        Bundles /ready + /api/runs into one event so the dashboard renders
+        completely without follow-up REST calls. Subsequent state changes
+        arrive as deltas on the same stream.
+        """
+        wabot_health = await wabot.health()
+        return redact(
+            {
+                "ok": True,
+                "live_model": settings.live_model_enabled,
+                "model": settings.openrouter_model if settings.live_model_enabled else "offline",
+                "send_policy": settings.send_policy,
+                "memory": memory.stats(),
+                "wabot": {
+                    "reachable": wabot_health.reachable,
+                    "logged_in": wabot_health.logged_in,
+                    "connected": wabot_health.connected,
+                    "ready": wabot_health.ready,
+                    "detail": wabot_health.detail,
+                },
+                "runs": memory.recent_runs(limit=8),
+            }
+        )
+
+    @app.get("/api/stream", dependencies=[operator_dependency])
+    async def event_stream(
+        request: Request,
+        last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
+    ) -> StreamingResponse:
+        """Server-sent events for live dashboard updates.
+
+        On connect: an initial `ready_snapshot` event with /ready + recent runs.
+        Live: every event published via EventLog (agent_run_*, inbound_message,
+        settings_updated) is forwarded with monotonic Last-Event-ID for replay.
+        Heartbeat comments every 15s keep proxies from idling the connection.
+        """
+        try:
+            lid: int | None = int(last_event_id) if last_event_id else None
+        except ValueError:
+            lid = None
+
+        async def generator() -> Any:
+            # 1) Initial snapshot — fast first paint, no separate REST round-trips.
+            snapshot = await _build_initial_snapshot()
+            yield _sse_frame(event_id=None, name="ready_snapshot", data=snapshot)
+
+            # 2) Backlog (anything we already broadcast past Last-Event-ID) + live.
+            backlog, queue = hub.open_subscription(lid)
+            try:
+                for event in backlog:
+                    yield _sse_frame(event.id, event.name, event.payload)
+                while True:
+                    if await request.is_disconnected():
+                        break
+                    try:
+                        event = await asyncio.wait_for(queue.get(), timeout=15.0)
+                    except TimeoutError:
+                        # SSE comment line — ignored by EventSource but keeps
+                        # idle proxies from killing the connection.
+                        yield ": keepalive\n\n"
+                        continue
+                    yield _sse_frame(event.id, event.name, event.payload)
+            finally:
+                hub.close_subscription(queue)
+
+        return StreamingResponse(
+            generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                # Defeat nginx proxy buffering if anything ever sits in front.
+                "X-Accel-Buffering": "no",
+            },
+        )
+
     @app.get("/api/settings", dependencies=[operator_dependency])
-    async def read_settings() -> dict[str, Any]:
-        return _settings_view(settings)
+    async def read_settings(
+        if_none_match: str | None = Header(default=None, alias="If-None-Match"),
+    ) -> Response:
+        # The settings view is small but the dashboard re-fetches it on every
+        # save, refresh, and (soon) SSE settings.changed event. A weak ETag
+        # over the redacted view turns the common case into a 304 with no body.
+        view = _settings_view(settings)
+        body = json.dumps(view, sort_keys=True, ensure_ascii=False).encode("utf-8")
+        etag = f'W/"{hashlib.blake2s(body, digest_size=12).hexdigest()}"'
+        if if_none_match == etag:
+            return Response(status_code=304, headers={"ETag": etag})
+        return JSONResponse(view, headers={"ETag": etag, "Cache-Control": "no-cache"})
 
     @app.patch("/api/settings", dependencies=[operator_dependency])
     async def update_settings(patch: SettingsPatch) -> dict[str, Any]:
@@ -463,6 +562,22 @@ def _settings_view(settings: Settings) -> dict[str, Any]:
             "token_file": str(settings.wabot_token_file) if settings.wabot_token_file else None,
         },
     }
+
+
+def _sse_frame(event_id: int | None, name: str, data: Any) -> str:
+    """Format a single SSE frame. Data is JSON-encoded; multi-line bodies are
+    split across multiple `data:` lines per the SSE spec, though our redacted
+    payloads almost never contain newlines."""
+    parts: list[str] = []
+    if event_id is not None:
+        parts.append(f"id: {event_id}")
+    parts.append(f"event: {name}")
+    body = json.dumps(data, ensure_ascii=False)
+    for line in body.split("\n"):
+        parts.append(f"data: {line}")
+    parts.append("")
+    parts.append("")
+    return "\n".join(parts)
 
 
 def _qr_svg(payload: str) -> bytes:

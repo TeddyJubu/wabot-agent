@@ -105,6 +105,12 @@ async def run_agent(
             "run_id": run_id,
             "session_id": session_key,
             "live_model": settings.live_model_enabled,
+            # Carry enough for the dashboard runs panel to render without a
+            # follow-up /api/runs fetch. EventLog passes both through redact()
+            # before broadcast, so the SSE wire payload stays redacted.
+            "sender": inbound.sender if inbound else None,
+            "user_input": prompt,
+            "final_output": final_output,
         },
     )
     return AgentRunResult(

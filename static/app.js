@@ -23,20 +23,38 @@ function setStatus(el, text, level = "warn") {
   el.classList.add(level);
 }
 
+// Cached run count so SSE deltas (agent_run_complete) can bump the Memory KPI
+// optimistically without waiting for the next full snapshot.
+let memoryRunCount = 0;
+
+function setMemoryRunCount(value) {
+  memoryRunCount = value;
+  setStatus(statusEls.memory, `${memoryRunCount} runs`, "ok");
+}
+
+function applyReady(data) {
+  setStatus(statusEls.model, data.live_model ? data.model : "Offline", data.live_model ? "ok" : "warn");
+  const wabotReady = data.wabot && data.wabot.ready;
+  setStatus(statusEls.wabot, wabotReady ? "Ready" : "Not ready", wabotReady ? "ok" : "warn");
+  // Policy level mapping is safety-critical: allow_all removes the recipient
+  // guard, so it MUST render as destructive (red), not "ok" (green).
+  const policyLevel = { dry_run: "warn", allowlist: "ok", allow_all: "bad" };
+  const policyLabel = { dry_run: "Dry run", allowlist: "Allowlist", allow_all: "Allow all" };
+  setStatus(
+    statusEls.policy,
+    policyLabel[data.send_policy] ?? data.send_policy,
+    policyLevel[data.send_policy] ?? "warn",
+  );
+  setMemoryRunCount(data.memory.runs);
+}
+
+// Fallback path — only used when the SSE stream is closed (network blip,
+// proxy timeout). On a healthy stream `ready_snapshot` repaints these tiles.
 async function loadReady() {
   try {
     const res = await fetch("/ready");
-    const data = await res.json();
-    setStatus(statusEls.model, data.live_model ? data.model : "Offline", data.live_model ? "ok" : "warn");
-    const wabotReady = data.wabot && data.wabot.ready;
-    setStatus(statusEls.wabot, wabotReady ? "Ready" : "Not ready", wabotReady ? "ok" : "warn");
-    setStatus(
-      statusEls.policy,
-      data.send_policy,
-      data.send_policy === "dry_run" ? "warn" : "ok",
-    );
-    setStatus(statusEls.memory, `${data.memory.runs} runs`, "ok");
-  } catch (error) {
+    applyReady(await res.json());
+  } catch {
     setStatus(statusEls.model, "Error", "bad");
     setStatus(statusEls.wabot, "Error", "bad");
   }
@@ -81,21 +99,36 @@ async function loadPairing() {
   }
 }
 
-async function loadRuns() {
-  const res = await fetch("/api/runs?limit=8");
-  const runs = await res.json();
+const MAX_RUNS_IN_LIST = 8;
+
+function renderRunItem(run) {
+  const item = document.createElement("article");
+  item.className = "run-item";
+  const title = document.createElement("strong");
+  title.textContent = run.run_id.slice(0, 8);
+  const body = document.createElement("p");
+  body.textContent = run.final_output || run.user_input || "No output";
+  item.append(title, body);
+  return item;
+}
+
+function paintRuns(runs) {
   runCount.textContent = `${runs.length}`;
-  runsList.innerHTML = "";
-  for (const run of runs) {
-    const item = document.createElement("article");
-    item.className = "run-item";
-    const title = document.createElement("strong");
-    title.textContent = run.run_id.slice(0, 8);
-    const body = document.createElement("p");
-    body.textContent = run.final_output || run.user_input || "No output";
-    item.append(title, body);
-    runsList.append(item);
+  runsList.replaceChildren(...runs.map(renderRunItem));
+}
+
+function prependRun(run) {
+  runsList.prepend(renderRunItem(run));
+  // Trim to keep the list bounded; SSE deltas are append-only.
+  while (runsList.children.length > MAX_RUNS_IN_LIST) {
+    runsList.lastElementChild?.remove();
   }
+  runCount.textContent = `${runsList.children.length}`;
+}
+
+async function loadRuns() {
+  const res = await fetch(`/api/runs?limit=${MAX_RUNS_IN_LIST}`);
+  paintRuns(await res.json());
 }
 
 function addMessage(role, text) {
@@ -122,8 +155,9 @@ form.addEventListener("submit", async (event) => {
     });
     const data = await res.json();
     pending.textContent = data.output || "No output";
-    await loadRuns();
-    await loadReady();
+    // The SSE stream will push agent_run_complete for the runs panel and a
+    // ready_snapshot-style update implicitly via memory.runs in the next state
+    // change — no explicit loadRuns/loadReady needed here.
   } catch (error) {
     pending.textContent = `Request failed: ${error.message}`;
   }
@@ -208,12 +242,17 @@ function applySettingsView(view) {
   }
 }
 
+let lastSettingsEtag = null;
+
 async function loadSettings() {
   try {
-    const res = await fetch("/api/settings");
+    const headers = lastSettingsEtag ? { "If-None-Match": lastSettingsEtag } : {};
+    const res = await fetch("/api/settings", { headers });
+    // 304 means the view we already have is current — no work to do.
+    if (res.status === 304) return;
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const view = await res.json();
-    applySettingsView(view);
+    lastSettingsEtag = res.headers.get("ETag");
+    applySettingsView(await res.json());
   } catch (error) {
     setSettingsStatus(`Failed to load settings: ${error.message}`, "bad");
   }
@@ -383,15 +422,84 @@ if ("IntersectionObserver" in window) {
 }
 
 // =====================================================================
+// Server-sent events — live readiness + runs + settings deltas
+// =====================================================================
+
+let eventSource = null;
+let pairingTimer = null;
+
+function handleSseEvent(name, data) {
+  switch (name) {
+    case "ready_snapshot":
+      applyReady(data);
+      paintRuns(data.runs || []);
+      break;
+    case "agent_run_complete":
+      // The event carries enough to render the run inline. Bump the runs KPI
+      // optimistically too — the next ready_snapshot will reconcile.
+      prependRun({
+        run_id: data.run_id,
+        sender: data.sender,
+        user_input: data.user_input,
+        final_output: data.final_output,
+      });
+      setMemoryRunCount(memoryRunCount + 1);
+      break;
+    case "inbound_message":
+      // Visible hint that something just arrived from WhatsApp. The follow-up
+      // agent_run_complete will append the actual run card.
+      runCount.classList.add("pulse");
+      setTimeout(() => runCount.classList.remove("pulse"), 1500);
+      break;
+    case "settings_updated":
+      loadSettings();
+      break;
+  }
+}
+
+function openEventStream() {
+  if (eventSource) eventSource.close();
+  eventSource = new EventSource("/api/stream");
+  // Named events dispatched server-side via `event:` lines.
+  for (const name of ["ready_snapshot", "agent_run_start", "agent_run_complete", "inbound_message", "settings_updated"]) {
+    eventSource.addEventListener(name, (ev) => {
+      try {
+        handleSseEvent(name, JSON.parse(ev.data));
+      } catch (err) {
+        console.error("SSE parse failed", name, err);
+      }
+    });
+  }
+  eventSource.onerror = () => {
+    // EventSource auto-reconnects with Last-Event-ID. While disconnected,
+    // run a one-shot fallback so the operator sees fresh readiness even if
+    // the stream stays broken (e.g. proxy is down).
+    if (eventSource.readyState === EventSource.CLOSED) loadReady();
+  };
+}
+
+// Pause the stream when the tab is hidden — saves OpenRouter health-probe
+// budget and avoids piling up backlog on the server's ring buffer.
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    if (!eventSource || eventSource.readyState === EventSource.CLOSED) openEventStream();
+    loadPairing();
+  } else if (eventSource) {
+    eventSource.close();
+    eventSource = null;
+  }
+});
+
+// =====================================================================
 // Boot
 // =====================================================================
 
 addMessage("agent", "Ready. Send policy is fail-closed unless the VPS is configured otherwise.");
-loadReady();
+openEventStream();
 loadPairing();
-loadRuns();
 loadSettings();
-setInterval(() => {
-  loadReady();
-  loadPairing();
-}, 10000);
+// Pairing isn't yet on the hub — wabot's QR rotates externally. Poll on a
+// slow cadence; the SSE stream handles the rest.
+pairingTimer = setInterval(() => {
+  if (document.visibilityState === "visible") loadPairing();
+}, 30000);

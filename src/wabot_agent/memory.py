@@ -40,6 +40,13 @@ class MemoryStore:
         with self._lock:
             conn = sqlite3.connect(self.path)
             conn.row_factory = sqlite3.Row
+            # WAL is enabled once at _init_db (persisted in the DB file).
+            # These two pragmas are per-connection: synchronous=NORMAL pairs with
+            # WAL for fast commits with crash-safe durability, and busy_timeout
+            # lets writers wait briefly instead of failing with 'database is locked'
+            # when the dashboard SSE/runs reader races with run_agent writes.
+            conn.execute("pragma synchronous=NORMAL")
+            conn.execute("pragma busy_timeout=5000")
             try:
                 yield conn
                 conn.commit()
@@ -48,6 +55,8 @@ class MemoryStore:
 
     def _init_db(self) -> None:
         with self.connect() as conn:
+            # Persisted on the DB file; survives subsequent connections.
+            conn.execute("pragma journal_mode=WAL")
             conn.executescript(
                 """
                 create table if not exists contact_facts (

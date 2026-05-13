@@ -406,6 +406,14 @@ button {
   font-size: 11px;
   color: var(--muted-foreground);
   font-variant-numeric: tabular-nums;
+  transition: color 200ms ease;
+}
+
+/* Brief flash when a new inbound message arrives via SSE — drawn on the
+   Recent runs counter so the operator notices activity without it being
+   loud. The class is toggled by app.js and self-removes after ~1.5s. */
+.panel-meta.pulse {
+  color: var(--success);
 }
 
 /* ----- Chat ----- */
