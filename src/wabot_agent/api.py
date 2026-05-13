@@ -75,13 +75,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings.ensure_dirs()
     overrides = load_overrides(settings.runtime_overrides_path)
     if overrides:
+        # Validate atomically on a snapshot first — a stale override file with
+        # one bad value (e.g. a Literal that no longer exists) shouldn't half-
+        # mutate live settings before the exception fires.
+        snapshot = settings.model_copy(deep=True)
         try:
-            apply_overrides(settings, overrides)
+            apply_overrides(snapshot, overrides)
         except Exception as exc:
             print(
-                f"[runtime_overrides] failed to apply overrides at startup: {exc}",
+                f"[runtime_overrides] overrides file failed validation, ignoring: {exc}",
                 flush=True,
             )
+        else:
+            apply_overrides(settings, overrides)
     memory = MemoryStore(settings.db_path)
     event_log = EventLog(settings.log_path)
     wabot = WabotClient(settings.wabot_endpoint, settings.resolved_wabot_token)
@@ -327,19 +333,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     ),
                 )
 
-        # Atomicity: validate on a deep copy first so a half-applied patch can't
-        # leave live settings inconsistent with disk if validation fails partway.
+        # Build the full set we'll persist (existing disk overrides + this patch),
+        # then validate the WHOLE thing on a snapshot — not just the delta. This
+        # catches the edge case where a stale/manually-edited overrides file
+        # contains a value that would fail validation when reapplied at restart.
+        merged = load_overrides(settings.runtime_overrides_path)
+        merged.update(proposed)
+
         snapshot = settings.model_copy(deep=True)
         try:
-            apply_overrides(snapshot, proposed)
+            apply_overrides(snapshot, merged)
         except Exception as exc:  # pydantic ValidationError or other
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
         # Persist to disk first. If this raises, live settings stay unchanged.
         # Disk is the authoritative source on next restart, so failing here means
         # we MUST NOT mutate live state — the next reload would otherwise diverge.
-        merged = load_overrides(settings.runtime_overrides_path)
-        merged.update(proposed)
         save_overrides(settings.runtime_overrides_path, merged)
 
         # Now commit to live settings. The same validators just succeeded on the

@@ -268,3 +268,23 @@ def test_settings_patch_atomicity_invalid_field_leaves_state_clean(tmp_path: Pat
     assert bad.status_code == 400
     assert settings.send_policy == original_policy
     assert not overrides_path.exists()
+
+
+def test_startup_ignores_invalid_overrides_atomically(tmp_path: Path) -> None:
+    """A stale overrides file with one bad field must not partially mutate Settings."""
+    import json
+
+    overrides_path = tmp_path / "overrides.json"
+    overrides_path.write_text(
+        json.dumps({"openrouter_model": "anthropic/claude-haiku", "send_policy": "garbage"})
+    )
+
+    settings = make_settings(tmp_path).model_copy(
+        update={"runtime_overrides_path": overrides_path}
+    )
+    # Should boot cleanly, ignoring the file entirely (not half-applying it).
+    client = TestClient(create_app(settings))
+    view = client.get("/api/settings").json()
+
+    assert view["send_policy"] == "dry_run"  # original env value preserved
+    assert view["openrouter"]["model"] == "openai/gpt-5.2"  # not partially applied
