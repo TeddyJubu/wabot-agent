@@ -31,6 +31,9 @@ fi
 mkdir -p "$APP_DIR/data" "$APP_DIR/.uv-cache"
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 
+sudo -u "$APP_USER" UV_CACHE_DIR="$APP_DIR/.uv-cache" \
+  uv -C "$APP_DIR" sync --frozen --all-extras
+
 if [[ ! -f "$APP_DIR/.env" ]]; then
   install -m 0600 -o "$APP_USER" -g "$APP_USER" "$APP_DIR/.env.example" "$APP_DIR/.env"
   echo "Created $APP_DIR/.env. Fill OPENROUTER_API_KEY, WABOT_TOKEN, and policy values."

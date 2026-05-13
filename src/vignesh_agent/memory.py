@@ -66,7 +66,10 @@ class MemoryStore:
                 create table if not exists processed_messages (
                     message_id text primary key,
                     sender text,
-                    processed_at text not null
+                    processed_at text not null,
+                    status text not null default 'done',
+                    run_id text,
+                    error text
                 );
                 create table if not exists runs (
                     run_id text primary key,
@@ -84,22 +87,84 @@ class MemoryStore:
                 );
                 """
             )
+            self._ensure_column(
+                conn, "processed_messages", "status", "text not null default 'done'"
+            )
+            self._ensure_column(conn, "processed_messages", "run_id", "text")
+            self._ensure_column(conn, "processed_messages", "error", "text")
+
+    def _ensure_column(
+        self, conn: sqlite3.Connection, table: str, column: str, definition: str
+    ) -> None:
+        rows = conn.execute(f"pragma table_info({table})").fetchall()
+        if column not in {row["name"] for row in rows}:
+            conn.execute(f"alter table {table} add column {column} {definition}")
 
     def is_processed(self, message_id: str) -> bool:
         with self.connect() as conn:
             row = conn.execute(
-                "select 1 from processed_messages where message_id = ?", (message_id,)
+                """
+                select 1 from processed_messages
+                where message_id = ? and status in ('processing', 'done')
+                """,
+                (message_id,),
             ).fetchone()
             return row is not None
 
     def mark_processed(self, message_id: str, sender: str) -> None:
+        if self.claim_message(message_id, sender):
+            self.complete_message(message_id, run_id=None)
+
+    def claim_message(self, message_id: str, sender: str) -> bool:
+        with self.connect() as conn:
+            existing = conn.execute(
+                """
+                select status from processed_messages where message_id = ?
+                """,
+                (message_id,),
+            ).fetchone()
+            if existing and existing["status"] in {"processing", "done"}:
+                return False
+            if existing and existing["status"] == "failed":
+                conn.execute(
+                    """
+                    update processed_messages
+                    set sender = ?, processed_at = ?, status = 'processing',
+                        run_id = null, error = null
+                    where message_id = ?
+                    """,
+                    (sender, now_iso(), message_id),
+                )
+                return True
+            conn.execute(
+                """
+                insert into processed_messages (message_id, sender, processed_at, status)
+                values (?, ?, ?, 'processing')
+                """,
+                (message_id, sender, now_iso()),
+            )
+            return True
+
+    def complete_message(self, message_id: str, run_id: str | None) -> None:
         with self.connect() as conn:
             conn.execute(
                 """
-                insert or ignore into processed_messages (message_id, sender, processed_at)
-                values (?, ?, ?)
+                update processed_messages
+                set processed_at = ?, status = 'done', run_id = ?, error = null
+                where message_id = ?
                 """,
-                (message_id, sender, now_iso()),
+                (now_iso(), run_id, message_id),
+            )
+
+    def fail_message(self, message_id: str, error: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                update processed_messages
+                set processed_at = ?, status = 'failed', error = ?
+                where message_id = ?
+                """,
+                (now_iso(), redact(error), message_id),
             )
 
     def remember_contact_fact(
@@ -172,13 +237,15 @@ class MemoryStore:
     def record_run(
         self, run_id: str, sender: str | None, user_input: str, final_output: str
     ) -> None:
+        safe_input = str(redact(user_input))
+        safe_output = str(redact(final_output))
         with self.connect() as conn:
             conn.execute(
                 """
                 insert or replace into runs (run_id, sender, user_input, final_output, created_at)
                 values (?, ?, ?, ?, ?)
                 """,
-                (run_id, sender, user_input, final_output, now_iso()),
+                (run_id, sender, safe_input, safe_output, now_iso()),
             )
 
     def record_tool_event(self, run_id: str, name: str, payload: dict[str, Any]) -> None:

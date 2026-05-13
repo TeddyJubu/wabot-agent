@@ -18,6 +18,8 @@ from agents.tool import Tool
 from agents.usage import Usage
 from openai import AsyncOpenAI
 
+from .redaction import redact_text
+
 try:
     from agents import OpenAIChatCompletionsModel
 except ImportError:  # pragma: no cover - dependency import guard
@@ -43,7 +45,7 @@ class OfflineModel(Model):
         conversation_id: str | None,
         prompt: Any | None,
     ) -> ModelResponse:
-        prompt_text = _input_to_text(input)
+        prompt_text = redact_text(_input_to_text(input))
         tool_names = ", ".join(tool.name for tool in tools)
         text = (
             "Offline mode is active, so I did not call OpenRouter or send WhatsApp messages. "
@@ -142,4 +144,3 @@ def _input_to_text(input_value: str | list[TResponseInputItem]) -> str:
                         if text:
                             parts.append(str(text))
     return "\n".join(parts)
-

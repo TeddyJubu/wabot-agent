@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from agents import RunContextWrapper, function_tool
@@ -31,6 +32,19 @@ def _is_send_allowed(settings: Settings, to: str) -> tuple[bool, str]:
     if to in settings.allowed_recipients:
         return True, "allowlist"
     return False, "recipient_not_allowlisted"
+
+
+def _media_path_allowed(settings: Settings, path: str) -> tuple[bool, Path | None, str | None]:
+    try:
+        media_root = settings.media_dir.resolve()
+        candidate = Path(path).expanduser().resolve()
+    except OSError as exc:
+        return False, None, str(exc)
+    if media_root not in candidate.parents and candidate != media_root:
+        return False, None, f"Images must live under {settings.media_dir}."
+    if not candidate.exists() or not candidate.is_file():
+        return False, None, "Image file does not exist."
+    return True, candidate, None
 
 
 @function_tool
@@ -99,9 +113,26 @@ async def send_whatsapp_image(
     ctx: RunContextWrapper[RuntimeContext], to: str, path: str, caption: str | None = None
 ) -> dict[str, Any]:
     """Send a WhatsApp image message through wabot when the send policy allows it."""
+    path_allowed, safe_path, path_reason = _media_path_allowed(ctx.context.settings, path)
+    if not path_allowed or safe_path is None:
+        payload = {
+            "sent": False,
+            "reason": "image_path_not_allowed",
+            "detail": path_reason,
+        }
+        ctx.context.memory.record_tool_event(
+            ctx.context.run_id, "send_whatsapp_image.blocked", payload
+        )
+        return payload
+
     allowed, reason = _is_send_allowed(ctx.context.settings, to)
     if not allowed:
-        payload = {"sent": False, "reason": reason, "to": mask_phone(to), "path": path}
+        payload = {
+            "sent": False,
+            "reason": reason,
+            "to": mask_phone(to),
+            "path": str(safe_path.relative_to(ctx.context.settings.media_dir.resolve())),
+        }
         ctx.context.memory.record_tool_event(
             ctx.context.run_id, "send_whatsapp_image.blocked", payload
         )
@@ -115,7 +146,7 @@ async def send_whatsapp_image(
         )
         return payload
 
-    result = await ctx.context.wabot.send_image(to=to, path=path, caption=caption)
+    result = await ctx.context.wabot.send_image(to=to, path=str(safe_path), caption=caption)
     payload = {"sent": True, "policy": reason, "to": mask_phone(to), "result": redact(result)}
     ctx.context.memory.record_tool_event(ctx.context.run_id, "send_whatsapp_image", payload)
     ctx.context.event_log.write("send_image", payload)

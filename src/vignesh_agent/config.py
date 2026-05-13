@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -13,7 +13,7 @@ class Settings(BaseSettings):
 
     env: str = Field(default="local", alias="VIGNESH_ENV")
     host: str = Field(default="127.0.0.1", alias="VIGNESH_HOST")
-    port: int = Field(default=8787, alias="VIGNESH_PORT")
+    port: int = Field(default=8787, validation_alias=AliasChoices("VIGNESH_PORT", "PORT"))
     offline_mode: bool = Field(default=False, alias="VIGNESH_OFFLINE_MODE")
 
     openrouter_api_key: str | None = Field(default=None, alias="OPENROUTER_API_KEY")
@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     data_dir: Path = Field(default=Path("./data"), alias="VIGNESH_DATA_DIR")
     db_path: Path = Field(default=Path("./data/vignesh-agent.db"), alias="VIGNESH_DB_PATH")
     log_path: Path = Field(default=Path("./data/events.jsonl"), alias="VIGNESH_LOG_PATH")
+    media_dir: Path = Field(default=Path("./data/media"), alias="VIGNESH_MEDIA_DIR")
     mcp_config: Path | None = Field(
         default=Path("./configs/mcp.example.json"),
         alias="VIGNESH_MCP_CONFIG",
@@ -40,6 +41,7 @@ class Settings(BaseSettings):
     wabot_endpoint: str = Field(default="http://127.0.0.1:7777", alias="WABOT_ENDPOINT")
     wabot_token: str | None = Field(default=None, alias="WABOT_TOKEN")
     wabot_inbound_token: str | None = Field(default=None, alias="WABOT_INBOUND_TOKEN")
+    operator_token: str | None = Field(default=None, alias="VIGNESH_OPERATOR_TOKEN")
 
     send_policy: Literal["dry_run", "allowlist", "allow_all"] = Field(
         default="dry_run", alias="VIGNESH_SEND_POLICY"
@@ -66,6 +68,7 @@ class Settings(BaseSettings):
 
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        self.media_dir.mkdir(parents=True, exist_ok=True)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
 

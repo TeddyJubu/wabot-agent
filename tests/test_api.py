@@ -30,6 +30,34 @@ def test_health_and_ready(tmp_path: Path) -> None:
     assert ready["send_policy"] == "dry_run"
 
 
+def test_operator_endpoints_require_token_when_configured(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path).model_copy(update={"operator_token": "operator-secret"})
+    client = TestClient(create_app(settings))
+
+    assert client.get("/ready").status_code == 401
+    ok = client.get("/ready", headers={"X-Operator-Token": "operator-secret"})
+    assert ok.status_code == 200
+
+
+def test_dashboard_token_sets_operator_cookie(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path).model_copy(update={"operator_token": "operator-secret"})
+    client = TestClient(create_app(settings))
+
+    denied = client.get("/")
+    allowed = client.get("/?token=operator-secret")
+    ready = client.get("/ready")
+
+    assert denied.status_code == 401
+    assert allowed.status_code == 200
+    assert ready.status_code == 200
+
+
+def test_runs_limit_rejects_negative_values(tmp_path: Path) -> None:
+    client = TestClient(create_app(make_settings(tmp_path)))
+
+    assert client.get("/api/runs?limit=-1").status_code == 422
+
+
 def test_inbound_requires_token(tmp_path: Path) -> None:
     client = TestClient(create_app(make_settings(tmp_path)))
     payload = {"id": "msg-1", "from": "+15550001111", "text": "hello"}
@@ -48,4 +76,3 @@ def test_inbound_is_idempotent(tmp_path: Path) -> None:
     assert first.status_code == 200
     assert first.json()["duplicate"] is False
     assert second.json()["duplicate"] is True
-

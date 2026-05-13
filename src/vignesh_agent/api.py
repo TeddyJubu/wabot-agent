@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import uvicorn
-from fastapi import FastAPI, Header, HTTPException, Request
+from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -57,8 +57,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
+    async def verify_operator(
+        x_operator_token: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+        operator_session: str | None = Cookie(default=None, alias="vignesh_operator_token"),
+    ) -> None:
+        _verify_operator_auth(settings, x_operator_token, authorization, operator_session)
+
+    operator_dependency = Depends(verify_operator)
+
     @app.get("/")
-    async def dashboard() -> FileResponse:
+    async def dashboard(
+        token: str | None = Query(default=None),
+        operator_session: str | None = Cookie(default=None, alias="vignesh_operator_token"),
+    ) -> FileResponse:
+        if settings.operator_token:
+            if token:
+                _verify_operator_auth(settings, token, None, None)
+                file_response = _dashboard_file(static_dir)
+                file_response.set_cookie(
+                    "vignesh_operator_token",
+                    token,
+                    httponly=True,
+                    secure=False,
+                    samesite="strict",
+                )
+                return file_response
+            _verify_operator_auth(settings, None, None, operator_session)
+        file_response = _dashboard_file(static_dir)
+        file_response.headers["Cache-Control"] = "no-store"
+        return file_response
+
+    def _dashboard_file(static_dir: Path) -> FileResponse:
         index = static_dir / "index.html"
         if not index.exists():
             raise HTTPException(status_code=404, detail="Dashboard not built.")
@@ -68,7 +98,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def health() -> dict[str, Any]:
         return {"ok": True, "service": "vignesh-agent", "env": settings.env}
 
-    @app.get("/ready")
+    @app.get("/ready", dependencies=[operator_dependency])
     async def ready() -> dict[str, Any]:
         wabot_health = await wabot.health()
         return redact(
@@ -88,7 +118,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
         )
 
-    @app.post("/api/chat", response_model=ChatResponse)
+    @app.post("/api/chat", response_model=ChatResponse, dependencies=[operator_dependency])
     async def chat(payload: ChatRequest) -> ChatResponse:
         result = await run_agent(
             payload.message,
@@ -121,22 +151,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             push_name=payload.push_name,
             is_group=payload.is_group,
         )
-        if memory.is_processed(inbound.id):
+        if not memory.claim_message(inbound.id, inbound.sender):
             return {"accepted": True, "duplicate": True, "message_id": inbound.id}
-        memory.mark_processed(inbound.id, inbound.sender)
         event_log.write(
             "inbound_message",
             {"message_id": inbound.id, "sender": inbound.sender, "path": str(request.url.path)},
         )
-        result = await run_agent(
-            inbound.text,
-            settings=settings,
-            memory=memory,
-            event_log=event_log,
-            wabot=wabot,
-            inbound=inbound,
-            session_id=inbound.sender,
-        )
+        try:
+            result = await run_agent(
+                inbound.text,
+                settings=settings,
+                memory=memory,
+                event_log=event_log,
+                wabot=wabot,
+                inbound=inbound,
+                session_id=inbound.sender,
+            )
+        except Exception as exc:
+            memory.fail_message(inbound.id, str(exc))
+            event_log.write(
+                "inbound_message_failed",
+                {"message_id": inbound.id, "sender": inbound.sender, "error": str(exc)},
+            )
+            raise
+        memory.complete_message(inbound.id, result.run_id)
         return {
             "accepted": True,
             "duplicate": False,
@@ -145,13 +183,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "output": result.final_output,
         }
 
-    @app.get("/api/memory/{contact}")
+    @app.get("/api/memory/{contact}", dependencies=[operator_dependency])
     async def contact_memory(contact: str) -> dict[str, Any]:
         return redact(memory.recall_contact(contact))
 
-    @app.get("/api/runs")
-    async def recent_runs(limit: int = 20) -> list[dict[str, Any]]:
-        return memory.recent_runs(limit=min(limit, 100))
+    @app.get("/api/runs", dependencies=[operator_dependency])
+    async def recent_runs(limit: int = Query(default=20, ge=0, le=100)) -> list[dict[str, Any]]:
+        return memory.recent_runs(limit=limit)
 
     return app
 
@@ -164,14 +202,25 @@ def _verify_inbound_auth(settings: Settings, authorization: str | None) -> None:
         raise HTTPException(status_code=401, detail="unauthorized")
 
 
-def get_app() -> FastAPI:
-    return create_app()
-
-
-app = get_app()
+def _verify_operator_auth(
+    settings: Settings,
+    x_operator_token: str | None,
+    authorization: str | None,
+    operator_session: str | None,
+) -> None:
+    if not settings.operator_token:
+        return
+    candidates = [x_operator_token, operator_session]
+    if authorization and authorization.lower().startswith("bearer "):
+        candidates.append(authorization.split(" ", 1)[1])
+    if any(
+        candidate and secrets.compare_digest(candidate, settings.operator_token)
+        for candidate in candidates
+    ):
+        return
+    raise HTTPException(status_code=401, detail="operator auth required")
 
 
 def main() -> None:
     settings = get_settings()
-    uvicorn.run("vignesh_agent.api:app", host=settings.host, port=settings.port, reload=False)
-
+    uvicorn.run(create_app(settings), host=settings.host, port=settings.port, reload=False)

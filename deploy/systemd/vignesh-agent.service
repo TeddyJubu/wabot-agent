@@ -11,7 +11,7 @@ WorkingDirectory=/opt/vignesh-agent
 EnvironmentFile=/opt/vignesh-agent/.env
 Environment=PYTHONUNBUFFERED=1
 Environment=UV_CACHE_DIR=/opt/vignesh-agent/.uv-cache
-ExecStart=/usr/local/bin/uv run --frozen python main.py
+ExecStart=/usr/local/bin/uv run --frozen --no-sync python main.py
 Restart=always
 RestartSec=5
 NoNewPrivileges=true

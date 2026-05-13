@@ -93,9 +93,18 @@ Production recommendation:
 ```bash
 VIGNESH_SEND_POLICY=allowlist
 VIGNESH_ALLOWED_RECIPIENTS=+15550001111,+15550002222
+VIGNESH_OPERATOR_TOKEN=<long-random-dashboard-token>
 ```
 
 `allow_all` exists for controlled environments, but it removes the recipient guard. Use it deliberately.
+
+When `VIGNESH_OPERATOR_TOKEN` is set, open the dashboard once with:
+
+```text
+http://127.0.0.1:8787/?token=<long-random-dashboard-token>
+```
+
+The service stores that token in an HTTP-only same-site cookie for same-origin dashboard calls. Direct API callers can use either `X-Operator-Token` or `Authorization: Bearer ...`.
 
 ## HTTP API
 
@@ -145,6 +154,8 @@ The core tool set is intentionally narrow:
 - `read_local_skill`
 
 Tool results and logs are redacted before persistence.
+
+Image sends are confined to `VIGNESH_MEDIA_DIR` (`./data/media` by default). Put approved outbound media there before asking the agent to send it.
 
 ## Skills And MCP
 
