@@ -6,7 +6,7 @@ from typing import Any
 
 import uvicorn
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -56,6 +56,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     static_dir = Path(__file__).resolve().parents[2] / "static"
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+    @app.get("/favicon.ico", include_in_schema=False, response_model=None)
+    async def favicon() -> Response:
+        favicon_path = static_dir / "favicon.svg"
+        if favicon_path.exists():
+            return FileResponse(favicon_path, media_type="image/svg+xml")
+        return Response(status_code=204)
 
     async def verify_operator(
         x_operator_token: str | None = Header(default=None),
