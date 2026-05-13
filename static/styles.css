@@ -1111,3 +1111,137 @@ button {
   border-color: #c44;
   color: #c44;
 }
+
+/* ============================================================
+   Step 7 — Settings drawer + mobile bottom tab bar
+   ============================================================
+   The settings panel was previously in-flow between the KPI strip and
+   the chat workspace. It's now a right-side drawer toggled from the
+   sidebar Settings link (desktop) or the bottom tab bar (mobile). The
+   form's IDs and structure are unchanged — only the wrapping container.
+   On mobile (<720px), the drawer fills the screen and the sticky tab
+   bar takes over for navigation.
+   ============================================================ */
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(520px, 96vw);
+  z-index: 60;
+  background: var(--background);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+  transform: translateX(100%);
+  transition: transform 220ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  box-shadow: -16px 0 32px oklch(0 0 0 / 0.35);
+}
+
+body.drawer-open .drawer {
+  transform: translateX(0);
+}
+
+/* The settings panel inside the drawer drops its outer card border —
+   the drawer container provides the visual frame. */
+.drawer > .settings-panel {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+}
+
+.drawer .panel-header {
+  position: sticky;
+  top: 0;
+  background: var(--background);
+  border-bottom: 1px solid var(--border);
+  z-index: 1;
+}
+
+.panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: oklch(0 0 0 / 0.5);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 220ms ease;
+}
+
+body.drawer-open .drawer-backdrop {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+/* Keep the drawer-toggle nav links visually styled like the others. */
+.nav a[data-drawer-toggle][aria-expanded="true"] {
+  background: var(--accent);
+  color: var(--foreground);
+}
+
+/* Bottom tab bar — hidden on desktop, sticky on mobile. */
+.mobile-tabs {
+  display: none;
+}
+
+.mobile-tabs a {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 4px;
+  text-decoration: none;
+  color: var(--muted-foreground);
+  font-size: 10.5px;
+  font-weight: 500;
+  border-top: 2px solid transparent;
+  transition: color 120ms ease, border-color 120ms ease;
+  /* Touch-friendly tap target without growing the bar height. */
+  min-height: 56px;
+}
+
+.mobile-tabs a svg {
+  width: 18px;
+  height: 18px;
+  stroke-width: 1.75;
+}
+
+.mobile-tabs a.active {
+  color: var(--foreground);
+  border-top-color: var(--foreground);
+}
+
+@media (max-width: 720px) {
+  /* The drawer covers the whole viewport on mobile. */
+  .drawer {
+    width: 100vw;
+    border-left: none;
+  }
+
+  /* Make room for the sticky bottom tab bar — both the chat composer
+     and the page bottom would otherwise overlap with it. */
+  main {
+    padding-bottom: 80px;
+  }
+
+  .mobile-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    background: var(--background);
+    border-top: 1px solid var(--border);
+    /* Respect iOS home indicator safe area when available. */
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+}

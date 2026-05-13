@@ -623,10 +623,13 @@ wabotTestBtn.addEventListener("click", async () => {
 });
 
 // =====================================================================
-// Sidebar nav — active state + smooth scroll
+// Sidebar nav + mobile tabs — active state, smooth scroll, drawer toggle
 // =====================================================================
 
-const navLinks = document.querySelectorAll(".nav a[href^='#']");
+// Both desktop sidebar links and the mobile bottom tab bar share the same
+// click-routing logic: links with data-drawer-toggle open the drawer;
+// everything else smooth-scrolls to its anchor target.
+const navLinks = document.querySelectorAll(".nav a[href^='#'], .mobile-tabs a[href^='#']");
 
 function setActiveNav(hash) {
   for (const link of navLinks) {
@@ -634,9 +637,60 @@ function setActiveNav(hash) {
   }
 }
 
+// =====================================================================
+// Step 7 — Settings drawer
+// =====================================================================
+
+const drawerEl = document.querySelector("#settings-drawer");
+const drawerBackdropEl = document.querySelector("#drawer-backdrop");
+const drawerCloseBtn = document.querySelector("#settings-close");
+
+function openDrawer() {
+  if (!drawerEl) return;
+  drawerEl.hidden = false;
+  if (drawerBackdropEl) drawerBackdropEl.hidden = false;
+  // Defer the body-class flip a frame so the browser registers the initial
+  // transform/opacity state and the transition actually plays.
+  requestAnimationFrame(() => {
+    document.body.classList.add("drawer-open");
+    drawerEl.setAttribute("aria-hidden", "false");
+    if (drawerBackdropEl) drawerBackdropEl.setAttribute("aria-hidden", "false");
+  });
+  setActiveNav("#settings");
+}
+
+function closeDrawer() {
+  if (!drawerEl) return;
+  document.body.classList.remove("drawer-open");
+  drawerEl.setAttribute("aria-hidden", "true");
+  if (drawerBackdropEl) drawerBackdropEl.setAttribute("aria-hidden", "true");
+  // Hide after transition so it can't trap tab focus while sliding out.
+  setTimeout(() => {
+    if (!document.body.classList.contains("drawer-open")) {
+      drawerEl.hidden = true;
+      if (drawerBackdropEl) drawerBackdropEl.hidden = true;
+    }
+  }, 240);
+}
+
+drawerCloseBtn?.addEventListener("click", closeDrawer);
+drawerBackdropEl?.addEventListener("click", closeDrawer);
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && document.body.classList.contains("drawer-open")) {
+    closeDrawer();
+  }
+});
+
 for (const link of navLinks) {
   link.addEventListener("click", (event) => {
     const href = link.getAttribute("href");
+    // Drawer-toggle links: open the drawer instead of scrolling.
+    if (link.dataset.drawerToggle) {
+      event.preventDefault();
+      openDrawer();
+      history.replaceState(null, "", href);
+      return;
+    }
     const target = document.querySelector(href);
     if (!target) return;
     event.preventDefault();
@@ -647,12 +701,16 @@ for (const link of navLinks) {
 }
 
 // Sync the active item to whichever section is currently most visible.
+// #settings is intentionally excluded — it lives in the drawer now, not in
+// the main scroll flow, and its "active" state is owned by openDrawer.
 if ("IntersectionObserver" in window) {
-  const sections = ["#status", "#settings", "#chat", "#whatsapp", "#runs"]
+  const sections = ["#status", "#chat", "#whatsapp", "#runs"]
     .map((id) => document.querySelector(id))
     .filter(Boolean);
   const observer = new IntersectionObserver(
     (entries) => {
+      // Skip syncing while the drawer is open — keeps Settings highlighted.
+      if (document.body.classList.contains("drawer-open")) return;
       const visible = entries
         .filter((entry) => entry.isIntersecting)
         .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
