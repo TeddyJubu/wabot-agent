@@ -226,7 +226,9 @@ button {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 32px;
+  /* Step 9 (a11y): primary action surface uses a 40px touch target.
+     Secondary/ghost/icon-button remain 32px — see overrides below. */
+  height: 40px;
   padding: 0 12px;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
@@ -236,6 +238,12 @@ button {
   font-weight: 500;
   cursor: pointer;
   transition: opacity 120ms ease, background 120ms ease;
+}
+
+/* Step 9: keep non-primary buttons at the previous 32px height. */
+.button.button-secondary,
+.button.button-ghost {
+  height: 32px;
 }
 
 .button:hover {
@@ -357,6 +365,72 @@ button {
 .kpi-value.warn,
 .kpi-value.bad {
   color: var(--foreground);
+}
+
+/* ----------------------------------------------------------------
+   Step 9 — Non-colour KPI cue
+   The ok/warn/bad classes already drive a coloured dot. Add a
+   shape-coded character prefix to the value text so colour isn't
+   the only signal: ● ok, ▲ warn, ■ bad.
+   ---------------------------------------------------------------- */
+.kpi-value.ok::before,
+.kpi-value.warn::before,
+.kpi-value.bad::before {
+  display: inline-block;
+  margin-right: 6px;
+  font-size: 0.8em;
+  color: var(--muted-foreground);
+  vertical-align: 1px;
+}
+.kpi-value.ok::before  { content: "\25CF"; }  /* ● */
+.kpi-value.warn::before { content: "\25B2"; } /* ▲ */
+.kpi-value.bad::before  { content: "\25A0"; } /* ■ */
+
+/* ----------------------------------------------------------------
+   Step 6 — KPI staleness pills
+   One per card, injected by app.js as a sibling of the value.
+   Fixed-width container so the seconds counter doesn't reflow.
+   ---------------------------------------------------------------- */
+.kpi-staleness {
+  display: inline-block;
+  margin-top: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+  line-height: 1.5;
+  min-inline-size: 64px;
+  text-align: center;
+}
+
+.kpi-staleness.muted {
+  color: var(--muted-foreground);
+  border-color: var(--border);
+}
+
+.kpi-staleness.neutral {
+  color: var(--foreground);
+  border-color: var(--border-strong);
+}
+
+.kpi-staleness.bad {
+  color: var(--destructive);
+  border-color: color-mix(in oklch, var(--destructive) 40%, var(--border));
+}
+
+/* Reconnecting hint shown via a CSS pseudo-element so the chip itself
+   doesn't have to shrink/grow — we put the hint on a second line below. */
+.kpi-staleness[data-reconnecting="true"]::after {
+  content: "Reconnecting…";
+  display: block;
+  margin-top: 2px;
+  font-size: 10px;
+  color: var(--muted-foreground);
+  letter-spacing: 0.02em;
 }
 
 /* ============================================================
@@ -615,6 +689,59 @@ button {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* ----------------------------------------------------------------
+   Step 5 — Run card header (timestamp · sender + live/offline chip)
+   The .run-item-title overrides the global .run-item strong rule so
+   the title uses sans-serif and looks like a heading instead of a hash.
+   ---------------------------------------------------------------- */
+.run-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+
+.run-item .run-item-title {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--foreground);
+  letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+
+.run-chip {
+  flex-shrink: 0;
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted-foreground);
+  line-height: 1.5;
+}
+
+.run-chip-live {
+  color: var(--success);
+  border-color: color-mix(in oklch, var(--success) 45%, var(--border));
+  background: color-mix(in oklch, var(--success) 12%, transparent);
+}
+
+.run-chip-offline {
+  color: var(--muted-foreground);
+  border-color: var(--border);
+  background: transparent;
 }
 
 /* ============================================================
@@ -938,4 +1065,49 @@ button {
   .composer-actions .kbd {
     display: none;
   }
+}
+
+/* =========================================================================
+   Streaming chat tool-call chips
+   Rendered inline in the messages list, immediately after the agent bubble
+   that triggered the call. One chip per tool invocation; we don't reuse
+   message bubble styling so chips read as a different signal class than
+   model output.
+   ========================================================================= */
+.tool-chip {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 88%;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--accent);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  color: var(--foreground);
+  opacity: 0.85;
+}
+
+.tool-chip-name {
+  font-weight: 600;
+}
+
+.tool-chip-args {
+  color: var(--muted, #777);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 480px;
+}
+
+.tool-chip-done {
+  opacity: 1;
+  border-color: var(--foreground);
+}
+
+.tool-chip-error {
+  border-color: #c44;
+  color: #c44;
 }

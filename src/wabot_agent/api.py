@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from qrcode.image.svg import SvgPathImage
 
-from .agent import run_agent
+from .agent import run_agent, run_agent_streamed
 from .config import Settings, get_settings
 from .events import EventHub, EventLog
 from .memory import InboundMessage, MemoryStore
@@ -234,6 +234,60 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             live_model=result.live_model,
         )
 
+    @app.post(
+        "/api/chat/stream",
+        dependencies=[operator_dependency],
+        response_model=None,
+    )
+    async def chat_stream(payload: ChatRequest, request: Request) -> StreamingResponse:
+        """Run the agent and stream NDJSON events to the client.
+
+        One JSON object per line. Event types:
+          - delta:      incremental model token (text)
+          - tool_call:  tool invocation (name + redacted args)
+          - tool_result: tool completion marker
+          - final:      run summary (run_id, output, live_model)
+          - error:      terminal failure (message)
+        The stream ends after `final` or `error`.
+
+        The existing `POST /api/chat` JSON endpoint is preserved for callers
+        that don't want a stream (external scripts, the inbound webhook path).
+        """
+
+        async def event_generator() -> Any:
+            iterator = run_agent_streamed(
+                payload.message,
+                settings=settings,
+                memory=memory,
+                event_log=event_log,
+                wabot=wabot,
+                session_id=payload.session_id,
+            ).__aiter__()
+            try:
+                while True:
+                    # Cancel the agent if the client has gone away — otherwise
+                    # we'd keep burning OpenRouter tokens for nobody.
+                    if await request.is_disconnected():
+                        raise asyncio.CancelledError()
+                    try:
+                        event = await iterator.__anext__()
+                    except StopAsyncIteration:
+                        return
+                    yield json.dumps(event, ensure_ascii=False) + "\n"
+            except asyncio.CancelledError:
+                try:
+                    await iterator.aclose()
+                except Exception:  # noqa: BLE001
+                    pass
+                event_log.write("chat_stream_cancelled", {"session_id": payload.session_id})
+                raise
+
+        return StreamingResponse(
+            event_generator(),
+            media_type="application/x-ndjson",
+            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
+        )
+
     @app.post("/whatsapp/inbound")
     async def whatsapp_inbound(
         payload: InboundPayload,
@@ -349,9 +403,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     try:
                         event = await asyncio.wait_for(queue.get(), timeout=15.0)
                     except TimeoutError:
-                        # SSE comment line — ignored by EventSource but keeps
-                        # idle proxies from killing the connection.
-                        yield ": keepalive\n\n"
+                        # Named heartbeat — the client uses it to keep the
+                        # staleness pill green during quiet periods. Doubles
+                        # as a proxy-keepalive (line traffic every 15s).
+                        yield _sse_frame(event_id=None, name="heartbeat", data={})
                         continue
                     yield _sse_frame(event.id, event.name, event.payload)
             finally:

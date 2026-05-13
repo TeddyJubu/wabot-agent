@@ -32,6 +32,76 @@ function setMemoryRunCount(value) {
   setStatus(statusEls.memory, `${memoryRunCount} runs`, "ok");
 }
 
+// =====================================================================
+// Step 6 — KPI staleness pills
+// One small "Xs ago" pill per KPI card, updated every second, that turns
+// red once the data is >60s old. Surfaces SSE stream liveness without
+// needing a dedicated indicator. Injected from JS so index.html stays
+// structurally untouched.
+// =====================================================================
+
+// Set by applyReady() on every successful SSE ready_snapshot or REST fallback.
+let lastSnapshotAt = null;
+
+// Probe window.dashboardEventSource (set when openEventStream runs) so the
+// pill can know whether the stream is open or reconnecting.
+function currentEventSource() {
+  return typeof window !== "undefined" ? window.dashboardEventSource || null : null;
+}
+
+const stalenessPillEls = {};
+function ensureStalenessPill(kpiValueEl, key) {
+  if (!kpiValueEl) return null;
+  if (stalenessPillEls[key]) return stalenessPillEls[key];
+  const pill = document.createElement("span");
+  pill.className = "kpi-staleness";
+  pill.setAttribute("aria-live", "off");
+  pill.textContent = "—";
+  // Insert AFTER the value so setStatus()'s textContent writes don't clobber it.
+  kpiValueEl.insertAdjacentElement("afterend", pill);
+  stalenessPillEls[key] = pill;
+  return pill;
+}
+
+function stalenessLabel(seconds) {
+  if (seconds == null) return "—";
+  if (seconds < 5) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  return "60s+ ago";
+}
+
+function stalenessLevel(seconds) {
+  if (seconds == null) return "muted";
+  if (seconds < 10) return "muted";
+  if (seconds < 60) return "neutral";
+  return "bad";
+}
+
+function updateStalenessPills() {
+  ensureStalenessPill(statusEls.model, "model");
+  ensureStalenessPill(statusEls.wabot, "wabot");
+  ensureStalenessPill(statusEls.policy, "policy");
+  ensureStalenessPill(statusEls.memory, "memory");
+
+  const seconds =
+    lastSnapshotAt == null ? null : Math.max(0, Math.floor((Date.now() - lastSnapshotAt) / 1000));
+  const level = stalenessLevel(seconds);
+  const label = stalenessLabel(seconds);
+
+  const source = currentEventSource();
+  const sseDown =
+    source !== null && typeof EventSource !== "undefined" && source.readyState !== EventSource.OPEN;
+
+  for (const key of Object.keys(stalenessPillEls)) {
+    const pill = stalenessPillEls[key];
+    if (!pill) continue;
+    pill.textContent = label;
+    pill.classList.remove("muted", "neutral", "bad");
+    pill.classList.add(level);
+    pill.dataset.reconnecting = sseDown && level === "bad" ? "true" : "false";
+  }
+}
+
 function applyReady(data) {
   setStatus(statusEls.model, data.live_model ? data.model : "Offline", data.live_model ? "ok" : "warn");
   const wabotReady = data.wabot && data.wabot.ready;
@@ -46,6 +116,9 @@ function applyReady(data) {
     policyLevel[data.send_policy] ?? "warn",
   );
   setMemoryRunCount(data.memory.runs);
+  // Step 6: any successful snapshot resets the staleness clock.
+  lastSnapshotAt = Date.now();
+  updateStalenessPills();
 }
 
 // Fallback path — only used when the SSE stream is closed (network blip,
@@ -101,15 +174,99 @@ async function loadPairing() {
 
 const MAX_RUNS_IN_LIST = 8;
 
+// =====================================================================
+// Step 5 — Run cards
+// Title: relative time + masked sender (or "Operator") + live/offline chip
+// Body: final output, truncated by CSS line-clamp.
+// =====================================================================
+
+// Mask a phone number to "+1555…1234" style. Falls back to the original
+// string if it's too short to mask meaningfully.
+function maskSender(sender) {
+  if (!sender) return null;
+  const raw = String(sender).trim();
+  if (!raw) return null;
+  const digits = raw.replace(/[^\d]/g, "");
+  if (digits.length < 6) return raw;
+  const hasPlus = raw.startsWith("+");
+  const head = digits.slice(0, Math.min(4, digits.length - 4));
+  const tail = digits.slice(-4);
+  return `${hasPlus ? "+" : ""}${head}…${tail}`;
+}
+
+// Buckets: <5s "just now"; <60s "Xs ago"; <60m "Xm ago"; <24h "Xh ago"; else "Xd ago".
+function formatRelativeTime(ms) {
+  if (ms == null || Number.isNaN(ms)) return "";
+  const delta = Math.max(0, Date.now() - ms);
+  const seconds = Math.floor(delta / 1000);
+  if (seconds < 5) return "just now";
+  if (seconds < 60) return `${seconds}s ago`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
+function resolveRunTimestamp(run) {
+  const candidates = [run.created_at, run.timestamp, run.started_at, run.completed_at];
+  for (const value of candidates) {
+    if (value == null) continue;
+    if (typeof value === "number") return value > 1e12 ? value : value * 1000;
+    const parsed = Date.parse(value);
+    if (!Number.isNaN(parsed)) return parsed;
+  }
+  return Date.now();
+}
+
 function renderRunItem(run) {
   const item = document.createElement("article");
   item.className = "run-item";
-  const title = document.createElement("strong");
-  title.textContent = run.run_id.slice(0, 8);
+
+  const ts = resolveRunTimestamp(run);
+  item.dataset.ts = String(ts);
+
+  const header = document.createElement("div");
+  header.className = "run-item-header";
+
+  const titleText = document.createElement("strong");
+  titleText.className = "run-item-title";
+  const masked = maskSender(run.sender);
+  const who = masked || "Operator";
+  const when = formatRelativeTime(ts);
+  // Re-rendered every 30s by refreshRelativeTimes(); store who half statically.
+  titleText.dataset.who = who;
+  titleText.textContent = `${when} · ${who}`;
+  header.append(titleText);
+
+  // Live/offline pill — agent_run_complete carries live_model; legacy /api/runs
+  // rows may not, default to "offline" rather than misleadingly showing "live".
+  const chip = document.createElement("span");
+  const live = run.live_model === true;
+  chip.className = `run-chip ${live ? "run-chip-live" : "run-chip-offline"}`;
+  chip.textContent = live ? "live" : "offline";
+  header.append(chip);
+
+  item.append(header);
+
   const body = document.createElement("p");
   body.textContent = run.final_output || run.user_input || "No output";
-  item.append(title, body);
+  item.append(body);
+
   return item;
+}
+
+function refreshRelativeTimes() {
+  const titles = runsList.querySelectorAll(".run-item-title");
+  for (const title of titles) {
+    const card = title.closest(".run-item");
+    if (!card) continue;
+    const ts = Number(card.dataset.ts);
+    if (!ts) continue;
+    const who = title.dataset.who || "Operator";
+    title.textContent = `${formatRelativeTime(ts)} · ${who}`;
+  }
 }
 
 function paintRuns(runs) {
@@ -139,6 +296,41 @@ function addMessage(role, text) {
   messages.scrollTop = messages.scrollHeight;
 }
 
+// Render a tool-call chip below the in-progress agent message. Chips show the
+// tool name (and a redacted arg preview if present); the server has already
+// passed args through redact(), so we just display whatever it sent.
+function renderToolCallChip(after, event) {
+  const chip = document.createElement("div");
+  chip.className = "tool-chip";
+  chip.dataset.callId = event.call_id || "";
+  const label = document.createElement("span");
+  label.className = "tool-chip-name";
+  label.textContent = `${event.name}()`;
+  chip.append(label);
+  if (event.args_redacted && Object.keys(event.args_redacted).length > 0) {
+    const args = document.createElement("span");
+    args.className = "tool-chip-args";
+    let preview;
+    try {
+      preview = JSON.stringify(event.args_redacted);
+    } catch (_err) {
+      preview = String(event.args_redacted);
+    }
+    if (preview.length > 120) preview = preview.slice(0, 117) + "…";
+    args.textContent = preview;
+    chip.append(args);
+  }
+  after.insertAdjacentElement("afterend", chip);
+  messages.scrollTop = messages.scrollHeight;
+  return chip;
+}
+
+function markToolChipDone(callId, ok) {
+  if (!callId) return;
+  const chip = messages.querySelector(`.tool-chip[data-call-id="${callId}"]`);
+  if (chip) chip.classList.add(ok === false ? "tool-chip-error" : "tool-chip-done");
+}
+
 form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const message = textarea.value.trim();
@@ -147,17 +339,60 @@ form.addEventListener("submit", async (event) => {
   addMessage("operator", message);
   addMessage("agent", "Thinking...");
   const pending = messages.lastElementChild;
+  let firstDeltaSeen = false;
+
   try {
-    const res = await fetch("/api/chat", {
+    const res = await fetch("/api/chat/stream", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", Accept: "application/x-ndjson" },
       body: JSON.stringify({ message, session_id: "operator-dashboard" }),
     });
-    const data = await res.json();
-    pending.textContent = data.output || "No output";
-    // The SSE stream will push agent_run_complete for the runs panel and a
-    // ready_snapshot-style update implicitly via memory.runs in the next state
-    // change — no explicit loadRuns/loadReady needed here.
+    if (!res.ok || !res.body) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    // Read NDJSON one line at a time. Server emits {"type": ...}\n records.
+    // The bubble's textContent accumulates streamed model output; tool-call
+    // chips are siblings inserted directly after the bubble.
+    // The SSE stream will push agent_run_complete for the runs panel, so no
+    // explicit loadRuns/loadReady needed after the stream closes.
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let newlineIdx;
+      while ((newlineIdx = buffer.indexOf("\n")) !== -1) {
+        const line = buffer.slice(0, newlineIdx).trim();
+        buffer = buffer.slice(newlineIdx + 1);
+        if (!line) continue;
+        let evt;
+        try {
+          evt = JSON.parse(line);
+        } catch (_err) {
+          continue;
+        }
+        if (evt.type === "delta") {
+          if (!firstDeltaSeen) {
+            pending.textContent = "";
+            firstDeltaSeen = true;
+          }
+          pending.textContent += evt.text || "";
+          messages.scrollTop = messages.scrollHeight;
+        } else if (evt.type === "tool_call") {
+          renderToolCallChip(pending, evt);
+        } else if (evt.type === "tool_result") {
+          markToolChipDone(evt.call_id, evt.ok !== false);
+        } else if (evt.type === "final") {
+          if (!firstDeltaSeen) pending.textContent = evt.output || "No output";
+        } else if (evt.type === "error") {
+          pending.textContent = `Request failed: ${evt.message || "unknown error"}`;
+        }
+      }
+    }
   } catch (error) {
     pending.textContent = `Request failed: ${error.message}`;
   }
@@ -429,6 +664,9 @@ let eventSource = null;
 let pairingTimer = null;
 
 function handleSseEvent(name, data) {
+  // Any event from the hub proves the stream is alive — feed the staleness
+  // clock here so the pill measures liveness, not full-snapshot age.
+  lastSnapshotAt = Date.now();
   switch (name) {
     case "ready_snapshot":
       applyReady(data);
@@ -460,8 +698,11 @@ function handleSseEvent(name, data) {
 function openEventStream() {
   if (eventSource) eventSource.close();
   eventSource = new EventSource("/api/stream");
+  // Exported so the Step 6 staleness pills can probe readyState without
+  // needing a module import (this script loads as type="module").
+  window.dashboardEventSource = eventSource;
   // Named events dispatched server-side via `event:` lines.
-  for (const name of ["ready_snapshot", "agent_run_start", "agent_run_complete", "inbound_message", "settings_updated"]) {
+  for (const name of ["ready_snapshot", "agent_run_start", "agent_run_complete", "inbound_message", "settings_updated", "heartbeat"]) {
     eventSource.addEventListener(name, (ev) => {
       try {
         handleSseEvent(name, JSON.parse(ev.data));
@@ -503,3 +744,11 @@ loadSettings();
 pairingTimer = setInterval(() => {
   if (document.visibilityState === "visible") loadPairing();
 }, 30000);
+
+// Step 5: keep run-card relative timestamps fresh.
+setInterval(refreshRelativeTimes, 30000);
+
+// Step 6: tick the staleness pills every second. Render once immediately so
+// the pills exist (with placeholder text) before the first ready_snapshot.
+updateStalenessPills();
+setInterval(updateStalenessPills, 1000);
