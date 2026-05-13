@@ -31,8 +31,9 @@ fi
 mkdir -p "$APP_DIR/data" "$APP_DIR/.uv-cache"
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 
+uv --version
 sudo -u "$APP_USER" UV_CACHE_DIR="$APP_DIR/.uv-cache" \
-  uv -C "$APP_DIR" sync --frozen --all-extras
+  uv sync --directory "$APP_DIR" --frozen --all-extras
 
 if [[ ! -f "$APP_DIR/.env" ]]; then
   install -m 0600 -o "$APP_USER" -g "$APP_USER" "$APP_DIR/.env.example" "$APP_DIR/.env"
@@ -43,6 +44,10 @@ install -m 0644 "$APP_DIR/deploy/systemd/wabot-agent.service" \
   /etc/systemd/system/wabot-agent.service
 systemctl daemon-reload
 systemctl enable wabot-agent.service
+
+# Smoke check: confirm systemd parsed the unit file. Non-zero exit if the unit
+# is missing or malformed — fail loudly here rather than at first `start`.
+systemctl cat wabot-agent.service > /dev/null
 
 echo "Bootstrap complete. Edit $APP_DIR/.env, then run:"
 echo "  sudo systemctl restart wabot-agent"
