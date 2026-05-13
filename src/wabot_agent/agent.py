@@ -295,7 +295,7 @@ def _translate_stream_event(event: Any) -> list[dict[str, Any]]:
             # ToolCallOutputItem doesn't carry the tool name directly; the UI
             # uses the call_id to pair this back to its tool_call event.
             call_id = getattr(item, "call_id", None)
-            payload2: dict[str, Any] = {"type": "tool_result", "ok": True}
+            payload2: dict[str, Any] = {"type": "tool_result", "ok": _tool_output_ok(item)}
             if call_id:
                 payload2["call_id"] = str(call_id)
             out.append(payload2)
@@ -324,6 +324,32 @@ def _extract_tool_args(raw_item: Any) -> Any:
         except (ValueError, TypeError):
             return {"_raw": candidate}
     return candidate
+
+
+def _tool_output_ok(item: Any) -> bool:
+    """Best-effort check for tool-call failure.
+
+    The Agents SDK signals tool failure on the ToolCallOutputItem in a couple
+    of shapes — an `error` attribute, a `status != "completed"` field, or a
+    dict-shaped raw item with one of those keys. Be defensive across SDK
+    versions: only mark a tool failed when we see an explicit failure signal,
+    otherwise default to success so we never erroneously red-flag a healthy
+    tool result.
+    """
+    error = getattr(item, "error", None)
+    if error:
+        return False
+    status = getattr(item, "status", None)
+    if isinstance(status, str) and status.lower() in {"error", "failed", "failure"}:
+        return False
+    raw = getattr(item, "raw_item", None)
+    if isinstance(raw, dict):
+        if raw.get("error") or raw.get("is_error"):
+            return False
+        raw_status = raw.get("status")
+        if isinstance(raw_status, str) and raw_status.lower() in {"error", "failed", "failure"}:
+            return False
+    return True
 
 
 def _augment_prompt(prompt: str, inbound: InboundMessage | None) -> str:

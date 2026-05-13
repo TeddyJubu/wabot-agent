@@ -5,6 +5,8 @@ import hashlib
 import io
 import json
 import secrets
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -96,14 +98,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     event_log = EventLog(settings.log_path, hub=hub)
     wabot = WabotClient(settings.wabot_endpoint, settings.resolved_wabot_token)
 
-    app = FastAPI(title="wabot-agent", version="0.1.0")
-    app.state.settings = settings
-    app.state.memory = memory
-    app.state.event_log = event_log
-    app.state.event_hub = hub
-    app.state.wabot = wabot
-
-    # State for the pairing poller (set in startup hook below).
+    # Pairing poller state — last published payload + the asyncio task handle.
     pairing_state: dict[str, Any] = {"last": None, "task": None}
 
     def _pairing_payload(p: Any) -> dict[str, Any]:
@@ -142,25 +137,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except asyncio.CancelledError:
                 return
 
-    @app.on_event("startup")
-    async def _on_startup() -> None:
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # Capture the running uvicorn loop so sync publishers (EventLog.write
         # called from inside tools, threads, etc.) can dispatch safely via
-        # call_soon_threadsafe.
+        # call_soon_threadsafe. Then drive pairing state through the hub so
+        # the dashboard can rely on `pairing_changed` for live updates.
         hub.bind_loop(asyncio.get_running_loop())
-        # Drive pairing state through the hub so the dashboard can drop its
-        # last setInterval. The poll loop survives transient wabot errors.
         pairing_state["task"] = asyncio.create_task(_pairing_poll_loop())
+        try:
+            yield
+        finally:
+            task = pairing_state.get("task")
+            if task is not None:
+                task.cancel()
+                try:
+                    await task
+                except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                    pass
 
-    @app.on_event("shutdown")
-    async def _on_shutdown() -> None:
-        task = pairing_state.get("task")
-        if task is not None:
-            task.cancel()
-            try:
-                await task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                pass
+    app = FastAPI(title="wabot-agent", version="0.1.0", lifespan=lifespan)
+    app.state.settings = settings
+    app.state.memory = memory
+    app.state.event_log = event_log
+    app.state.event_hub = hub
+    app.state.wabot = wabot
 
     static_dir = Path(__file__).resolve().parents[2] / "static"
     if static_dir.exists():

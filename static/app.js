@@ -748,6 +748,9 @@ function handleSseEvent(name, data) {
         sender: data.sender,
         user_input: data.user_input,
         final_output: data.final_output,
+        // Forward live_model so renderRunItem's run-chip-live/offline pill
+        // reflects whether a real model produced the response.
+        live_model: data.live_model,
       });
       setMemoryRunCount(memoryRunCount + 1);
       break;
