@@ -18,7 +18,9 @@ const pairingEmpty = document.querySelector("#pairing-empty");
 
 function setStatus(el, text, level = "warn") {
   el.textContent = text;
-  el.className = level;
+  // Preserve baseline classes (e.g. kpi-value) — only swap the level token.
+  el.classList.remove("ok", "warn", "bad");
+  el.classList.add(level);
 }
 
 async function loadReady() {

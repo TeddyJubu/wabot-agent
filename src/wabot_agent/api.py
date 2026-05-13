@@ -4,6 +4,7 @@ import io
 import secrets
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import qrcode
 import uvicorn
@@ -303,22 +304,51 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 ),
             )
 
-        # Merge with existing on-disk overrides so partial PATCHes don't clobber
-        # earlier overrides for fields not in this request.
-        merged = load_overrides(settings.runtime_overrides_path)
-        merged.update(proposed)
+        # wabot must stay on loopback (README safety rule). A non-loopback endpoint
+        # would let an operator redirect the bearer token to an arbitrary host.
+        if "wabot_endpoint" in proposed:
+            _require_loopback_url("wabot_endpoint", proposed["wabot_endpoint"])
 
-        # Validate by applying to a snapshot first to surface errors before persisting.
+        # openrouter_base_url must be HTTPS or loopback HTTP. AND if the base URL
+        # changes, require a new API key in the same patch — otherwise the next
+        # /api/settings/test/openrouter (or /api/chat) would send the existing
+        # stored key to the new endpoint, defeating the no-round-trip property.
+        if "openrouter_base_url" in proposed:
+            _require_safe_openrouter_url("openrouter_base_url", proposed["openrouter_base_url"])
+            if (
+                proposed["openrouter_base_url"] != settings.openrouter_base_url
+                and "openrouter_api_key" not in proposed
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Changing openrouter_base_url requires openrouter_api_key in the "
+                        "same PATCH so the existing stored key is not sent to a new endpoint."
+                    ),
+                )
+
+        # Atomicity: validate on a deep copy first so a half-applied patch can't
+        # leave live settings inconsistent with disk if validation fails partway.
+        snapshot = settings.model_copy(deep=True)
         try:
-            apply_overrides(settings, proposed)
+            apply_overrides(snapshot, proposed)
         except Exception as exc:  # pydantic ValidationError or other
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-        # Wabot client mirrors settings — refresh the live instance in place.
+        # Persist to disk first. If this raises, live settings stay unchanged.
+        # Disk is the authoritative source on next restart, so failing here means
+        # we MUST NOT mutate live state — the next reload would otherwise diverge.
+        merged = load_overrides(settings.runtime_overrides_path)
+        merged.update(proposed)
+        save_overrides(settings.runtime_overrides_path, merged)
+
+        # Now commit to live settings. The same validators just succeeded on the
+        # snapshot, so this is reliable (and we'd rather crash here than leave
+        # disk and memory desynced — the operator can restart to recover).
+        apply_overrides(settings, proposed)
         wabot.endpoint = settings.wabot_endpoint.rstrip("/")
         wabot.token = settings.resolved_wabot_token
 
-        save_overrides(settings.runtime_overrides_path, merged)
         event_log.write(
             "settings_updated",
             {"fields": sorted(proposed.keys())},
@@ -364,6 +394,44 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
 
     return app
+
+
+_LOOPBACK_HOSTS: frozenset[str] = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _require_loopback_url(field: str, url: str) -> None:
+    """Reject URLs whose host is not loopback. Defends the wabot bearer token
+    from being redirected to an arbitrary host by an operator-token holder."""
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower().strip("[]")
+    if host not in _LOOPBACK_HOSTS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{field} must point at loopback (localhost, 127.0.0.1, or ::1); "
+                f"got '{host or url}'."
+            ),
+        )
+
+
+def _require_safe_openrouter_url(field: str, url: str) -> None:
+    """Allow https://anywhere or http://loopback. Plain HTTP to a remote host
+    would leak the API key in cleartext."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field} must use http or https; got scheme '{parsed.scheme}'.",
+        )
+    host = (parsed.hostname or "").lower().strip("[]")
+    if parsed.scheme == "http" and host not in _LOOPBACK_HOSTS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{field} over plain HTTP is only allowed for loopback hosts; "
+                f"use https for '{host or url}'."
+            ),
+        )
 
 
 def _settings_view(settings: Settings) -> dict[str, Any]:

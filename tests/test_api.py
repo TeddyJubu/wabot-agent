@@ -183,3 +183,88 @@ def test_runtime_overrides_apply_on_startup(tmp_path: Path) -> None:
     view = client.get("/api/settings").json()
     assert view["openrouter"]["model"] == "anthropic/claude-haiku"
     assert view["send_policy"] == "allowlist"
+
+
+def test_settings_patch_rejects_non_loopback_wabot_endpoint(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path).model_copy(
+        update={"runtime_overrides_path": tmp_path / "overrides.json"}
+    )
+    client = TestClient(create_app(settings))
+    original_endpoint = settings.wabot_endpoint
+
+    bad = client.patch("/api/settings", json={"wabot_endpoint": "http://evil.example.com:7777"})
+
+    assert bad.status_code == 400
+    assert "loopback" in bad.json()["detail"]
+    # Live settings unchanged.
+    assert settings.wabot_endpoint == original_endpoint
+    assert not (tmp_path / "overrides.json").exists()
+
+
+def test_settings_patch_rejects_plain_http_remote_openrouter(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path).model_copy(
+        update={"runtime_overrides_path": tmp_path / "overrides.json"}
+    )
+    client = TestClient(create_app(settings))
+
+    resp = client.patch(
+        "/api/settings",
+        json={
+            "openrouter_base_url": "http://attacker.example.com/v1",
+            "openrouter_api_key": "sk-test",
+        },
+    )
+
+    assert resp.status_code == 400
+    assert "https" in resp.json()["detail"].lower()
+
+
+def test_settings_patch_base_url_change_requires_new_key(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path).model_copy(
+        update={
+            "runtime_overrides_path": tmp_path / "overrides.json",
+            "openrouter_api_key": "sk-old-key",
+        }
+    )
+    client = TestClient(create_app(settings))
+
+    blocked = client.patch(
+        "/api/settings",
+        json={"openrouter_base_url": "https://elsewhere.example.com/v1"},
+    )
+    assert blocked.status_code == 400
+    assert "openrouter_api_key" in blocked.json()["detail"]
+    # Live and on-disk state unchanged.
+    assert settings.openrouter_base_url == "https://openrouter.ai/api/v1"
+    assert settings.openrouter_api_key == "sk-old-key"
+
+    allowed = client.patch(
+        "/api/settings",
+        json={
+            "openrouter_base_url": "https://elsewhere.example.com/v1",
+            "openrouter_api_key": "sk-new-key",
+        },
+    )
+    assert allowed.status_code == 200
+    assert allowed.json()["openrouter"]["base_url"] == "https://elsewhere.example.com/v1"
+
+
+def test_settings_patch_atomicity_invalid_field_leaves_state_clean(tmp_path: Path) -> None:
+    """A patch that fails validation must not mutate live settings or write to disk."""
+    overrides_path = tmp_path / "overrides.json"
+    settings = make_settings(tmp_path).model_copy(
+        update={"runtime_overrides_path": overrides_path}
+    )
+    client = TestClient(create_app(settings))
+    original_policy = settings.send_policy
+
+    bad = client.patch(
+        "/api/settings",
+        # send_policy is a Literal — "garbage" should fail validation on the snapshot
+        # before anything is written to disk or applied to live settings.
+        json={"send_policy": "garbage"},
+    )
+
+    assert bad.status_code == 400
+    assert settings.send_policy == original_policy
+    assert not overrides_path.exists()
