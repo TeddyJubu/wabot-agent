@@ -17,10 +17,17 @@ if ! id "$APP_USER" >/dev/null 2>&1; then
   useradd --system --create-home --shell /usr/sbin/nologin "$APP_USER"
 fi
 
-if ! command -v uv >/dev/null 2>&1; then
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-  install -m 0755 "$HOME/.local/bin/uv" /usr/local/bin/uv
+# Canonical uv location is /usr/local/bin/uv so it lands in sudo's secure_path
+# for the `sudo -u "$APP_USER" uv sync ...` call below. Gate on the absolute
+# path, not `command -v uv`, so a stray uv on root's PATH (e.g. /root/.local/bin)
+# doesn't cause us to skip the install-to-system-path step.
+if [[ ! -x /usr/local/bin/uv ]]; then
+  if ! command -v uv >/dev/null 2>&1; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+  fi
+  install -m 0755 "$(command -v uv)" /usr/local/bin/uv
 fi
+UV_BIN=/usr/local/bin/uv
 
 if [[ ! -d "$APP_DIR/.git" ]]; then
   git clone "$REPO_URL" "$APP_DIR"
@@ -31,9 +38,13 @@ fi
 mkdir -p "$APP_DIR/data" "$APP_DIR/.uv-cache"
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 
-uv --version
+# Invoke uv by absolute path: `uv --version` as root would otherwise mask the
+# case where $APP_USER's sudo secure_path can't reach uv. Using $UV_BIN gives
+# both calls the same lookup path, so the smoke check actually exercises what
+# `uv sync` will see.
+"$UV_BIN" --version
 sudo -u "$APP_USER" UV_CACHE_DIR="$APP_DIR/.uv-cache" \
-  uv sync --directory "$APP_DIR" --frozen --all-extras
+  "$UV_BIN" sync --directory "$APP_DIR" --frozen --all-extras
 
 if [[ ! -f "$APP_DIR/.env" ]]; then
   install -m 0600 -o "$APP_USER" -g "$APP_USER" "$APP_DIR/.env.example" "$APP_DIR/.env"
