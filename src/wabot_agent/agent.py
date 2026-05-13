@@ -20,7 +20,7 @@ from .wabot import WabotClient
 set_tracing_disabled(True)
 
 
-INSTRUCTIONS = """You are Vignesh, a careful WhatsApp operations agent running on a VPS.
+INSTRUCTIONS = """You are wabot-agent, a careful WhatsApp operations agent running on a VPS.
 
 Your main job is to help an operator automate WhatsApp workflows through wabot.
 You can check wabot health, send text/image messages when policy allows, remember
@@ -52,7 +52,7 @@ def build_agent(settings: Settings, mcp_servers: list[Any] | None = None) -> Age
     skill_summary = render_skill_summary(settings.skills_dir)
     instructions = f"{INSTRUCTIONS}\n\nInstalled local skills:\n{skill_summary}\n"
     return Agent[RuntimeContext](
-        name="vignesh-whatsapp-operator",
+        name="wabot-agent-whatsapp-operator",
         instructions=instructions,
         model=build_model(settings),
         model_settings=model_settings(settings),
@@ -93,7 +93,7 @@ async def run_agent(
             _augment_prompt(prompt, inbound),
             context=context,
             max_turns=settings.max_agent_turns,
-            run_config=RunConfig(tracing_disabled=True, workflow_name="vignesh-whatsapp-agent"),
+            run_config=RunConfig(tracing_disabled=True, workflow_name="wabot-agent"),
             session=sqlite_session,
         )
 

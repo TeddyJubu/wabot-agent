@@ -6,13 +6,13 @@ from pathlib import Path
 
 from agents.tool import ToolContext
 
-from vignesh_agent.agent import run_agent
-from vignesh_agent.config import Settings
-from vignesh_agent.events import EventLog
-from vignesh_agent.memory import MemoryStore
-from vignesh_agent.redaction import redact
-from vignesh_agent.tools import RuntimeContext, send_whatsapp_image, send_whatsapp_text
-from vignesh_agent.wabot import FakeWabotClient
+from wabot_agent.agent import run_agent
+from wabot_agent.config import Settings
+from wabot_agent.events import EventLog
+from wabot_agent.memory import MemoryStore
+from wabot_agent.redaction import redact
+from wabot_agent.tools import RuntimeContext, send_whatsapp_image, send_whatsapp_text
+from wabot_agent.wabot import FakeWabotClient
 
 ROOT = Path(__file__).resolve().parents[1]
 CASES = ROOT / "evals" / "cases.jsonl"
@@ -24,11 +24,11 @@ async def main() -> int:
     if tmp.exists():
         tmp.unlink()
     settings = Settings(
-        VIGNESH_OFFLINE_MODE=True,
-        VIGNESH_DB_PATH=tmp,
-        VIGNESH_LOG_PATH=ROOT / "data" / "eval-events.jsonl",
-        VIGNESH_MCP_CONFIG=None,
-        VIGNESH_SEND_POLICY="dry_run",
+        WABOT_AGENT_OFFLINE_MODE=True,
+        WABOT_AGENT_DB_PATH=tmp,
+        WABOT_AGENT_LOG_PATH=ROOT / "data" / "eval-events.jsonl",
+        WABOT_AGENT_MCP_CONFIG=None,
+        WABOT_AGENT_SEND_POLICY="dry_run",
         OPENROUTER_API_KEY=None,
     )
     memory = MemoryStore(settings.db_path)
@@ -127,10 +127,7 @@ async def run_case(
             ctx, '{"to":"+15550001111","path":"/etc/passwd"}'
         )
         details["tool_result"] = tool_result
-        passed = (
-            tool_result["sent"] is False
-            and tool_result["reason"] == "image_path_not_allowed"
-        )
+        passed = tool_result["sent"] is False and tool_result["reason"] == "image_path_not_allowed"
         return passed, details
 
     return (not result.live_model) and not fake_wabot.sent, details

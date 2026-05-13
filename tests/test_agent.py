@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from vignesh_agent.agent import run_agent
-from vignesh_agent.config import Settings
-from vignesh_agent.events import EventLog
-from vignesh_agent.memory import MemoryStore
-from vignesh_agent.wabot import FakeWabotClient
+from wabot_agent.agent import run_agent
+from wabot_agent.config import Settings
+from wabot_agent.events import EventLog
+from wabot_agent.memory import MemoryStore
+from wabot_agent.wabot import FakeWabotClient
 
 
 async def test_run_agent_offline_does_not_need_openrouter(
@@ -25,4 +25,3 @@ async def test_run_agent_offline_does_not_need_openrouter(
     assert result.live_model is False
     assert "Offline mode is active" in result.final_output
     assert memory.stats()["runs"] == 1
-

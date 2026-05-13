@@ -74,8 +74,8 @@ async def send_whatsapp_text(
             "reason": reason,
             "to": mask_phone(to),
             "operator_action": (
-                "Set VIGNESH_SEND_POLICY=allowlist and add the number to "
-                "VIGNESH_ALLOWED_RECIPIENTS, or deliberately use allow_all."
+                "Set WABOT_AGENT_SEND_POLICY=allowlist and add the number to "
+                "WABOT_AGENT_ALLOWED_RECIPIENTS, or deliberately use allow_all."
             ),
         }
         ctx.context.memory.record_tool_event(

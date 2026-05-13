@@ -40,4 +40,3 @@ def render_skill_summary(skills_dir: Path) -> str:
     if not cards:
         return "No local skills are installed."
     return "\n".join(f"- {card.name}: {card.description}" for card in cards)
-

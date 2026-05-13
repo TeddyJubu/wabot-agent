@@ -21,4 +21,3 @@ class EventLog:
         }
         with self.path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=True, sort_keys=True) + "\n")
-

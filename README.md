@@ -1,6 +1,6 @@
-# Vignesh WhatsApp Agent
+# wabot-agent
 
-Vignesh is a VPS-ready WhatsApp automation agent built around the OpenAI Agents SDK, OpenRouter, and [`wabot`](https://github.com/TeddyJubu/wabot). It is designed to run locally first, then upload cleanly to the SSH host named `vignesh`.
+wabot-agent is a VPS-ready WhatsApp automation agent built around the OpenAI Agents SDK, OpenRouter, and [`wabot`](https://github.com/TeddyJubu/wabot). It is designed to run locally first, then upload cleanly to the SSH host named `vignesh`.
 
 ![Architecture](docs/agent-interactions.png)
 
@@ -11,7 +11,7 @@ Vignesh is a VPS-ready WhatsApp automation agent built around the OpenAI Agents 
 - Treats `wabot` as the primary side-effect tool for WhatsApp.
 - Keeps durable local memory in SQLite: contact facts, agent notes, processed inbound ids, runs, and tool events.
 - Supports local skills under `skills/*/SKILL.md`.
-- Supports optional MCP servers through `VIGNESH_MCP_CONFIG`.
+- Supports optional MCP servers through `WABOT_AGENT_MCP_CONFIG`.
 - Exposes a small operator dashboard at `/`.
 - Defaults to `dry_run` send policy so fresh installs cannot send WhatsApp messages by accident.
 
@@ -57,6 +57,8 @@ OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
 
 Secrets stay in `.env`, which is ignored by git. Do not paste OpenRouter keys into chat prompts, skills, memory, README files, or MCP config.
 
+The current environment prefix is `WABOT_AGENT_*`. Existing `VIGNESH_*` variables are still accepted as backward-compatible aliases during migration.
+
 ## Connect wabot
 
 Install and pair `wabot` first:
@@ -85,20 +87,20 @@ Use `WABOT_HTTP_ADDR=127.0.0.1:7777` for the daemon. Do not expose the wabot dae
 The default is safe:
 
 ```bash
-VIGNESH_SEND_POLICY=dry_run
+WABOT_AGENT_SEND_POLICY=dry_run
 ```
 
 Production recommendation:
 
 ```bash
-VIGNESH_SEND_POLICY=allowlist
-VIGNESH_ALLOWED_RECIPIENTS=+15550001111,+15550002222
-VIGNESH_OPERATOR_TOKEN=<long-random-dashboard-token>
+WABOT_AGENT_SEND_POLICY=allowlist
+WABOT_AGENT_ALLOWED_RECIPIENTS=+15550001111,+15550002222
+WABOT_AGENT_OPERATOR_TOKEN=<long-random-dashboard-token>
 ```
 
 `allow_all` exists for controlled environments, but it removes the recipient guard. Use it deliberately.
 
-When `VIGNESH_OPERATOR_TOKEN` is set, open the dashboard once with:
+When `WABOT_AGENT_OPERATOR_TOKEN` is set, open the dashboard once with:
 
 ```text
 http://127.0.0.1:8787/?token=<long-random-dashboard-token>
@@ -126,7 +128,7 @@ Inbound webhook payload from `wabot`:
   "from": "+15550001111",
   "chat": "+15550001111",
   "is_group": false,
-  "push_name": "Vignesh",
+  "push_name": "wabot-agent",
   "text": "hello"
 }
 ```
@@ -155,7 +157,7 @@ The core tool set is intentionally narrow:
 
 Tool results and logs are redacted before persistence.
 
-Image sends are confined to `VIGNESH_MEDIA_DIR` (`./data/media` by default). Put approved outbound media there before asking the agent to send it.
+Image sends are confined to `WABOT_AGENT_MEDIA_DIR` (`./data/media` by default). Put approved outbound media there before asking the agent to send it.
 
 ## Skills And MCP
 
@@ -168,7 +170,7 @@ skills/<name>/SKILL.md
 MCP servers are configured by JSON:
 
 ```bash
-VIGNESH_MCP_CONFIG=./configs/mcp.example.json
+WABOT_AGENT_MCP_CONFIG=./configs/mcp.example.json
 ```
 
 Every example MCP server is disabled by default. Enable only trusted servers and keep privileged tools behind approval or an allowlist.
@@ -178,10 +180,10 @@ Every example MCP server is disabled by default. Enable only trusted servers and
 On the VPS:
 
 ```bash
-sudo APP_DIR=/opt/vignesh-agent APP_USER=vignesh ./scripts/bootstrap-vps.sh
-sudo nano /opt/vignesh-agent/.env
-sudo systemctl restart vignesh-agent
-sudo journalctl -u vignesh-agent -f
+sudo APP_DIR=/opt/wabot-agent APP_USER=wabotagent ./scripts/bootstrap-vps.sh
+sudo nano /opt/wabot-agent/.env
+sudo systemctl restart wabot-agent
+sudo journalctl -u wabot-agent -f
 ```
 
 From this local machine after the VPS is bootstrapped:
@@ -190,7 +192,7 @@ From this local machine after the VPS is bootstrapped:
 SSH_HOST=vignesh ./scripts/deploy-to-vignesh.sh
 ```
 
-The systemd unit is in `deploy/systemd/vignesh-agent.service`.
+The systemd unit is in `deploy/systemd/wabot-agent.service`.
 
 ## Verification
 
@@ -216,7 +218,7 @@ Then use the dashboard to ask for a health check and a draft response before ena
 ## Repository Layout
 
 ```text
-src/vignesh_agent/
+src/wabot_agent/
   agent.py      # Agents SDK orchestration
   api.py        # FastAPI app and webhook surface
   models.py     # OpenRouter and offline model wiring

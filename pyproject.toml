@@ -1,5 +1,5 @@
 [project]
-name = "vignesh-agent"
+name = "wabot-agent"
 version = "0.1.0"
 description = "A VPS-ready OpenRouter-powered WhatsApp automation agent for wabot."
 readme = "README.md"
@@ -17,13 +17,14 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  "pillow>=12.0.0",
   "pytest>=9.0.0",
   "pytest-asyncio>=1.3.0",
   "ruff>=0.14.0",
 ]
 
 [project.scripts]
-vignesh-agent = "vignesh_agent.api:main"
+wabot-agent = "wabot_agent.api:main"
 
 [tool.uv]
 package = true
@@ -42,4 +43,3 @@ markers = [
   "offline: tests that do not need live credentials or WhatsApp",
   "live: tests that require live OpenRouter or wabot credentials",
 ]
-

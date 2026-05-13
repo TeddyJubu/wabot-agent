@@ -1,16 +1,16 @@
 [Unit]
-Description=Vignesh WhatsApp Agent
+Description=wabot-agent
 After=network-online.target wabot.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-User=vignesh
-Group=vignesh
-WorkingDirectory=/opt/vignesh-agent
-EnvironmentFile=/opt/vignesh-agent/.env
+User=wabotagent
+Group=wabotagent
+WorkingDirectory=/opt/wabot-agent
+EnvironmentFile=/opt/wabot-agent/.env
 Environment=PYTHONUNBUFFERED=1
-Environment=UV_CACHE_DIR=/opt/vignesh-agent/.uv-cache
+Environment=UV_CACHE_DIR=/opt/wabot-agent/.uv-cache
 ExecStart=/usr/local/bin/uv run --frozen --no-sync python main.py
 Restart=always
 RestartSec=5
@@ -18,7 +18,7 @@ NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
-ReadWritePaths=/opt/vignesh-agent/data /opt/vignesh-agent/.uv-cache
+ReadWritePaths=/opt/wabot-agent/data /opt/wabot-agent/.uv-cache
 
 [Install]
 WantedBy=multi-user.target

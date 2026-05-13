@@ -47,7 +47,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     event_log = EventLog(settings.log_path)
     wabot = WabotClient(settings.wabot_endpoint, settings.wabot_token)
 
-    app = FastAPI(title="Vignesh WhatsApp Agent", version="0.1.0")
+    app = FastAPI(title="wabot-agent", version="0.1.0")
     app.state.settings = settings
     app.state.memory = memory
     app.state.event_log = event_log
@@ -60,7 +60,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def verify_operator(
         x_operator_token: str | None = Header(default=None),
         authorization: str | None = Header(default=None),
-        operator_session: str | None = Cookie(default=None, alias="vignesh_operator_token"),
+        operator_session: str | None = Cookie(default=None, alias="wabot_agent_operator_token"),
     ) -> None:
         _verify_operator_auth(settings, x_operator_token, authorization, operator_session)
 
@@ -69,14 +69,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/")
     async def dashboard(
         token: str | None = Query(default=None),
-        operator_session: str | None = Cookie(default=None, alias="vignesh_operator_token"),
+        operator_session: str | None = Cookie(default=None, alias="wabot_agent_operator_token"),
     ) -> FileResponse:
         if settings.operator_token:
             if token:
                 _verify_operator_auth(settings, token, None, None)
                 file_response = _dashboard_file(static_dir)
                 file_response.set_cookie(
-                    "vignesh_operator_token",
+                    "wabot_agent_operator_token",
                     token,
                     httponly=True,
                     secure=False,
@@ -96,7 +96,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
-        return {"ok": True, "service": "vignesh-agent", "env": settings.env}
+        return {"ok": True, "service": "wabot-agent", "env": settings.env}
 
     @app.get("/ready", dependencies=[operator_dependency])
     async def ready() -> dict[str, Any]:

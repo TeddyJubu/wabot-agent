@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_DIR="${APP_DIR:-/opt/vignesh-agent}"
-APP_USER="${APP_USER:-vignesh}"
-REPO_URL="${REPO_URL:-https://github.com/TeddyJubu/vignesh.git}"
+APP_DIR="${APP_DIR:-/opt/wabot-agent}"
+APP_USER="${APP_USER:-wabotagent}"
+REPO_URL="${REPO_URL:-https://github.com/TeddyJubu/wabot-agent.git}"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Run as root on the VPS: sudo APP_DIR=$APP_DIR $0"
@@ -39,11 +39,11 @@ if [[ ! -f "$APP_DIR/.env" ]]; then
   echo "Created $APP_DIR/.env. Fill OPENROUTER_API_KEY, WABOT_TOKEN, and policy values."
 fi
 
-install -m 0644 "$APP_DIR/deploy/systemd/vignesh-agent.service" \
-  /etc/systemd/system/vignesh-agent.service
+install -m 0644 "$APP_DIR/deploy/systemd/wabot-agent.service" \
+  /etc/systemd/system/wabot-agent.service
 systemctl daemon-reload
-systemctl enable vignesh-agent.service
+systemctl enable wabot-agent.service
 
 echo "Bootstrap complete. Edit $APP_DIR/.env, then run:"
-echo "  sudo systemctl restart vignesh-agent"
-echo "  sudo journalctl -u vignesh-agent -f"
+echo "  sudo systemctl restart wabot-agent"
+echo "  sudo journalctl -u wabot-agent -f"

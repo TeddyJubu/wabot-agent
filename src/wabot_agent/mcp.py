@@ -67,4 +67,3 @@ async def connected_mcp_servers(config_path: Path | None) -> AsyncIterator[list[
     )
     async with manager:
         yield manager.active_servers
-

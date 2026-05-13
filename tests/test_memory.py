@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from vignesh_agent.memory import MemoryStore
+from wabot_agent.memory import MemoryStore
 
 
 def test_contact_memory_rejects_sensitive_values(memory: MemoryStore) -> None:

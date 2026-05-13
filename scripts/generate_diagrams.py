@@ -74,7 +74,7 @@ def arrow(
 def architecture() -> None:
     img = Image.new("RGB", (1400, 820), COLORS["bg"])
     draw = ImageDraw.Draw(img)
-    label(draw, (60, 42), "Vignesh WhatsApp Agent Architecture", 34, True)
+    label(draw, (60, 42), "wabot-agent Architecture", 34, True)
     label(
         draw,
         (60, 88),

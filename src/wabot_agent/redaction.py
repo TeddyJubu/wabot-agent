@@ -49,4 +49,3 @@ def looks_sensitive(value: str) -> bool:
     if OPENROUTER_KEY_RE.search(value) or BEARER_RE.search(value):
         return True
     return False
-

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 SSH_HOST="${SSH_HOST:-vignesh}"
-APP_DIR="${APP_DIR:-/opt/vignesh-agent}"
+APP_DIR="${APP_DIR:-/opt/wabot-agent}"
 
 rsync -az --delete \
   --exclude '.git/' \
@@ -12,5 +12,5 @@ rsync -az --delete \
   --exclude '__pycache__/' \
   ./ "$SSH_HOST:$APP_DIR/"
 
-ssh "$SSH_HOST" "cd '$APP_DIR' && uv sync --all-extras && sudo systemctl restart vignesh-agent && sudo systemctl status vignesh-agent --no-pager"
+ssh "$SSH_HOST" "cd '$APP_DIR' && uv sync --all-extras && sudo systemctl restart wabot-agent && sudo systemctl status wabot-agent --no-pager"
 

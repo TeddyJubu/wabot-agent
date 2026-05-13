@@ -2,16 +2,16 @@ from __future__ import annotations
 
 from agents.tool import ToolContext
 
-from vignesh_agent.config import Settings
-from vignesh_agent.events import EventLog
-from vignesh_agent.memory import MemoryStore
-from vignesh_agent.tools import (
+from wabot_agent.config import Settings
+from wabot_agent.events import EventLog
+from wabot_agent.memory import MemoryStore
+from wabot_agent.tools import (
     RuntimeContext,
     send_whatsapp_image,
     send_whatsapp_text,
     wabot_health,
 )
-from vignesh_agent.wabot import FakeWabotClient
+from wabot_agent.wabot import FakeWabotClient
 
 
 async def test_send_tool_blocks_by_default(
@@ -27,9 +27,7 @@ async def test_send_tool_blocks_by_default(
         tool_arguments='{"to":"+15550001111","text":"hello"}',
     )
 
-    result = await send_whatsapp_text.on_invoke_tool(
-        ctx, '{"to":"+15550001111","text":"hello"}'
-    )
+    result = await send_whatsapp_text.on_invoke_tool(ctx, '{"to":"+15550001111","text":"hello"}')
 
     assert result["sent"] is False
     assert result["reason"] == "dry_run"
@@ -52,9 +50,7 @@ async def test_send_tool_allows_allowlisted_recipient(
         tool_arguments='{"to":"+15550001111","text":"hello"}',
     )
 
-    result = await send_whatsapp_text.on_invoke_tool(
-        ctx, '{"to":"+15550001111","text":"hello"}'
-    )
+    result = await send_whatsapp_text.on_invoke_tool(ctx, '{"to":"+15550001111","text":"hello"}')
 
     assert result["sent"] is True
     assert fake_wabot.sent[0]["to"] == "+15550001111"

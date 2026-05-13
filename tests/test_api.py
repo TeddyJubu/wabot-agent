@@ -4,21 +4,34 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from vignesh_agent.api import create_app
-from vignesh_agent.config import Settings
+from wabot_agent.api import create_app
+from wabot_agent.config import Settings
 
 
 def make_settings(tmp_path: Path) -> Settings:
     return Settings(
-        VIGNESH_OFFLINE_MODE=True,
-        VIGNESH_DATA_DIR=tmp_path,
-        VIGNESH_DB_PATH=tmp_path / "agent.db",
-        VIGNESH_LOG_PATH=tmp_path / "events.jsonl",
-        VIGNESH_MCP_CONFIG=None,
-        VIGNESH_SEND_POLICY="dry_run",
+        WABOT_AGENT_OFFLINE_MODE=True,
+        WABOT_AGENT_DATA_DIR=tmp_path,
+        WABOT_AGENT_DB_PATH=tmp_path / "agent.db",
+        WABOT_AGENT_LOG_PATH=tmp_path / "events.jsonl",
+        WABOT_AGENT_MCP_CONFIG=None,
+        WABOT_AGENT_SEND_POLICY="dry_run",
         WABOT_INBOUND_TOKEN="inbound-secret",
         OPENROUTER_API_KEY=None,
     )
+
+
+def test_settings_accepts_legacy_vignesh_aliases(tmp_path: Path) -> None:
+    settings = Settings(
+        VIGNESH_OFFLINE_MODE=True,
+        VIGNESH_DB_PATH=tmp_path / "legacy.db",
+        VIGNESH_SEND_POLICY="dry_run",
+        OPENROUTER_API_KEY=None,
+    )
+
+    assert settings.offline_mode is True
+    assert settings.db_path == tmp_path / "legacy.db"
+    assert settings.send_policy == "dry_run"
 
 
 def test_health_and_ready(tmp_path: Path) -> None:
