@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import AliasChoices, Field, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -87,7 +87,9 @@ class Settings(BaseSettings):
         default="dry_run",
         validation_alias=AliasChoices("WABOT_AGENT_SEND_POLICY", "VIGNESH_SEND_POLICY"),
     )
-    allowed_recipients: set[str] = Field(
+    # NoDecode disables pydantic-settings' JSON pre-pass on env values so the
+    # validator below can accept an empty string from `.env` without a JSON error.
+    allowed_recipients: Annotated[set[str], NoDecode] = Field(
         default_factory=set,
         validation_alias=AliasChoices(
             "WABOT_AGENT_ALLOWED_RECIPIENTS", "VIGNESH_ALLOWED_RECIPIENTS"
