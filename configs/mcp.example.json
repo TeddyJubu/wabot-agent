@@ -1,0 +1,13 @@
+{
+  "servers": [
+    {
+      "name": "example-readonly-tools",
+      "enabled": false,
+      "transport": "stdio",
+      "command": "uvx",
+      "args": ["example-mcp-server"],
+      "require_approval": "always"
+    }
+  ]
+}
+

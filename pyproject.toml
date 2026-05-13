@@ -1,0 +1,45 @@
+[project]
+name = "vignesh-agent"
+version = "0.1.0"
+description = "A VPS-ready OpenRouter-powered WhatsApp automation agent for wabot."
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi>=0.124.0",
+  "httpx>=0.28.0",
+  "openai>=2.15.0",
+  "openai-agents>=0.17.2",
+  "pydantic>=2.12.0",
+  "pydantic-settings>=2.12.0",
+  "python-multipart>=0.0.20",
+  "uvicorn[standard]>=0.38.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=9.0.0",
+  "pytest-asyncio>=1.3.0",
+  "ruff>=0.14.0",
+]
+
+[project.scripts]
+vignesh-agent = "vignesh_agent.api:main"
+
+[tool.uv]
+package = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = [
+  "offline: tests that do not need live credentials or WhatsApp",
+  "live: tests that require live OpenRouter or wabot credentials",
+]
+

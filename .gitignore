@@ -1,0 +1,23 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.DS_Store
+
+# Runtime state and secrets
+.env
+.env.*
+!.env.example
+data/*.db
+data/*.db-*
+data/*.jsonl
+data/*.log
+evals/results/*
+!evals/results/.gitkeep
+
+# wabot identity/session material must never be committed.
+store.db
+wabot.env
+sends.log
+

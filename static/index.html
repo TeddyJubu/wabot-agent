@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vignesh WhatsApp Agent</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">V</div>
+          <div>
+            <strong>Vignesh</strong>
+            <span>WhatsApp Agent</span>
+          </div>
+        </div>
+        <nav aria-label="Primary">
+          <a class="active" href="#chat">Console</a>
+          <a href="#status">Readiness</a>
+          <a href="#runs">Runs</a>
+        </nav>
+      </aside>
+
+      <main>
+        <header class="topbar">
+          <div>
+            <h1>Operator Console</h1>
+            <p id="subtitle">Local-first control plane for wabot automation.</p>
+          </div>
+          <button id="refresh" class="icon-button" title="Refresh readiness" aria-label="Refresh readiness">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 12a8 8 0 1 1-2.34-5.66" />
+              <path d="M20 4v6h-6" />
+            </svg>
+          </button>
+        </header>
+
+        <section id="status" class="status-grid" aria-label="Readiness">
+          <article>
+            <span>Model</span>
+            <strong id="model-state">Checking</strong>
+          </article>
+          <article>
+            <span>wabot</span>
+            <strong id="wabot-state">Checking</strong>
+          </article>
+          <article>
+            <span>Send Policy</span>
+            <strong id="policy-state">Checking</strong>
+          </article>
+          <article>
+            <span>Memory</span>
+            <strong id="memory-state">Checking</strong>
+          </article>
+        </section>
+
+        <section id="chat" class="workspace">
+          <div class="chat-panel">
+            <div id="messages" class="messages" aria-live="polite"></div>
+            <form id="chat-form" class="composer">
+              <textarea
+                id="message"
+                name="message"
+                rows="3"
+                placeholder="Ask the agent to check wabot, draft a WhatsApp reply, or run an allowed send."
+                required
+              ></textarea>
+              <button type="submit">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="m22 2-7 20-4-9-9-4Z" />
+                  <path d="M22 2 11 13" />
+                </svg>
+                Send
+              </button>
+            </form>
+          </div>
+
+          <aside id="runs" class="runs-panel">
+            <div class="panel-title">
+              <h2>Recent Runs</h2>
+              <span id="run-count">0</span>
+            </div>
+            <div id="runs-list" class="runs-list"></div>
+          </aside>
+        </section>
+      </main>
+    </div>
+    <script src="/static/app.js" type="module"></script>
+  </body>
+</html>
+

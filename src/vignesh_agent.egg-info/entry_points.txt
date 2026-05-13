@@ -1,0 +1,2 @@
+[console_scripts]
+vignesh-agent = vignesh_agent.api:main

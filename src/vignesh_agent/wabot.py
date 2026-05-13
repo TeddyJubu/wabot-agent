@@ -1,0 +1,116 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+import httpx
+
+
+class WabotError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class WabotHealth:
+    reachable: bool
+    logged_in: bool | None = None
+    connected: bool | None = None
+    detail: str | None = None
+
+    @property
+    def ready(self) -> bool:
+        return bool(self.reachable and self.logged_in and self.connected)
+
+
+class WabotClient:
+    def __init__(self, endpoint: str, token: str | None, timeout: float = 60.0):
+        self.endpoint = endpoint.rstrip("/")
+        self.token = token
+        self.timeout = timeout
+
+    async def health(self) -> WabotHealth:
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(f"{self.endpoint}/health")
+        except httpx.HTTPError as exc:
+            return WabotHealth(reachable=False, detail=str(exc))
+        if resp.status_code != 200:
+            return WabotHealth(
+                reachable=False,
+                detail=f"HTTP {resp.status_code}: {resp.text[:200]}",
+            )
+        payload = resp.json()
+        return WabotHealth(
+            reachable=True,
+            logged_in=payload.get("logged_in"),
+            connected=payload.get("connected"),
+            detail=payload.get("detail"),
+        )
+
+    def _headers(self) -> dict[str, str]:
+        if not self.token:
+            raise WabotError("WABOT_TOKEN is not configured.")
+        return {"X-Token": self.token}
+
+    async def send_text(self, to: str, text: str) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.post(
+                f"{self.endpoint}/send",
+                json={"to": to, "text": text},
+                headers=self._headers(),
+            )
+        return self._handle_response(resp)
+
+    async def send_image(self, to: str, path: str, caption: str | None = None) -> dict[str, Any]:
+        image_path = Path(path)
+        if not image_path.exists():
+            raise WabotError(f"Image file does not exist: {image_path}")
+        data = {"to": to}
+        if caption:
+            data["caption"] = caption
+        with image_path.open("rb") as f:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(
+                    f"{self.endpoint}/send-image",
+                    data=data,
+                    files={"file": (image_path.name, f, "application/octet-stream")},
+                    headers=self._headers(),
+                )
+        return self._handle_response(resp)
+
+    def _handle_response(self, resp: httpx.Response) -> dict[str, Any]:
+        if resp.status_code == 401:
+            raise WabotError("wabot rejected WABOT_TOKEN with HTTP 401.")
+        if resp.status_code == 429:
+            retry_after = resp.headers.get("Retry-After")
+            detail = "wabot rate limit hit"
+            if retry_after:
+                detail += f"; retry after {retry_after}s"
+            raise WabotError(detail)
+        if resp.status_code == 503:
+            raise WabotError("wabot is reachable but WhatsApp is not ready or not linked.")
+        if resp.status_code >= 400:
+            raise WabotError(f"wabot returned HTTP {resp.status_code}: {resp.text[:300]}")
+        if not resp.content:
+            return {"ok": True}
+        return resp.json()
+
+
+class FakeWabotClient(WabotClient):
+    def __init__(self) -> None:
+        super().__init__("http://fake-wabot", "fake-token")
+        self.sent: list[dict[str, Any]] = []
+
+    async def health(self) -> WabotHealth:
+        return WabotHealth(reachable=True, logged_in=True, connected=True, detail="fake")
+
+    async def send_text(self, to: str, text: str) -> dict[str, Any]:
+        payload = {"id": f"fake-{len(self.sent) + 1}", "to": to, "text": text}
+        self.sent.append({"type": "text", **payload})
+        return payload
+
+    async def send_image(self, to: str, path: str, caption: str | None = None) -> dict[str, Any]:
+        payload = {"id": f"fake-{len(self.sent) + 1}", "to": to, "path": path, "caption": caption}
+        self.sent.append({"type": "image", **payload})
+        return payload
