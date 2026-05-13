@@ -12,10 +12,14 @@ rsync -az --delete \
   --exclude '__pycache__/' \
   ./ "$SSH_HOST:$APP_DIR/"
 
-# Wrap the remote command in `bash -lc` so profile files are sourced and `uv`
-# (installed under ~/.local/bin or /usr/local/bin) is on PATH for non-interactive ssh.
-# Pass APP_DIR as a remote env var (printf %q-escaped) rather than splicing it
-# into the command string, so shell metacharacters in APP_DIR are treated as
-# data on the remote, not as code. `cd --` guards against paths starting with `-`.
-ssh "$SSH_HOST" "APP_DIR=$(printf '%q' "$APP_DIR") bash -lc 'export PATH=\$HOME/.local/bin:/usr/local/bin:\$PATH && cd -- \"\$APP_DIR\" && uv sync --all-extras && sudo systemctl restart wabot-agent && sudo systemctl status wabot-agent --no-pager'"
+# APP_DIR is passed as $1 (not interpolated) to prevent remote injection if it contains shell-meta chars.
+APP_DIR_Q=$(printf '%q' "$APP_DIR")
+ssh "$SSH_HOST" bash -l -s -- "$APP_DIR_Q" <<'REMOTE'
+set -euo pipefail
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:/home/linuxbrew/.linuxbrew/bin:$PATH"
+cd -- "$1"
+uv sync --all-extras
+sudo systemctl restart wabot-agent
+sudo systemctl status wabot-agent --no-pager
+REMOTE
 
