@@ -25,7 +25,21 @@ if [[ ! -x /usr/local/bin/uv ]]; then
   if ! command -v uv >/dev/null 2>&1; then
     curl -LsSf https://astral.sh/uv/install.sh | sh
   fi
-  install -m 0755 "$(command -v uv)" /usr/local/bin/uv
+  # The installer drops uv at $HOME/.local/bin/uv and only updates profile files
+  # (not the current non-login shell's PATH), so `command -v uv` would still fail
+  # right after install on a fresh host. Look at the installer's known output
+  # path first, then fall back to PATH for the "uv already there" case.
+  uv_src=""
+  if [[ -x "$HOME/.local/bin/uv" ]]; then
+    uv_src="$HOME/.local/bin/uv"
+  elif command -v uv >/dev/null 2>&1; then
+    uv_src="$(command -v uv)"
+  fi
+  if [[ -z "$uv_src" ]]; then
+    echo "uv not found at \$HOME/.local/bin/uv or on PATH after install" >&2
+    exit 1
+  fi
+  install -m 0755 "$uv_src" /usr/local/bin/uv
 fi
 UV_BIN=/usr/local/bin/uv
 
