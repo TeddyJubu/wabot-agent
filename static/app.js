@@ -68,7 +68,9 @@ async function loadPairing() {
     pairingDetail.textContent = data.detail || "Waiting for a fresh pairing QR.";
     pairingQR.hidden = true;
     pairingEmpty.hidden = false;
-    pairingEmpty.textContent = data.reachable ? "Waiting for QR" : "wabot offline";
+    pairingEmpty.textContent = data.detail && data.detail.includes("WABOT_TOKEN")
+      ? "Needs token"
+      : data.reachable ? "Waiting for QR" : "wabot offline";
   } catch (error) {
     pairingDetail.textContent = `Pairing check failed: ${error.message}`;
     pairingQR.hidden = true;

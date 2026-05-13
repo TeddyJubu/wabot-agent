@@ -68,7 +68,7 @@ class WabotClient:
     async def pairing_qr(self) -> WabotPairingQR:
         if not self.token:
             return WabotPairingQR(
-                supported=False,
+                supported=True,
                 reachable=False,
                 detail="WABOT_TOKEN is not configured and WABOT_TOKEN_FILE was not readable.",
             )

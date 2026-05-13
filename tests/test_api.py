@@ -50,7 +50,7 @@ def test_pairing_endpoint_reports_missing_token(tmp_path: Path) -> None:
     svg = client.get("/api/whatsapp/pairing.svg")
 
     assert pairing.status_code == 200
-    assert pairing.json()["supported"] is False
+    assert pairing.json()["supported"] is True
     assert pairing.json()["qr_available"] is False
     assert svg.status_code == 404
 
