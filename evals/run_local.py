@@ -33,6 +33,8 @@ async def main() -> int:
     failures = 0
     with CASES.open("r", encoding="utf-8") as src, RESULTS.open("w", encoding="utf-8") as out:
         for line in src:
+            if not line.strip():
+                continue
             case = json.loads(line)
             result = await run_agent(
                 case["input"],
@@ -61,4 +63,3 @@ async def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(asyncio.run(main()))
-

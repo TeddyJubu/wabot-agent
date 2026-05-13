@@ -1,0 +1,24 @@
+[Unit]
+Description=Vignesh WhatsApp Agent
+After=network-online.target wabot.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=vignesh
+Group=vignesh
+WorkingDirectory=/opt/vignesh-agent
+EnvironmentFile=/opt/vignesh-agent/.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/usr/local/bin/uv run python main.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/vignesh-agent/data
+
+[Install]
+WantedBy=multi-user.target
+
