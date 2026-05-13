@@ -10,15 +10,15 @@ Group=vignesh
 WorkingDirectory=/opt/vignesh-agent
 EnvironmentFile=/opt/vignesh-agent/.env
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/usr/local/bin/uv run python main.py
+Environment=UV_CACHE_DIR=/opt/vignesh-agent/.uv-cache
+ExecStart=/usr/local/bin/uv run --frozen python main.py
 Restart=always
 RestartSec=5
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full
 ProtectHome=true
-ReadWritePaths=/opt/vignesh-agent/data
+ReadWritePaths=/opt/vignesh-agent/data /opt/vignesh-agent/.uv-cache
 
 [Install]
 WantedBy=multi-user.target
-

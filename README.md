@@ -21,6 +21,8 @@ Vignesh is a VPS-ready WhatsApp automation agent built around the OpenAI Agents 
 
 The model can plan and choose tools, but the Python harness owns execution. WhatsApp sends go through a narrow `wabot` client that checks send policy and daemon readiness before calling `/send` or `/send-image`.
 
+This repo uses a local FastAPI dashboard rather than a hosted Agent Builder or Vercel-first UI because the critical dependency is a loopback-only `wabot` daemon on the VPS. That keeps WhatsApp session state, tokens, and send authorization close to the host that owns them. A Vercel or AgentKit frontend can still be added later against this API if you want a hosted operator surface.
+
 ```text
 Operator / wabot inbound webhook
   -> FastAPI control plane
@@ -227,4 +229,3 @@ evals/          # Local eval harness
 - Keep `wabot` bound to loopback.
 - Use allowlists for production sending.
 - Rotate secrets if they ever appear in prompts, logs, memory, traces, or screenshots.
-

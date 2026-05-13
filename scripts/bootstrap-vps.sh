@@ -28,7 +28,7 @@ else
   git -C "$APP_DIR" pull --ff-only
 fi
 
-mkdir -p "$APP_DIR/data"
+mkdir -p "$APP_DIR/data" "$APP_DIR/.uv-cache"
 chown -R "$APP_USER:$APP_USER" "$APP_DIR"
 
 if [[ ! -f "$APP_DIR/.env" ]]; then
@@ -44,4 +44,3 @@ systemctl enable vignesh-agent.service
 echo "Bootstrap complete. Edit $APP_DIR/.env, then run:"
 echo "  sudo systemctl restart vignesh-agent"
 echo "  sudo journalctl -u vignesh-agent -f"
-
