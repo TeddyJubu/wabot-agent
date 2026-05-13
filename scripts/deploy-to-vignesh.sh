@@ -5,7 +5,7 @@ SSH_HOST="${SSH_HOST:-vignesh}"
 APP_DIR="${APP_DIR:-/opt/wabot-agent}"
 
 rsync -az --delete \
-  --exclude '.git/' \
+  --exclude '.git' \
   --exclude '.venv/' \
   --exclude '.env' \
   --exclude 'data/' \
