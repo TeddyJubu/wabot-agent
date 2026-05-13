@@ -133,37 +133,44 @@ async function loadReady() {
   }
 }
 
+function paintPairing(data) {
+  if (!data) return;
+  if (!data.supported) {
+    pairingDetail.textContent = data.detail || "Upgrade wabot to enable browser pairing.";
+    pairingQR.hidden = true;
+    pairingEmpty.hidden = false;
+    pairingEmpty.textContent = "Upgrade wabot";
+    return;
+  }
+  if (data.logged_in && data.connected) {
+    pairingDetail.textContent = "WhatsApp is linked and connected.";
+    pairingQR.hidden = true;
+    pairingEmpty.hidden = false;
+    pairingEmpty.textContent = "Connected";
+    return;
+  }
+  if (data.qr_available) {
+    pairingDetail.textContent = "Open WhatsApp on your phone and scan this linked-device QR.";
+    // Cache-bust on the updated_at so a rotated QR forces a new image load.
+    pairingQR.src = `/api/whatsapp/pairing.svg?t=${encodeURIComponent(data.updated_at || Date.now())}`;
+    pairingQR.hidden = false;
+    pairingEmpty.hidden = true;
+    return;
+  }
+  pairingDetail.textContent = data.detail || "Waiting for a fresh pairing QR.";
+  pairingQR.hidden = true;
+  pairingEmpty.hidden = false;
+  pairingEmpty.textContent = data.detail && data.detail.includes("WABOT_TOKEN")
+    ? "Needs token"
+    : data.reachable ? "Waiting for QR" : "wabot offline";
+}
+
+// Fallback path — used by the refresh button. The SSE stream's pairing_changed
+// event handles live updates; this only fires on manual operator action.
 async function loadPairing() {
   try {
     const res = await fetch("/api/whatsapp/pairing");
-    const data = await res.json();
-    if (!data.supported) {
-      pairingDetail.textContent = data.detail || "Upgrade wabot to enable browser pairing.";
-      pairingQR.hidden = true;
-      pairingEmpty.hidden = false;
-      pairingEmpty.textContent = "Upgrade wabot";
-      return;
-    }
-    if (data.logged_in && data.connected) {
-      pairingDetail.textContent = "WhatsApp is linked and connected.";
-      pairingQR.hidden = true;
-      pairingEmpty.hidden = false;
-      pairingEmpty.textContent = "Connected";
-      return;
-    }
-    if (data.qr_available) {
-      pairingDetail.textContent = "Open WhatsApp on your phone and scan this linked-device QR.";
-      pairingQR.src = `/api/whatsapp/pairing.svg?t=${Date.now()}`;
-      pairingQR.hidden = false;
-      pairingEmpty.hidden = true;
-      return;
-    }
-    pairingDetail.textContent = data.detail || "Waiting for a fresh pairing QR.";
-    pairingQR.hidden = true;
-    pairingEmpty.hidden = false;
-    pairingEmpty.textContent = data.detail && data.detail.includes("WABOT_TOKEN")
-      ? "Needs token"
-      : data.reachable ? "Waiting for QR" : "wabot offline";
+    paintPairing(await res.json());
   } catch (error) {
     pairingDetail.textContent = `Pairing check failed: ${error.message}`;
     pairingQR.hidden = true;
@@ -661,7 +668,6 @@ if ("IntersectionObserver" in window) {
 // =====================================================================
 
 let eventSource = null;
-let pairingTimer = null;
 
 function handleSseEvent(name, data) {
   // Any event from the hub proves the stream is alive — feed the staleness
@@ -671,6 +677,10 @@ function handleSseEvent(name, data) {
     case "ready_snapshot":
       applyReady(data);
       paintRuns(data.runs || []);
+      if (data.pairing) paintPairing(data.pairing);
+      break;
+    case "pairing_changed":
+      paintPairing(data);
       break;
     case "agent_run_complete":
       // The event carries enough to render the run inline. Bump the runs KPI
@@ -702,7 +712,7 @@ function openEventStream() {
   // needing a module import (this script loads as type="module").
   window.dashboardEventSource = eventSource;
   // Named events dispatched server-side via `event:` lines.
-  for (const name of ["ready_snapshot", "agent_run_start", "agent_run_complete", "inbound_message", "settings_updated", "heartbeat"]) {
+  for (const name of ["ready_snapshot", "agent_run_start", "agent_run_complete", "inbound_message", "settings_updated", "pairing_changed", "heartbeat"]) {
     eventSource.addEventListener(name, (ev) => {
       try {
         handleSseEvent(name, JSON.parse(ev.data));
@@ -724,7 +734,6 @@ function openEventStream() {
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
     if (!eventSource || eventSource.readyState === EventSource.CLOSED) openEventStream();
-    loadPairing();
   } else if (eventSource) {
     eventSource.close();
     eventSource = null;
@@ -737,13 +746,10 @@ document.addEventListener("visibilitychange", () => {
 
 addMessage("agent", "Ready. Send policy is fail-closed unless the VPS is configured otherwise.");
 openEventStream();
-loadPairing();
 loadSettings();
-// Pairing isn't yet on the hub — wabot's QR rotates externally. Poll on a
-// slow cadence; the SSE stream handles the rest.
-pairingTimer = setInterval(() => {
-  if (document.visibilityState === "visible") loadPairing();
-}, 30000);
+// Pairing arrives via the SSE `pairing_changed` event (and the initial
+// ready_snapshot.pairing field) — no client timer needed. The refresh
+// button still calls loadPairing() as a manual escape hatch.
 
 // Step 5: keep run-card relative timestamps fresh.
 setInterval(refreshRelativeTimes, 30000);

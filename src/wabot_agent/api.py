@@ -103,12 +103,64 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.event_hub = hub
     app.state.wabot = wabot
 
+    # State for the pairing poller (set in startup hook below).
+    pairing_state: dict[str, Any] = {"last": None, "task": None}
+
+    def _pairing_payload(p: Any) -> dict[str, Any]:
+        # Same shape as GET /api/whatsapp/pairing — keep them in sync so the
+        # client can paint from either source.
+        return {
+            "supported": p.supported,
+            "reachable": p.reachable,
+            "logged_in": p.logged_in,
+            "connected": p.connected,
+            "qr_available": p.qr_available,
+            "event": p.event,
+            "updated_at": p.updated_at,
+            "expires_at": p.expires_at,
+            "detail": p.detail,
+        }
+
+    async def _pairing_poll_loop() -> None:
+        """Probe wabot pairing state and publish pairing_changed on diff.
+
+        Polls every 5s on loopback — cheap. We only publish when the snapshot
+        actually changes, so a stable linked session generates zero events
+        beyond the initial state push at startup.
+        """
+        while True:
+            try:
+                pairing = await wabot.pairing_qr()
+                payload = _pairing_payload(pairing)
+            except Exception:  # noqa: BLE001 — never let a transient HTTP error kill the loop
+                payload = None
+            if payload is not None and payload != pairing_state["last"]:
+                pairing_state["last"] = payload
+                hub.publish("pairing_changed", payload)
+            try:
+                await asyncio.sleep(5)
+            except asyncio.CancelledError:
+                return
+
     @app.on_event("startup")
-    async def _bind_event_loop() -> None:
+    async def _on_startup() -> None:
         # Capture the running uvicorn loop so sync publishers (EventLog.write
         # called from inside tools, threads, etc.) can dispatch safely via
         # call_soon_threadsafe.
         hub.bind_loop(asyncio.get_running_loop())
+        # Drive pairing state through the hub so the dashboard can drop its
+        # last setInterval. The poll loop survives transient wabot errors.
+        pairing_state["task"] = asyncio.create_task(_pairing_poll_loop())
+
+    @app.on_event("shutdown")
+    async def _on_shutdown() -> None:
+        task = pairing_state.get("task")
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
 
     static_dir = Path(__file__).resolve().parents[2] / "static"
     if static_dir.exists():
@@ -184,20 +236,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/whatsapp/pairing", dependencies=[operator_dependency])
     async def whatsapp_pairing() -> dict[str, Any]:
-        pairing = await wabot.pairing_qr()
-        return redact(
-            {
-                "supported": pairing.supported,
-                "reachable": pairing.reachable,
-                "logged_in": pairing.logged_in,
-                "connected": pairing.connected,
-                "qr_available": pairing.qr_available,
-                "event": pairing.event,
-                "updated_at": pairing.updated_at,
-                "expires_at": pairing.expires_at,
-                "detail": pairing.detail,
-            }
-        )
+        # _pairing_payload defines the canonical shape; both the SSE
+        # `pairing_changed` event and this REST endpoint emit it.
+        return redact(_pairing_payload(await wabot.pairing_qr()))
 
     @app.get(
         "/api/whatsapp/pairing.svg",
@@ -347,11 +388,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def _build_initial_snapshot() -> dict[str, Any]:
         """Initial payload pushed when an SSE client connects.
 
-        Bundles /ready + /api/runs into one event so the dashboard renders
-        completely without follow-up REST calls. Subsequent state changes
-        arrive as deltas on the same stream.
+        Bundles /ready + /api/runs + pairing into one event so the dashboard
+        renders completely without follow-up REST calls. Subsequent state
+        changes arrive as deltas on the same stream.
         """
         wabot_health = await wabot.health()
+        # Prefer the poller's cached pairing snapshot (already redacted on
+        # publish); on cold start before the first tick fires, fall through
+        # to a fresh probe so the client doesn't paint a blank pairing card.
+        pairing = pairing_state.get("last")
+        if pairing is None:
+            pairing = _pairing_payload(await wabot.pairing_qr())
         return redact(
             {
                 "ok": True,
@@ -366,6 +413,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     "ready": wabot_health.ready,
                     "detail": wabot_health.detail,
                 },
+                "pairing": pairing,
                 "runs": memory.recent_runs(limit=8),
             }
         )
