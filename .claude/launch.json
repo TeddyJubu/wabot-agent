@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "wabot-agent",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "python", "main.py"],
+      "port": 8787
+    }
+  ]
+}

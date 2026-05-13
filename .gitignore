@@ -16,6 +16,7 @@ data/*.db
 data/*.db-*
 data/*.jsonl
 data/*.log
+data/*.json
 evals/results/*
 !evals/results/.gitkeep
 

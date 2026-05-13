@@ -14,6 +14,7 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         extra="ignore",
         populate_by_name=True,
+        validate_assignment=True,
     )
 
     env: str = Field(
@@ -63,6 +64,12 @@ class Settings(BaseSettings):
     skills_dir: Path = Field(
         default=Path("./skills"),
         validation_alias=AliasChoices("WABOT_AGENT_SKILLS_DIR", "VIGNESH_SKILLS_DIR"),
+    )
+    runtime_overrides_path: Path = Field(
+        default=Path("./data/runtime_overrides.json"),
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_RUNTIME_OVERRIDES_PATH", "VIGNESH_RUNTIME_OVERRIDES_PATH"
+        ),
     )
 
     wabot_endpoint: str = Field(default="http://127.0.0.1:7777", alias="WABOT_ENDPOINT")

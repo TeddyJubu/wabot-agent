@@ -109,3 +109,77 @@ def test_inbound_is_idempotent(tmp_path: Path) -> None:
     assert first.status_code == 200
     assert first.json()["duplicate"] is False
     assert second.json()["duplicate"] is True
+
+
+def test_settings_get_masks_secrets(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path).model_copy(
+        update={"openrouter_api_key": "sk-or-v1-abcdefghij1234567890"}
+    )
+    client = TestClient(create_app(settings))
+
+    view = client.get("/api/settings").json()
+    api_key = view["openrouter"]["api_key"]
+    assert api_key["set"] is True
+    assert api_key["preview"].startswith("sk-o")
+    assert api_key["preview"].endswith("7890")
+    # The raw key must never appear in the response.
+    assert "abcdefghij1234567890" not in client.get("/api/settings").text
+
+
+def test_settings_patch_updates_send_policy_and_persists(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path).model_copy(
+        update={"runtime_overrides_path": tmp_path / "overrides.json"}
+    )
+    client = TestClient(create_app(settings))
+
+    resp = client.patch(
+        "/api/settings",
+        json={"send_policy": "allowlist", "allowed_recipients": ["+15550001111"]},
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["send_policy"] == "allowlist"
+    assert body["allowed_recipients"] == ["+15550001111"]
+
+    # File on disk reflects the change.
+    import json
+
+    written = json.loads((tmp_path / "overrides.json").read_text())
+    assert written["send_policy"] == "allowlist"
+    assert written["allowed_recipients"] == ["+15550001111"]
+
+
+def test_settings_patch_allow_all_requires_confirmation(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path).model_copy(
+        update={"runtime_overrides_path": tmp_path / "overrides.json"}
+    )
+    client = TestClient(create_app(settings))
+
+    blocked = client.patch("/api/settings", json={"send_policy": "allow_all"})
+    assert blocked.status_code == 400
+
+    allowed = client.patch(
+        "/api/settings",
+        json={"send_policy": "allow_all", "confirm_allow_all": True},
+    )
+    assert allowed.status_code == 200
+    assert allowed.json()["send_policy"] == "allow_all"
+
+
+def test_runtime_overrides_apply_on_startup(tmp_path: Path) -> None:
+    import json
+
+    overrides_path = tmp_path / "overrides.json"
+    overrides_path.write_text(
+        json.dumps({"openrouter_model": "anthropic/claude-haiku", "send_policy": "allowlist"})
+    )
+
+    settings = make_settings(tmp_path).model_copy(
+        update={"runtime_overrides_path": overrides_path}
+    )
+    client = TestClient(create_app(settings))
+
+    view = client.get("/api/settings").json()
+    assert view["openrouter"]["model"] == "anthropic/claude-haiku"
+    assert view["send_policy"] == "allowlist"

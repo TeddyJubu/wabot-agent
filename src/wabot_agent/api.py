@@ -18,6 +18,14 @@ from .config import Settings, get_settings
 from .events import EventLog
 from .memory import InboundMessage, MemoryStore
 from .redaction import redact
+from .runtime_overrides import (
+    MUTABLE_FIELDS,
+    SECRET_FIELDS,
+    apply_overrides,
+    load_overrides,
+    mask_secret,
+    save_overrides,
+)
 from .wabot import WabotClient
 
 
@@ -43,9 +51,36 @@ class InboundPayload(BaseModel):
     text: str = ""
 
 
+class SettingsPatch(BaseModel):
+    """Partial update to runtime-mutable settings.
+
+    Any field omitted is unchanged. To clear a secret, pass an empty string.
+    `confirm_allow_all` must be true to set send_policy='allow_all'.
+    """
+
+    openrouter_api_key: str | None = None
+    openrouter_base_url: str | None = None
+    openrouter_model: str | None = None
+    wabot_endpoint: str | None = None
+    wabot_token: str | None = None
+    send_policy: str | None = None
+    allowed_recipients: list[str] | None = None
+    max_agent_turns: int | None = None
+    confirm_allow_all: bool = False
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     settings.ensure_dirs()
+    overrides = load_overrides(settings.runtime_overrides_path)
+    if overrides:
+        try:
+            apply_overrides(settings, overrides)
+        except Exception as exc:
+            print(
+                f"[runtime_overrides] failed to apply overrides at startup: {exc}",
+                flush=True,
+            )
     memory = MemoryStore(settings.db_path)
     event_log = EventLog(settings.log_path)
     wabot = WabotClient(settings.wabot_endpoint, settings.resolved_wabot_token)
@@ -236,7 +271,121 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def recent_runs(limit: int = Query(default=20, ge=0, le=100)) -> list[dict[str, Any]]:
         return memory.recent_runs(limit=limit)
 
+    @app.get("/api/settings", dependencies=[operator_dependency])
+    async def read_settings() -> dict[str, Any]:
+        return _settings_view(settings)
+
+    @app.patch("/api/settings", dependencies=[operator_dependency])
+    async def update_settings(patch: SettingsPatch) -> dict[str, Any]:
+        # Build the override dict from non-None fields only.
+        proposed: dict[str, Any] = {}
+        raw = patch.model_dump(exclude={"confirm_allow_all"}, exclude_none=True)
+        for key, value in raw.items():
+            if key not in MUTABLE_FIELDS:
+                continue
+            if key == "allowed_recipients":
+                cleaned = sorted(
+                    {str(item).strip() for item in (value or []) if str(item).strip()}
+                )
+                proposed[key] = cleaned
+                continue
+            if key in SECRET_FIELDS and isinstance(value, str) and value == "":
+                proposed[key] = None
+                continue
+            proposed[key] = value
+
+        if proposed.get("send_policy") == "allow_all" and not patch.confirm_allow_all:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Setting send_policy=allow_all removes the recipient guard. "
+                    "Pass confirm_allow_all=true to acknowledge."
+                ),
+            )
+
+        # Merge with existing on-disk overrides so partial PATCHes don't clobber
+        # earlier overrides for fields not in this request.
+        merged = load_overrides(settings.runtime_overrides_path)
+        merged.update(proposed)
+
+        # Validate by applying to a snapshot first to surface errors before persisting.
+        try:
+            apply_overrides(settings, proposed)
+        except Exception as exc:  # pydantic ValidationError or other
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+        # Wabot client mirrors settings — refresh the live instance in place.
+        wabot.endpoint = settings.wabot_endpoint.rstrip("/")
+        wabot.token = settings.resolved_wabot_token
+
+        save_overrides(settings.runtime_overrides_path, merged)
+        event_log.write(
+            "settings_updated",
+            {"fields": sorted(proposed.keys())},
+        )
+        return _settings_view(settings)
+
+    @app.post("/api/settings/test/openrouter", dependencies=[operator_dependency])
+    async def test_openrouter() -> dict[str, Any]:
+        if not settings.openrouter_api_key:
+            return {"ok": False, "detail": "OPENROUTER_API_KEY is not configured."}
+        import httpx
+
+        url = settings.openrouter_base_url.rstrip("/") + "/models"
+        headers = {"Authorization": f"Bearer {settings.openrouter_api_key}"}
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(url, headers=headers)
+        except httpx.HTTPError as exc:
+            return {"ok": False, "detail": f"Connection failed: {exc}"}
+        if resp.status_code == 200:
+            return {
+                "ok": True,
+                "detail": f"OpenRouter reachable. Active model: {settings.openrouter_model}",
+            }
+        return {
+            "ok": False,
+            "detail": f"OpenRouter returned HTTP {resp.status_code}: {resp.text[:200]}",
+        }
+
+    @app.post("/api/settings/test/wabot", dependencies=[operator_dependency])
+    async def test_wabot() -> dict[str, Any]:
+        health = await wabot.health()
+        return {
+            "ok": health.ready,
+            "reachable": health.reachable,
+            "logged_in": health.logged_in,
+            "connected": health.connected,
+            "detail": health.detail or (
+                "wabot daemon is reachable and WhatsApp is linked."
+                if health.ready
+                else "wabot reachable but session not ready."
+            ),
+        }
+
     return app
+
+
+def _settings_view(settings: Settings) -> dict[str, Any]:
+    """Build the GET /api/settings response: secrets masked, source-of-truth annotated."""
+    return {
+        "env_source": ".env (immutable) + data/runtime_overrides.json (operator-mutable)",
+        "send_policy": settings.send_policy,
+        "send_policy_choices": ["dry_run", "allowlist", "allow_all"],
+        "allowed_recipients": sorted(settings.allowed_recipients),
+        "max_agent_turns": settings.max_agent_turns,
+        "openrouter": {
+            "api_key": mask_secret(settings.openrouter_api_key),
+            "base_url": settings.openrouter_base_url,
+            "model": settings.openrouter_model,
+            "live": settings.live_model_enabled,
+        },
+        "wabot": {
+            "endpoint": settings.wabot_endpoint,
+            "token": mask_secret(settings.resolved_wabot_token),
+            "token_file": str(settings.wabot_token_file) if settings.wabot_token_file else None,
+        },
+    }
 
 
 def _qr_svg(payload: str) -> bytes:
