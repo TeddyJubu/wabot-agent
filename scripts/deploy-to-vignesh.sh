@@ -12,5 +12,14 @@ rsync -az --delete \
   --exclude '__pycache__/' \
   ./ "$SSH_HOST:$APP_DIR/"
 
-ssh "$SSH_HOST" "cd '$APP_DIR' && uv sync --all-extras && sudo systemctl restart wabot-agent && sudo systemctl status wabot-agent --no-pager"
+# APP_DIR is passed as $1 (not interpolated) to prevent remote injection if it contains shell-meta chars.
+APP_DIR_Q=$(printf '%q' "$APP_DIR")
+ssh "$SSH_HOST" bash -l -s -- "$APP_DIR_Q" <<'REMOTE'
+set -euo pipefail
+export PATH="$HOME/.local/bin:$HOME/.cargo/bin:/home/linuxbrew/.linuxbrew/bin:$PATH"
+cd -- "$1"
+uv sync --all-extras
+sudo systemctl restart wabot-agent
+sudo systemctl status wabot-agent --no-pager
+REMOTE
 
