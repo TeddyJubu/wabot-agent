@@ -148,7 +148,8 @@ svg {
 
 .status-grid article,
 .chat-panel,
-.runs-panel {
+.runs-panel,
+.setup-panel {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -168,6 +169,72 @@ svg {
 
 .status-grid strong {
   font-size: 18px;
+}
+
+.setup-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px auto;
+  gap: 18px;
+  align-items: center;
+  margin-bottom: 18px;
+  padding: 16px;
+}
+
+.setup-copy span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.setup-copy h2 {
+  margin-top: 5px;
+  font-size: 20px;
+}
+
+.setup-copy p {
+  color: var(--muted);
+  line-height: 1.45;
+  margin-top: 8px;
+}
+
+.qr-surface {
+  width: 220px;
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: #fbfcfe;
+  overflow: hidden;
+}
+
+.qr-surface img {
+  width: 100%;
+  height: 100%;
+  padding: 10px;
+  object-fit: contain;
+}
+
+#pairing-empty {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.secondary-button {
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0 13px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .workspace {
@@ -321,8 +388,14 @@ button[type="submit"] {
   }
 
   .status-grid,
-  .workspace {
+  .workspace,
+  .setup-panel {
     grid-template-columns: 1fr;
+  }
+
+  .qr-surface {
+    width: min(260px, 100%);
+    justify-self: start;
   }
 
   .chat-panel {
@@ -337,7 +410,8 @@ button[type="submit"] {
 
   .sidebar,
   .topbar,
-  .composer {
+  .composer,
+  .setup-panel {
     grid-template-columns: 1fr;
     flex-direction: column;
     align-items: stretch;
@@ -351,4 +425,3 @@ button[type="submit"] {
     gap: 10px;
   }
 }
-

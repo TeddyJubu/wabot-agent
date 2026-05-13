@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from wabot_agent.api import create_app
+from wabot_agent.api import _qr_svg, create_app
 from wabot_agent.config import Settings
 
 
@@ -41,6 +41,26 @@ def test_health_and_ready(tmp_path: Path) -> None:
     ready = client.get("/ready").json()
     assert ready["live_model"] is False
     assert ready["send_policy"] == "dry_run"
+
+
+def test_pairing_endpoint_reports_missing_token(tmp_path: Path) -> None:
+    client = TestClient(create_app(make_settings(tmp_path)))
+
+    pairing = client.get("/api/whatsapp/pairing")
+    svg = client.get("/api/whatsapp/pairing.svg")
+
+    assert pairing.status_code == 200
+    assert pairing.json()["supported"] is False
+    assert pairing.json()["qr_available"] is False
+    assert svg.status_code == 404
+
+
+def test_qr_svg_renderer() -> None:
+    svg = _qr_svg("pairing-code")
+
+    assert svg.startswith(b"<?xml")
+    assert b"<svg" in svg
+    assert b"path" in svg
 
 
 def test_operator_endpoints_require_token_when_configured(tmp_path: Path) -> None:

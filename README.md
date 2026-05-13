@@ -59,9 +59,13 @@ Secrets stay in `.env`, which is ignored by git. Do not paste OpenRouter keys in
 
 The current environment prefix is `WABOT_AGENT_*`. Existing `VIGNESH_*` variables are still accepted as backward-compatible aliases during migration.
 
-## Connect wabot
+## Connect WhatsApp
 
-Install and pair `wabot` first:
+`wabot` uses the WhatsApp Web linked-device protocol through `whatsmeow`. It does not automate the browser tab at `web.whatsapp.com`; it creates a linked device that your phone can remove at any time from WhatsApp settings.
+
+The dashboard includes a WhatsApp linking panel. With a recent `wabot` daemon, open `/`, scan the QR shown under **WhatsApp Link**, and wait for readiness to switch to connected.
+
+Install and pair `wabot` first when bootstrapping manually:
 
 ```bash
 git clone https://github.com/TeddyJubu/wabot.git
@@ -77,10 +81,13 @@ The agent expects:
 ```bash
 WABOT_ENDPOINT=http://127.0.0.1:7777
 WABOT_TOKEN=...
+WABOT_TOKEN_FILE=~/.config/wabot/token
 WABOT_INBOUND_TOKEN=...
 ```
 
 Use `WABOT_HTTP_ADDR=127.0.0.1:7777` for the daemon. Do not expose the wabot daemon directly to the public internet.
+
+Older `wabot` builds only print QR codes to stdout or `journalctl -u wabot -f`. Upgrade `wabot` if the dashboard says `/pairing/qr` is unavailable.
 
 ## Send Policy
 
@@ -113,6 +120,8 @@ The service stores that token in an HTTP-only same-site cookie for same-origin d
 ```text
 GET  /health
 GET  /ready
+GET  /api/whatsapp/pairing
+GET  /api/whatsapp/pairing.svg
 POST /api/chat
 GET  /api/runs
 GET  /api/memory/{contact}

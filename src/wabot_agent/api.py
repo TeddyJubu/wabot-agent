@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import io
 import secrets
 from pathlib import Path
 from typing import Any
 
+import qrcode
 import uvicorn
 from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from qrcode.image.svg import SvgPathImage
 
 from .agent import run_agent
 from .config import Settings, get_settings
@@ -45,7 +48,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings.ensure_dirs()
     memory = MemoryStore(settings.db_path)
     event_log = EventLog(settings.log_path)
-    wabot = WabotClient(settings.wabot_endpoint, settings.wabot_token)
+    wabot = WabotClient(settings.wabot_endpoint, settings.resolved_wabot_token)
 
     app = FastAPI(title="wabot-agent", version="0.1.0")
     app.state.settings = settings
@@ -125,6 +128,41 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
         )
 
+    @app.get("/api/whatsapp/pairing", dependencies=[operator_dependency])
+    async def whatsapp_pairing() -> dict[str, Any]:
+        pairing = await wabot.pairing_qr()
+        return redact(
+            {
+                "supported": pairing.supported,
+                "reachable": pairing.reachable,
+                "logged_in": pairing.logged_in,
+                "connected": pairing.connected,
+                "qr_available": pairing.qr_available,
+                "event": pairing.event,
+                "updated_at": pairing.updated_at,
+                "expires_at": pairing.expires_at,
+                "detail": pairing.detail,
+            }
+        )
+
+    @app.get(
+        "/api/whatsapp/pairing.svg",
+        dependencies=[operator_dependency],
+        include_in_schema=False,
+        response_model=None,
+    )
+    async def whatsapp_pairing_svg() -> Response:
+        pairing = await wabot.pairing_qr()
+        if not pairing.qr:
+            raise HTTPException(
+                status_code=404, detail=pairing.detail or "Pairing QR is unavailable."
+            )
+        return Response(
+            content=_qr_svg(pairing.qr),
+            media_type="image/svg+xml",
+            headers={"Cache-Control": "no-store"},
+        )
+
     @app.post("/api/chat", response_model=ChatResponse, dependencies=[operator_dependency])
     async def chat(payload: ChatRequest) -> ChatResponse:
         result = await run_agent(
@@ -199,6 +237,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return memory.recent_runs(limit=limit)
 
     return app
+
+
+def _qr_svg(payload: str) -> bytes:
+    qr = qrcode.QRCode(border=2, error_correction=qrcode.constants.ERROR_CORRECT_M)
+    qr.add_data(payload)
+    qr.make(fit=True)
+    image = qr.make_image(image_factory=SvgPathImage)
+    out = io.BytesIO()
+    image.save(out)
+    return out.getvalue()
 
 
 def _verify_inbound_auth(settings: Settings, authorization: str | None) -> None:

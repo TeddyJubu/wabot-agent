@@ -11,6 +11,10 @@ const runCount = document.querySelector("#run-count");
 const form = document.querySelector("#chat-form");
 const textarea = document.querySelector("#message");
 const refresh = document.querySelector("#refresh");
+const refreshQR = document.querySelector("#refresh-qr");
+const pairingDetail = document.querySelector("#pairing-detail");
+const pairingQR = document.querySelector("#pairing-qr");
+const pairingEmpty = document.querySelector("#pairing-empty");
 
 function setStatus(el, text, level = "warn") {
   el.textContent = text;
@@ -33,6 +37,43 @@ async function loadReady() {
   } catch (error) {
     setStatus(statusEls.model, "Error", "bad");
     setStatus(statusEls.wabot, "Error", "bad");
+  }
+}
+
+async function loadPairing() {
+  try {
+    const res = await fetch("/api/whatsapp/pairing");
+    const data = await res.json();
+    if (!data.supported) {
+      pairingDetail.textContent = data.detail || "Upgrade wabot to enable browser pairing.";
+      pairingQR.hidden = true;
+      pairingEmpty.hidden = false;
+      pairingEmpty.textContent = "Upgrade wabot";
+      return;
+    }
+    if (data.logged_in && data.connected) {
+      pairingDetail.textContent = "WhatsApp is linked and connected.";
+      pairingQR.hidden = true;
+      pairingEmpty.hidden = false;
+      pairingEmpty.textContent = "Connected";
+      return;
+    }
+    if (data.qr_available) {
+      pairingDetail.textContent = "Open WhatsApp on your phone and scan this linked-device QR.";
+      pairingQR.src = `/api/whatsapp/pairing.svg?t=${Date.now()}`;
+      pairingQR.hidden = false;
+      pairingEmpty.hidden = true;
+      return;
+    }
+    pairingDetail.textContent = data.detail || "Waiting for a fresh pairing QR.";
+    pairingQR.hidden = true;
+    pairingEmpty.hidden = false;
+    pairingEmpty.textContent = data.reachable ? "Waiting for QR" : "wabot offline";
+  } catch (error) {
+    pairingDetail.textContent = `Pairing check failed: ${error.message}`;
+    pairingQR.hidden = true;
+    pairingEmpty.hidden = false;
+    pairingEmpty.textContent = "Unavailable";
   }
 }
 
@@ -86,10 +127,20 @@ form.addEventListener("submit", async (event) => {
 
 refresh.addEventListener("click", () => {
   loadReady();
+  loadPairing();
   loadRuns();
+});
+
+refreshQR.addEventListener("click", () => {
+  loadPairing();
+  loadReady();
 });
 
 addMessage("agent", "Ready. Send policy is fail-closed unless the VPS is configured otherwise.");
 loadReady();
+loadPairing();
 loadRuns();
-
+setInterval(() => {
+  loadReady();
+  loadPairing();
+}, 10000);

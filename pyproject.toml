@@ -12,6 +12,7 @@ dependencies = [
   "pydantic>=2.12.0",
   "pydantic-settings>=2.12.0",
   "python-multipart>=0.0.20",
+  "qrcode>=8.2",
   "uvicorn[standard]>=0.38.0",
 ]
 

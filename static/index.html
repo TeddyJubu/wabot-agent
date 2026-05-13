@@ -19,6 +19,7 @@
         </div>
         <nav aria-label="Primary">
           <a class="active" href="#chat">Console</a>
+          <a href="#whatsapp">WhatsApp</a>
           <a href="#status">Readiness</a>
           <a href="#runs">Runs</a>
         </nav>
@@ -55,6 +56,25 @@
             <span>Memory</span>
             <strong id="memory-state">Checking</strong>
           </article>
+        </section>
+
+        <section id="whatsapp" class="setup-panel" aria-label="WhatsApp linking">
+          <div class="setup-copy">
+            <span>WhatsApp Link</span>
+            <h2>Linked Device</h2>
+            <p id="pairing-detail">Checking pairing status.</p>
+          </div>
+          <div class="qr-surface">
+            <img id="pairing-qr" alt="WhatsApp pairing QR code" hidden />
+            <div id="pairing-empty">No QR available</div>
+          </div>
+          <button id="refresh-qr" class="secondary-button" type="button">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 12a8 8 0 1 1-2.34-5.66" />
+              <path d="M20 4v6h-6" />
+            </svg>
+            Refresh QR
+          </button>
         </section>
 
         <section id="chat" class="workspace">

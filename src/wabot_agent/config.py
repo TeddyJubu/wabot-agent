@@ -67,6 +67,9 @@ class Settings(BaseSettings):
 
     wabot_endpoint: str = Field(default="http://127.0.0.1:7777", alias="WABOT_ENDPOINT")
     wabot_token: str | None = Field(default=None, alias="WABOT_TOKEN")
+    wabot_token_file: Path | None = Field(
+        default=Path("~/.config/wabot/token"), alias="WABOT_TOKEN_FILE"
+    )
     wabot_inbound_token: str | None = Field(default=None, alias="WABOT_INBOUND_TOKEN")
     operator_token: str | None = Field(
         default=None,
@@ -104,6 +107,19 @@ class Settings(BaseSettings):
     @property
     def live_model_enabled(self) -> bool:
         return bool(self.openrouter_api_key and not self.offline_mode)
+
+    @property
+    def resolved_wabot_token(self) -> str | None:
+        if self.wabot_token:
+            return self.wabot_token
+        if not self.wabot_token_file:
+            return None
+        token_path = self.wabot_token_file.expanduser()
+        try:
+            token = token_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            return None
+        return token or None
 
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)

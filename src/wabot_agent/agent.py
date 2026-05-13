@@ -79,7 +79,7 @@ async def run_agent(
     context = RuntimeContext(
         settings=settings,
         memory=memory,
-        wabot=wabot or WabotClient(settings.wabot_endpoint, settings.wabot_token),
+        wabot=wabot or WabotClient(settings.wabot_endpoint, settings.resolved_wabot_token),
         event_log=event_log,
         run_id=run_id,
         inbound=inbound,
