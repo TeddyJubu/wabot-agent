@@ -38,12 +38,32 @@ Operator / wabot inbound webhook
 ```bash
 uv sync --all-extras
 cp .env.example .env
+./scripts/build-web.sh        # builds the React SPA into static/
 uv run python main.py
 ```
 
 Open [http://127.0.0.1:8787](http://127.0.0.1:8787).
 
 With no `OPENROUTER_API_KEY`, the service runs in offline mode. This is intentional: the app can boot, render, and test without network credentials.
+
+### Frontend dev (HMR)
+
+The operator dashboard is a React SPA in `web/`. For hot module reload while developing:
+
+```bash
+cd web && npm install         # one-time
+cd web && npm run dev         # Vite at http://127.0.0.1:5173
+# in another terminal:
+uv run python main.py         # FastAPI at http://127.0.0.1:8787
+```
+
+Vite proxies `/api`, `/whatsapp`, `/health`, and `/ready` back to FastAPI on 8787.
+
+To ship a fresh build into the static bundle (also called by `deploy-to-vignesh.sh`):
+
+```bash
+./scripts/build-web.sh
+```
 
 ## Connect OpenRouter
 
