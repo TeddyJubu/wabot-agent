@@ -34,11 +34,27 @@ def _truncate(body: Any, limit: int = _BODY_PREVIEW_MAX) -> str:
 
 
 def _wabot_status(result: dict[str, Any]) -> dict[str, Any]:
-    ok = bool(result.get("ok"))
-    data: dict[str, Any] = {"status": "ok" if ok else "bad"}
-    for key in ("version", "uptime_s", "last_seen_s", "error"):
-        if key in result:
-            data[key] = result[key]
+    """Build a wabot_status card from a `wabot_health` tool result.
+
+    `wabot_health` returns `{reachable, logged_in, connected, ready, detail}`.
+    Tri-state mapping:
+      - ready (all three flags healthy) → ok
+      - reachable but not ready          → warn (daemon up, WhatsApp not linked)
+      - not reachable                    → bad  (daemon down)
+    `detail` surfaces the failure reason whenever status != ok.
+    """
+    ready = bool(result.get("ready"))
+    reachable = bool(result.get("reachable"))
+    if ready:
+        status = "ok"
+    elif reachable:
+        status = "warn"
+    else:
+        status = "bad"
+    data: dict[str, Any] = {"status": status}
+    detail = result.get("detail")
+    if status != "ok" and isinstance(detail, str) and detail:
+        data["error"] = detail
     return {
         "kind": "wabot_status",
         "data": data,
@@ -48,38 +64,64 @@ def _wabot_status(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+_POLICY_NAMES = {"dry_run", "allowlist", "allow_all"}
+
+
 def _send_confirm(tool_name: str, result: dict[str, Any]) -> dict[str, Any]:
-    policy = result.get("policy", "dry_run")
-    delivered = bool(result.get("delivered", False))
-    needs_approval = policy != "dry_run" and not delivered
+    """Build a send_confirm card from a `send_whatsapp_*` tool result.
+
+    By the time a tool_result event fires, the send already either succeeded
+    (`sent=True`) or was blocked (`sent=False`) — nothing to approve. The
+    pre-send approval prompt is emitted by the model's text channel per the
+    system prompt; this builder only reflects the *outcome*.
+
+    Policy resolution is best-effort because the tool only echoes back
+    `policy` on the success path. On the blocked path it echoes `reason`,
+    which is sometimes a policy name (dry_run/allow_all/allowlist) and
+    sometimes a different sentinel like `recipient_not_allowlisted`.
+    """
+    sent = bool(result.get("sent"))
+    raw_policy = result.get("policy")
+    if not isinstance(raw_policy, str) or raw_policy not in _POLICY_NAMES:
+        reason = result.get("reason")
+        raw_policy = reason if isinstance(reason, str) and reason in _POLICY_NAMES else "dry_run"
     data: dict[str, Any] = {
-        "policy": policy,
+        "policy": raw_policy,
         "recipient_masked": _mask_recipient(result.get("to")),
-        "body_preview": _truncate(result.get("body")),
-        "needs_approval": needs_approval,
-        "delivered": delivered,
+        # Tools don't currently echo the message body; prefer an explicit
+        # `body_preview` if a future tool version adds one.
+        "body_preview": _truncate(result.get("body_preview") or result.get("body")),
+        "needs_approval": False,
+        "delivered": sent,
     }
     if tool_name == "send_whatsapp_image":
         data["image_path"] = result.get("path")
-        data["caption_preview"] = _truncate(result.get("caption"))
-    if needs_approval:
-        actions = [
-            {"id": "approve", "label": "Approve", "tool": tool_name, "args": {}},
-            {"id": "cancel", "label": "Cancel", "tool": None, "args": {}},
-        ]
-    else:
-        actions = []
-    return {"kind": "send_confirm", "data": data, "actions": actions}
+        data["caption_preview"] = _truncate(
+            result.get("caption_preview") or result.get("caption")
+        )
+    return {"kind": "send_confirm", "data": data, "actions": []}
 
 
 def _memory(result: dict[str, Any]) -> dict[str, Any]:
+    """Build a memory card from a `recall_contact_memory` tool result.
+
+    Stored facts are `{key, value, source, updated_at}` per the SQLite
+    schema. The frontend `MemoryCard` consumes `{id, text}` per fact, so
+    derive `id=key` (unique per contact, stable across re-fetches) and
+    `text="key: value"` for a human-readable rendering.
+    """
     raw_facts = result.get("facts")
     facts_iter: list[Any] = raw_facts if isinstance(raw_facts, list) else []
-    safe_facts = [
-        {"id": str(f.get("id", "")), "text": str(f.get("text", ""))}
-        for f in facts_iter
-        if isinstance(f, dict)
-    ]
+    safe_facts: list[dict[str, str]] = []
+    for f in facts_iter:
+        if not isinstance(f, dict):
+            continue
+        key = str(f.get("key", "") or "")
+        value = str(f.get("value", "") or "")
+        if not key and not value:
+            continue
+        text = f"{key}: {value}" if key and value else (key or value)
+        safe_facts.append({"id": key or text, "text": text})
     return {
         "kind": "memory",
         "data": {

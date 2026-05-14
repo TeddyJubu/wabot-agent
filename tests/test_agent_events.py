@@ -47,7 +47,16 @@ def test_tool_output_attaches_ui_envelope_for_wabot_health() -> None:
     state: dict[str, str] = {}
     a = _translate_stream_event(_call("wabot_health", "c1"), state)
     b = _translate_stream_event(
-        _output("c1", {"ok": True, "version": "0.4.2", "uptime_s": 10, "last_seen_s": 1}),
+        _output(
+            "c1",
+            {
+                "reachable": True,
+                "logged_in": True,
+                "connected": True,
+                "ready": True,
+                "detail": None,
+            },
+        ),
         state,
     )
     assert a[0]["type"] == "tool_call"
@@ -97,4 +106,5 @@ def test_scalar_tool_output_is_redacted() -> None:
     assert "Bearer sk-secret-123" not in result
     assert "Bearer [REDACTED]" in result
     assert "sk-or-DEADBEEF" not in result
-    assert "5550101234" not in result.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+    digits_only = "".join(ch for ch in result if ch.isdigit())
+    assert "5550101234" not in digits_only
