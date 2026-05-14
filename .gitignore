@@ -24,3 +24,8 @@ evals/results/*
 store.db
 wabot.env
 sends.log
+
+# Frontend (web/) — built into static/ via scripts/build-web.sh
+web/node_modules/
+web/dist/
+web/.vite/

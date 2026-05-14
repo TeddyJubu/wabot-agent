@@ -1,0 +1,51 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-app: 60 12% 97%;
+  --bg-card: 0 0% 100%;
+  --fg-default: 222 17% 9%;
+  --fg-muted: 225 5% 41%;
+  --border: 222 17% 9% / 0.08;
+  --accent: 262 83% 58%;
+  --accent-fg: 0 0% 100%;
+  --ok: 160 84% 39%;
+  --warn: 38 92% 50%;
+  --bad: 0 84% 60%;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-app: 222 17% 8%;
+    --bg-card: 222 17% 12%;
+    --fg-default: 226 15% 91%;
+    --fg-muted: 222 8% 64%;
+    --border: 0 0% 100% / 0.08;
+    --accent: 262 83% 65%;
+    --accent-fg: 0 0% 100%;
+    --ok: 160 84% 45%;
+    --warn: 38 92% 55%;
+    --bad: 0 84% 65%;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  font-feature-settings: "cv11", "ss01";
+}
+
+@keyframes shimmer {
+  0% { opacity: 0.55; }
+  50% { opacity: 1; }
+  100% { opacity: 0.55; }
+}
+
+.shimmer {
+  animation: shimmer 1.4s ease-in-out infinite;
+}
