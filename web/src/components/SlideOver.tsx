@@ -43,7 +43,13 @@ export default function SlideOver({ open, onClose, title, children }: Props) {
             <X className="size-4" />
           </button>
         </header>
-        <div className="h-[calc(100%-49px)] overflow-y-auto p-4">{children}</div>
+        {/* Mount children only while open so each reopen remounts the
+            panel and re-fires its `useEffect(..., [])` fetches. Mounting
+            them unconditionally would freeze the very first fetch's
+            result (success or error) across every subsequent reopen. */}
+        <div className="h-[calc(100%-49px)] overflow-y-auto p-4">
+          {open ? children : null}
+        </div>
       </aside>
     </div>
   );

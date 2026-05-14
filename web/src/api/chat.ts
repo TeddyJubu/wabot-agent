@@ -62,6 +62,11 @@ export async function postChatStream(
       }
     }
   }
+  // Flush any buffered UTF-8 bytes the decoder held back on chunk
+  // boundaries; without this the trailing event can be truncated when
+  // the final JSON line straddles two read() chunks or the connection
+  // ends mid-codepoint.
+  buffer += decoder.decode();
   const tail = buffer.trim();
   if (tail) {
     try {
