@@ -47,7 +47,7 @@ The high-level flow is **operator/inbound → FastAPI → Agents SDK runner → 
 Key modules in [src/wabot_agent/](src/wabot_agent/):
 
 - [agent.py](src/wabot_agent/agent.py) — builds the `Agent[RuntimeContext]` with instructions, model, tools, and MCP servers; `run_agent()` is the single entry point used by both the chat API and the inbound webhook. Tracing is disabled globally (`set_tracing_disabled(True)`).
-- [api.py](src/wabot_agent/api.py) — FastAPI app. Routes: `/health`, `/ready`, `/api/chat`, `/api/runs`, `/api/memory/{contact}`, `/api/whatsapp/pairing(.svg)`, `/api/settings` (GET/PATCH), `/api/settings/test/{openrouter,wabot}`, `/whatsapp/inbound`. Auth uses `WABOT_AGENT_OPERATOR_TOKEN` via HTTP-only same-site cookie for dashboard, or `X-Operator-Token` / `Authorization: Bearer` for direct callers. The inbound webhook checks `WABOT_INBOUND_TOKEN` separately. `/api/settings` always masks secrets in GET responses (returns `{set, preview}` records via `mask_secret()`) — raw key values never round-trip back over the wire.
+- [api.py](src/wabot_agent/api.py) — FastAPI app. Routes: `/health`, `/ready`, `/api/chat`, `/api/chat/stream` (NDJSON), `/api/stream` (SSE event hub), `/api/runs`, `/api/memory/{contact}`, `/api/whatsapp/pairing(.svg)`, `/api/settings` (GET/PATCH), `/api/settings/test/{openrouter,wabot}`, `/whatsapp/inbound`. Auth uses `WABOT_AGENT_OPERATOR_TOKEN` via HTTP-only same-site cookie for dashboard, or `X-Operator-Token` / `Authorization: Bearer` for direct callers. The inbound webhook checks `WABOT_INBOUND_TOKEN` separately. `/api/settings` always masks secrets in GET responses (returns `{set, preview}` records via `mask_secret()`) — raw key values never round-trip back over the wire.
 - [config.py](src/wabot_agent/config.py) — Pydantic `Settings`. **Internal** settings (env, host, port, paths, send_policy, allowed_recipients, max_agent_turns, operator_token, etc.) accept both `WABOT_AGENT_*` and legacy `VIGNESH_*` via `AliasChoices` — **do not "clean up" the dual prefixes**, they're an explicit backward-compat migration aid. **External-system** settings keep the names of the systems they configure: `OPENROUTER_*` for the model provider and `WABOT_*` (e.g. `WABOT_TOKEN`, `WABOT_ENDPOINT`) for the wabot daemon — these have single aliases, no `WABOT_AGENT_` prefix and no `VIGNESH_` alias. `validate_assignment=True` is enabled so runtime mutations (via [runtime_overrides.py](src/wabot_agent/runtime_overrides.py)) are validated by Pydantic on every `setattr`.
 - [runtime_overrides.py](src/wabot_agent/runtime_overrides.py) — operator-mutable settings layer on top of `.env`. Loads `data/runtime_overrides.json` at boot and applies to live `Settings`. The `/api/settings` PATCH endpoint writes here. `MUTABLE_FIELDS` is an allowlist — anything outside it is silently dropped on read/write (defends against mass-assignment via the API). `.env` remains the immutable VPS-bootstrap source of truth; overrides take precedence at runtime.
 - [tools.py](src/wabot_agent/tools.py) — the narrow tool set exposed to the model: `wabot_health`, `send_whatsapp_text`, `send_whatsapp_image`, `recall_contact_memory`, `remember_contact_fact`, `recall_agent_notes`, `remember_agent_note`, `list_local_skills`, `read_local_skill`. **All send-policy and media-path enforcement lives here**, not in the prompt.
@@ -80,16 +80,49 @@ These constraints are non-obvious and should shape any change:
 - Use the existing fixtures in [tests/conftest.py](tests/conftest.py) (`settings`, `memory`, etc.) which already wire offline mode and a temp dir; don't construct `Settings()` ad hoc in new tests.
 - The eval harness ([evals/run_local.py](evals/run_local.py)) reads [evals/cases.jsonl](evals/cases.jsonl) and writes `evals/results/latest.jsonl`. Add new cases there rather than inventing a parallel harness.
 
+## Frontend
+
+The operator dashboard is a Vite + React + TypeScript SPA in [web/](web/). FastAPI keeps serving the *built* assets from `static/`; the build pipeline mirrors `web/dist/` into `static/`:
+
+```bash
+./scripts/build-web.sh   # cd web && npm ci && npm run build && rsync into static/
+```
+
+For local development with HMR, run Vite and FastAPI side-by-side:
+
+```bash
+cd web && npm install      # one-time
+cd web && npm run dev      # Vite at http://127.0.0.1:5173, proxies /api -> 8787
+# in another terminal:
+uv run python main.py      # FastAPI at http://127.0.0.1:8787
+```
+
+Key modules in [web/src/](web/src/):
+
+- `App.tsx` - wires `<TopBar />`, `<Conversation />`, `<PromptInput />`, three `<SlideOver />` panels; submits to `/api/chat/stream` and dispatches NDJSON deltas + tool ui envelopes into the Zustand store.
+- `store/index.ts` - single Zustand store for `messages`, `readiness`, `slideOver`.
+- `components/tool-cards/` - `ToolCard.tsx` switches on `kind` and renders one of four polished card variants (`wabot_status`, `pairing_qr`, `send_confirm`, `memory`) sourced from the server-built `ui` field.
+- `components/ai-elements/` - hand-rolled chat primitives (Conversation, Message, PromptInput, Suggestion). Edit freely; they live in the repo.
+- `components/slide-overs/` - `PairingPanel`, `RunsPanel`, `SettingsPanel`. Settings respects the nested `/api/settings` shape and the "empty input means no change" rule for secrets.
+- `hooks/useSlashCommands.ts` - `/qr`, `/skills`, `/runs`, `/settings`, `/policy`, `/health`. Slash menu opens when the first token starts with `/`.
+
+The `ui` field on tool-result NDJSON events is built server-side by [src/wabot_agent/ui_envelopes.py](src/wabot_agent/ui_envelopes.py). Adding a new card means: register a builder in `_BUILDERS`, add a TS type in `web/src/types/ui-envelope.ts`, add a child component under `tool-cards/`, and add the case to `ToolCard.tsx`.
+
+The send-confirmation card is **not** the security boundary. Server-side `_is_send_allowed()` remains authoritative; the card is a transparency layer that pauses the model on non-dry-run sends and lets the operator type "approved" to continue.
+
+Frontend tests use Vitest (`cd web && npm run test`). Snapshot tests for the four ToolCard variants live in [web/src/__tests__/tool-cards.test.tsx](web/src/__tests__/tool-cards.test.tsx).
+
 ## Repository Layout
 
 ```text
 src/wabot_agent/   # application code (see module map above)
-static/            # operator dashboard (vanilla HTML/JS)
+static/            # built React SPA (auto-generated by scripts/build-web.sh)
+web/               # React SPA source (Vite + Tailwind, builds into static/)
 skills/            # local agent skills as SKILL.md files
 configs/           # MCP config examples (disabled by default)
 deploy/systemd/    # wabot-agent.service unit
-scripts/           # bootstrap-vps.sh, deploy-to-vignesh.sh, generate_diagrams.py
-tests/             # offline test suite
+scripts/           # bootstrap-vps.sh, build-web.sh, deploy-to-vignesh.sh, generate_diagrams.py
+tests/             # offline Python test suite
 evals/             # local eval harness + cases
-docs/              # architecture diagrams + prompt notes
+docs/              # architecture diagrams + prompt notes + superpowers/specs+plans
 ```

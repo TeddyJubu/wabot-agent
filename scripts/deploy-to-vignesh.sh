@@ -4,7 +4,12 @@ set -euo pipefail
 SSH_HOST="${SSH_HOST:-vignesh}"
 APP_DIR="${APP_DIR:-/opt/wabot-agent}"
 
+# Build the React SPA into static/ before rsyncing.
+"$(dirname "$0")/build-web.sh"
+
 rsync -az --delete \
+  --exclude 'web/node_modules/' \
+  --exclude 'web/dist/' \
   --exclude '.git' \
   --exclude '.venv/' \
   --exclude '.env' \

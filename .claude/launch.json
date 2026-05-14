@@ -2,10 +2,14 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "wabot-agent",
+      "name": "wabot-agent-offline",
       "runtimeExecutable": "uv",
       "runtimeArgs": ["run", "python", "main.py"],
-      "port": 8788
+      "port": 8787,
+      "env": {
+        "WABOT_AGENT_OFFLINE_MODE": "true",
+        "WABOT_AGENT_OPERATOR_TOKEN": ""
+      }
     }
   ]
 }

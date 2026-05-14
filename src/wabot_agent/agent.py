@@ -18,6 +18,7 @@ from .models import build_model, model_settings
 from .redaction import redact
 from .skills import render_skill_summary
 from .tools import RuntimeContext, core_tools
+from .ui_envelopes import build_ui_envelope
 from .wabot import WabotClient
 
 set_tracing_disabled(True)
@@ -40,6 +41,11 @@ Operating rules:
 - Respect rate limits and avoid bulk/spam behavior.
 - If an MCP tool or skill could change files, run shell commands, or affect external systems,
   treat it as privileged and prefer a brief plan unless policy explicitly allows it.
+- Before calling send_whatsapp_text or send_whatsapp_image when the active send_policy is not
+  dry_run, FIRST reply with a one-line summary of the intended send (recipient and short body)
+  and STOP. Wait for the operator to reply "approved" (or equivalent affirmative) before
+  invoking the send tool. If they decline or stay silent, do not send. The frontend renders a
+  confirmation card from the tool result; do not describe the card's JSON to the user.
 """
 
 
@@ -190,8 +196,9 @@ async def run_agent_streamed(
                     session=sqlite_session,
                 )
                 try:
+                    state: dict[str, str] = {}
                     async for event in stream_result.stream_events():
-                        for payload in _translate_stream_event(event):
+                        for payload in _translate_stream_event(event, state):
                             yield payload
                 except Exception as exc:  # noqa: BLE001 — surface but cleanup
                     errored = exc
@@ -260,13 +267,22 @@ async def run_agent_streamed(
     }
 
 
-def _translate_stream_event(event: Any) -> list[dict[str, Any]]:
+def _translate_stream_event(
+    event: Any, state: dict[str, str] | None = None
+) -> list[dict[str, Any]]:
     """Convert one Agents SDK StreamEvent into zero or more NDJSON payloads.
 
     Tool-call args are passed through `redact()` before they go on the wire —
     the model can emit raw user input or sensitive arguments as part of
     function calls, and these should never reach the operator UI unredacted.
+
+    `state` carries call_id -> tool_name across successive events in one run,
+    so that tool_output events can attach the matching ui envelope (the
+    Agents-SDK output item doesn't carry the tool name directly). Callers
+    that don't care about ui envelopes can omit it.
     """
+    if state is None:
+        state = {}
     out: list[dict[str, Any]] = []
     etype = getattr(event, "type", None)
 
@@ -296,18 +312,62 @@ def _translate_stream_event(event: Any) -> list[dict[str, Any]]:
             call_id = getattr(item, "call_id", None)
             if call_id:
                 payload["call_id"] = str(call_id)
+                state[str(call_id)] = str(tool_name)
             out.append(payload)
         elif name == "tool_output" and item is not None:
-            # ToolCallOutputItem doesn't carry the tool name directly; the UI
-            # uses the call_id to pair this back to its tool_call event.
             call_id = getattr(item, "call_id", None)
-            payload2: dict[str, Any] = {"type": "tool_result", "ok": _tool_output_ok(item)}
+            tool_name = state.get(str(call_id)) if call_id else None
+            raw_output = _extract_tool_output(item)
+            payload2: dict[str, Any] = {
+                "type": "tool_result",
+                "ok": _tool_output_ok(item),
+            }
             if call_id:
                 payload2["call_id"] = str(call_id)
+            if tool_name:
+                payload2["name"] = tool_name
+            if isinstance(raw_output, dict):
+                envelope = build_ui_envelope(tool_name or "", raw_output)
+                if envelope is not None:
+                    payload2["ui"] = envelope
+                payload2["result"] = redact(raw_output)
+            elif isinstance(raw_output, list):
+                payload2["result"] = redact(raw_output)
+            elif raw_output is not None:
+                # Scalar outputs (typically strings from MCP or error payloads) must
+                # also go through redact() — otherwise Bearer tokens, OpenRouter keys,
+                # and phone numbers in plain-string tool results leak unredacted to
+                # the browser stream. redact() is identity on numbers/bools.
+                payload2["result"] = redact(raw_output)
             out.append(payload2)
         return out
 
     return out
+
+
+def _extract_tool_output(item: Any) -> Any:
+    """Pull the tool result payload off a ToolCallOutputItem.
+
+    Different SDK versions expose it as `output`, `raw_item.output`, or a
+    JSON-encoded string on either. We try cheap paths first, parse strings
+    where possible, and return None if nothing usable surfaces.
+    """
+    for getter in (
+        lambda i: getattr(i, "output", None),
+        lambda i: (getattr(i, "raw_item", None) or {}).get("output")
+        if isinstance(getattr(i, "raw_item", None), dict)
+        else None,
+    ):
+        candidate = getter(item)
+        if candidate is None:
+            continue
+        if isinstance(candidate, str):
+            try:
+                return json.loads(candidate)
+            except (ValueError, TypeError):
+                return candidate
+        return candidate
+    return None
 
 
 def _extract_tool_args(raw_item: Any) -> Any:
