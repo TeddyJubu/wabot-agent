@@ -27,7 +27,14 @@ export default function SettingsPanel() {
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     setStatus("Saving…");
-    const body: Record<string, unknown> = { send_policy: policy };
+    const body: Record<string, unknown> = {};
+    if (policy !== view.send_policy) {
+      body.send_policy = policy;
+      // confirm_allow_all is only meaningful on transition into allow_all.
+      // The radio-click handler gathered fresh window.confirm() consent then;
+      // re-saving with policy already at allow_all must not implicitly renew it.
+      if (policy === "allow_all") body.confirm_allow_all = true;
+    }
     if (recipients !== view.allowed_recipients.join(", ")) {
       body.allowed_recipients = recipients
         .split(/[,\n]+/)
@@ -37,7 +44,6 @@ export default function SettingsPanel() {
     for (const [key, value] of Object.entries(draft)) {
       if (value !== "") body[key] = value;
     }
-    if (policy === "allow_all") body.confirm_allow_all = true;
     try {
       await patchSettings(body);
       setStatus("Saved.");

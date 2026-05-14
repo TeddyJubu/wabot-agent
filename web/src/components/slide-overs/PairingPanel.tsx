@@ -26,10 +26,14 @@ export default function PairingPanel() {
     };
   }, [tick]);
 
+  const status = describe(state);
   return (
     <div className="space-y-3">
+      {status && (
+        <p className="text-xs uppercase tracking-wider text-fg-muted">{status}</p>
+      )}
       <PairingQrCard
-        data={{ available: !!state?.qr_available, linked_device: describe(state) }}
+        data={{ available: !!state?.qr_available, linked_device: null }}
         actions={[{ id: "refresh", label: "Refresh", tool: "__pairing_qr", args: {} }]}
         onAction={() => setTick((t) => t + 1)}
       />

@@ -83,6 +83,7 @@ export default function App() {
     addUser(trimmed);
     setPending(true);
     let assistantId: string | null = null;
+    let deltaSeen = false;
     const ensureAssistant = () => {
       if (assistantId == null) assistantId = startAssistant();
       return assistantId;
@@ -91,11 +92,13 @@ export default function App() {
       await postChatStream(trimmed, {
         onEvent: (e) => {
           if (e.type === "delta") {
+            deltaSeen = true;
             appendDelta(ensureAssistant(), e.text);
           } else if (e.type === "tool_result" && e.ui) {
             attachCard(ensureAssistant(), e.ui);
           } else if (e.type === "final") {
             const id = ensureAssistant();
+            if (!deltaSeen && e.output) appendDelta(id, e.output);
             finishAssistant(id);
           } else if (e.type === "error") {
             const id = ensureAssistant();
