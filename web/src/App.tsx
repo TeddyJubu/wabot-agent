@@ -183,6 +183,11 @@ export default function App() {
                             void submit("cancel — do not send");
                           } else if (env.kind === "wabot_status" && actionId === "recheck") {
                             void submit("recheck wabot health");
+                          } else if (env.kind === "pairing_qr" && actionId === "refresh") {
+                            // No real tool maps to __pairing_qr; route the
+                            // operator to the slide-over which refetches via
+                            // /api/whatsapp/pairing on each open.
+                            open("qr");
                           }
                         }}
                       />

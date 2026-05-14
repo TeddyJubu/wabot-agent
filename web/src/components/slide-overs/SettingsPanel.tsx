@@ -65,16 +65,17 @@ export default function SettingsPanel() {
           label="API key"
           type="password"
           placeholder={view.openrouter.api_key.preview ?? "sk-or-…"}
+          value={draft.openrouter_api_key ?? ""}
           onChange={(v) => setDraft((d) => ({ ...d, openrouter_api_key: v }))}
         />
         <Field
           label="Model"
-          defaultValue={view.openrouter.model}
+          value={draft.openrouter_model ?? view.openrouter.model}
           onChange={(v) => setDraft((d) => ({ ...d, openrouter_model: v }))}
         />
         <Field
           label="Base URL"
-          defaultValue={view.openrouter.base_url}
+          value={draft.openrouter_base_url ?? view.openrouter.base_url}
           onChange={(v) => setDraft((d) => ({ ...d, openrouter_base_url: v }))}
         />
       </fieldset>
@@ -83,13 +84,14 @@ export default function SettingsPanel() {
         <legend className="text-xs font-medium uppercase tracking-wider text-fg-muted">wabot</legend>
         <Field
           label="Endpoint"
-          defaultValue={view.wabot.endpoint}
+          value={draft.wabot_endpoint ?? view.wabot.endpoint}
           onChange={(v) => setDraft((d) => ({ ...d, wabot_endpoint: v }))}
         />
         <Field
           label="Token"
           type="password"
           placeholder={view.wabot.token.preview ?? ""}
+          value={draft.wabot_token ?? ""}
           onChange={(v) => setDraft((d) => ({ ...d, wabot_token: v }))}
         />
       </fieldset>
@@ -152,19 +154,19 @@ export default function SettingsPanel() {
 
 interface FieldProps {
   label: string;
-  defaultValue?: string;
+  value: string;
   placeholder?: string;
   type?: string;
   onChange: (v: string) => void;
 }
 
-function Field({ label, defaultValue, placeholder, type = "text", onChange }: FieldProps) {
+function Field({ label, value, placeholder, type = "text", onChange }: FieldProps) {
   return (
     <label className="block">
       <span className="text-xs text-fg-muted">{label}</span>
       <input
         type={type}
-        defaultValue={defaultValue}
+        value={value}
         placeholder={placeholder}
         autoComplete="off"
         spellCheck={false}
