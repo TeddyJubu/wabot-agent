@@ -94,8 +94,21 @@ export default function App() {
           if (e.type === "delta") {
             deltaSeen = true;
             appendDelta(ensureAssistant(), e.text);
-          } else if (e.type === "tool_result" && e.ui) {
-            attachCard(ensureAssistant(), e.ui);
+          } else if (e.type === "tool_result") {
+            const id = ensureAssistant();
+            if (e.ui) {
+              attachCard(id, e.ui);
+            } else if (e.result !== undefined) {
+              // Non-envelope tool results are emitted with a redacted `result`
+              // payload — inline a minimal preview so the operator still sees
+              // that a tool ran and what it returned.
+              const preview =
+                typeof e.result === "string"
+                  ? e.result
+                  : JSON.stringify(e.result);
+              const tag = e.name ? `[${e.name}]` : "[tool]";
+              appendDelta(id, `\n\n${tag} ${preview}\n`);
+            }
           } else if (e.type === "final") {
             const id = ensureAssistant();
             if (!deltaSeen && e.output) appendDelta(id, e.output);

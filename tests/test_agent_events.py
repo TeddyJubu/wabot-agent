@@ -81,3 +81,20 @@ def test_default_state_is_optional() -> None:
     out = _translate_stream_event(_output("c4", {"ok": True}))
     assert out[0]["type"] == "tool_result"
     assert "ui" not in out[0]
+
+
+def test_scalar_tool_output_is_redacted() -> None:
+    # Tools that return a plain string (e.g. MCP commands, error payloads) must
+    # still go through redact() — otherwise Bearer tokens, OpenRouter keys, and
+    # phone numbers in scalar tool results leak unredacted to the browser stream.
+    state: dict[str, str] = {}
+    _translate_stream_event(_call("read_local_skill", "c5"), state)
+    leaky = "auth: Bearer sk-secret-123 / contact +1 (555) 010-1234 / key sk-or-DEADBEEF"
+    out = _translate_stream_event(_output("c5", leaky), state)
+    assert out[0]["type"] == "tool_result"
+    result = out[0]["result"]
+    assert isinstance(result, str)
+    assert "Bearer sk-secret-123" not in result
+    assert "Bearer [REDACTED]" in result
+    assert "sk-or-DEADBEEF" not in result
+    assert "5550101234" not in result.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")

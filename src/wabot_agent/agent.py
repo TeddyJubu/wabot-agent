@@ -334,7 +334,11 @@ def _translate_stream_event(
             elif isinstance(raw_output, list):
                 payload2["result"] = redact(raw_output)
             elif raw_output is not None:
-                payload2["result"] = raw_output
+                # Scalar outputs (typically strings from MCP or error payloads) must
+                # also go through redact() — otherwise Bearer tokens, OpenRouter keys,
+                # and phone numbers in plain-string tool results leak unredacted to
+                # the browser stream. redact() is identity on numbers/bools.
+                payload2["result"] = redact(raw_output)
             out.append(payload2)
         return out
 
