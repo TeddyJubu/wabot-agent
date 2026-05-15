@@ -19,6 +19,8 @@ jobs:
         uses: astral-sh/setup-uv@v3
         with:
           version: "0.8.22"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
 
       - name: Set up Python
         run: uv python install 3.12
@@ -42,6 +44,8 @@ jobs:
         uses: astral-sh/setup-uv@v3
         with:
           version: "0.8.22"
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
 
       - name: Set up Python
         run: uv python install 3.12

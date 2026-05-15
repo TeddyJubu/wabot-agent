@@ -270,6 +270,22 @@ wa health
 
 Then use the dashboard to ask for a health check and a draft response before enabling real sends.
 
+## Continuous Integration
+
+Every push and pull request runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml) with three jobs:
+
+- **backend** — `uv sync --all-extras`, `ruff check .`, `pytest -m "not live"` (offline tests).
+- **evals** — the local eval harness at [`evals/run_local.py`](evals/run_local.py).
+- **web** — Vitest unit tests and the production Vite build.
+
+The uv tool cache is keyed on `uv.lock`, the npm cache on `web/package-lock.json`; warm re-runs install in seconds.
+
+`main` is a protected branch. PRs require **all three checks green** and **one approving review** before merge, and linear history is enforced — rebase onto `main` rather than merging it back in. To reproduce the gates locally, run the [offline checks](#verification) and:
+
+```bash
+cd web && npm run test && npm run build
+```
+
 ## Repository Layout
 
 ```text
