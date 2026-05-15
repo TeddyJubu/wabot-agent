@@ -1,7 +1,7 @@
 # Pairing + Stream Event Schemas — Design
 
 - **Date:** 2026-05-15
-- **Issue:** [#9 — API: formalize pairing + stream event schemas with Pydantic models](https://github.com/TeddyJubu/vignesh/issues/9)
+- **Issue:** [#9 — API: formalize pairing + stream event schemas with Pydantic models](https://github.com/TeddyJubu/wabot-agent/issues/9)
 - **Status:** Approved (brainstorm) — pending plan
 - **Scope:** Narrow — pairing payload + SSE envelope only. Per-event payload typing is deliberately out of scope for this change.
 
@@ -11,16 +11,16 @@ The pairing payload and SSE event framing are maintained by convention, not by t
 
 1. The canonical pairing JSON shape is a closure (`_pairing_payload` in [src/wabot_agent/api.py:105](../../../src/wabot_agent/api.py)) called by both `GET /api/whatsapp/pairing` and the SSE `pairing_changed` poller. The shape stays aligned only because both call sites happen to call the same helper.
 2. The TypeScript `PairingState` interface in [web/src/api/pairing.ts:1](../../../web/src/api/pairing.ts) declares 7 fields; the Python helper emits 9. Drift already exists (`event`, `expires_at` are untyped on the consumer side).
-3. The REST handler calls `redact()` on the pairing payload before returning. The SSE poller publishes the raw payload to the hub **without** redaction (api.py:135 vs api.py:240). If wabot returns a `detail` containing a phone number, REST scrubs it and SSE leaks it.
-4. SSE frames are built by `_sse_frame(event_id, name, data)` with no validation. A publisher passing an empty name or a non-dict payload would produce a malformed frame that the browser silently discards.
+3. Redaction is applied in two different places along the pairing path. The REST handler ([api.py:240](../../../src/wabot_agent/api.py)) wraps the payload in `redact()` explicitly. The SSE poller ([api.py:135](../../../src/wabot_agent/api.py)) does not — it relies on `EventHub.publish()` ([events.py:59](../../../src/wabot_agent/events.py)) which calls `redact()` on dict payloads internally. Both paths are redacted today, but the *responsibility* for redaction is split between the publisher (REST) and the bus (SSE). A new contributor adding a third call site has to guess which model applies.
+4. SSE frames are built by `_sse_frame(event_id, name, data)` with no validation on the publisher side. `json.dumps()` will encode any value, so a typo'd event name or wrong-shape `data` produces a syntactically valid frame that the consumer either silently mismatches or hits at parse time. There is no fail-fast guard at the boundary.
 
 These are the kinds of bugs that get harder to find as more consumers grow on top of the new public surface. Issue #9 was filed alongside PR #7 specifically to lock the contract before that happens.
 
 ## Goals
 
 - Pairing payload is one Pydantic model used by REST and SSE.
-- Redaction is part of constructing that model — there is no way to build a public payload that hasn't been redacted.
-- Every event over `/api/stream` is wrapped in a typed envelope; framing errors fail fast at the publisher, not silently on the wire.
+- Redaction is the responsibility of the model's only public constructor (`from_wabot()`), so the *publisher* doesn't have to remember whether the downstream bus also redacts. Defense in depth — `EventHub.publish` keeps its own `redact()` call as a backstop.
+- Every event over `/api/stream` is wrapped in a typed envelope; name/payload validation fires at the publish call site, not at the consumer.
 - TS authors find out about Python-side drift in code review, by way of a diff to a checked-in JSON Schema snapshot.
 
 ## Non-goals
@@ -149,11 +149,21 @@ yield _sse_frame(StreamEventEnvelope(name="ready_snapshot", data=snapshot))
 yield _sse_frame(StreamEventEnvelope(name="heartbeat", data={}))
 ```
 
-The envelope is the only path data can take to the wire. Bad framing fails at construction, not on the consumer.
+The envelope construction validates name (non-empty string) and data (dict). A typo'd event name or wrong-shape data raises a `ValidationError` at the publish call site instead of producing a syntactically-valid-but-semantically-broken frame that the consumer has to detect at parse time.
 
 ## Redaction invariant
 
-`PairingPayload` is the only object that crosses the trust boundary out of the wabot layer. Construction is centralized in `from_wabot()`. The three call sites — `GET /api/whatsapp/pairing` (REST), the `_pairing_poll_loop` (live SSE event), and `_build_initial_snapshot` (cold-start SSE bundle) — all consume the same classmethod. There is no documented or undocumented way to get an unredacted public payload onto the wire without bypassing the class — and `_sse_frame`'s type signature plus `response_model=` prevent that for SSE and REST respectively.
+The invariant we want is: every pairing payload that reaches a client has passed through `redact()` at least once. Today that's true, but the *responsibility* is split (REST handler explicit, SSE implicit via the hub). The refactor centralizes it.
+
+`PairingPayload` is the public projection of `WabotPairingQR`. `from_wabot()` is its only documented constructor and it applies `redact()` before validation. The three call sites — `GET /api/whatsapp/pairing` (REST), `_pairing_poll_loop` (live SSE event), and `_build_initial_snapshot` (cold-start SSE bundle) — all consume the same classmethod, so each one is independently redacted at the producer.
+
+This is enforced by:
+
+1. **Convention** — the only public path through the type is `from_wabot()`. Direct `PairingPayload(**raw)` construction would bypass it, but the spec calls out three call sites and contract tests assert REST and SSE produce identical output. A reviewer can grep for `PairingPayload(` to spot a bypass.
+2. **Contract tests** — `test_pairing_payload_redacts_detail` proves the model redacts on construction; `test_rest_and_sse_emit_identical_pairing_shape` proves both wire paths produce the same bytes.
+3. **Defense in depth** — `EventHub.publish()` keeps its existing `redact()` call. If someone bypasses `from_wabot()` and publishes a raw dict, the hub catches it. Belt and suspenders.
+
+Note: Python type hints are not enforced at runtime, and FastAPI's `response_model=` validates output shape but doesn't compel handlers to construct via `from_wabot()` (a handler could return a dict that happens to match the schema). The invariant lives in the call-site discipline + tests + hub fallback, not in the type system.
 
 ## Error handling
 
@@ -179,7 +189,7 @@ tests/
 | Test | Asserts |
 |---|---|
 | `test_pairing_payload_from_wabot_roundtrip` | `PairingPayload.from_wabot(WabotPairingQR(...))` has the expected field values. |
-| `test_pairing_payload_redacts_detail` | `WabotPairingQR(detail="+1234567890 unauthorized")` → `payload.detail` has the number masked. **Contract test for the SSE-leak bug.** |
+| `test_pairing_payload_redacts_detail` | `WabotPairingQR(detail="+1234567890 unauthorized")` → `PairingPayload.from_wabot(...).detail` has the number masked. Proves the construction-time redaction invariant; future call sites that go through `from_wabot()` cannot emit unredacted detail even if `EventHub.publish`'s backstop were removed. |
 | `test_stream_envelope_rejects_empty_name` | `StreamEventEnvelope(name="", data={})` raises `ValidationError`. |
 | `test_stream_envelope_rejects_non_dict_data` | `StreamEventEnvelope(name="x", data="oops")` raises `ValidationError`. |
 | `test_rest_and_sse_emit_identical_pairing_shape` | With `FakeWabotClient` returning a known `WabotPairingQR`, the JSON body from `GET /api/whatsapp/pairing` equals the parsed `pairing_changed.data` read from `/api/stream`. **Headline acceptance test for #9.** |
