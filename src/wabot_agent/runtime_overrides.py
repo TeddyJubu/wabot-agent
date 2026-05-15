@@ -33,6 +33,9 @@ MUTABLE_FIELDS: frozenset[str] = frozenset(
         "send_policy",
         "allowed_recipients",
         "max_agent_turns",
+        "cf_access_team_domain",
+        "cf_access_aud",
+        "cf_access_required",
     }
 )
 
