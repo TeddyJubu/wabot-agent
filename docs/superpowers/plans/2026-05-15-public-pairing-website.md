@@ -396,6 +396,18 @@ def test_missing_aud_raises(rsa_key, kid):
 
     with pytest.raises(CfAccessError, match="aud"):
         verify_access_jwt(token, cfg, fetcher=fetcher)
+
+
+def test_wrong_issuer_rejected(rsa_key, kid, cfg):
+    """A token forged with the right key but the wrong issuer must be rejected.
+
+    Defence-in-depth against a confused-deputy where two CF teams share keys.
+    """
+    token = _make_jwt(rsa_key, kid, iss="https://attacker.cloudflareaccess.com")
+    fetcher = _fake_jwks_fetcher(_jwks_for(rsa_key, kid))
+
+    with pytest.raises(CfAccessError, match="(?i)issuer|iss"):
+        verify_access_jwt(token, cfg, fetcher=fetcher)
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -695,6 +707,10 @@ def _patch_jwks(monkeypatch, jwks: dict):
 # --- Tests ---
 
 
+@pytest.mark.skipif(
+    not (Path(__file__).resolve().parents[1] / "static" / "index.html").exists(),
+    reason="static/index.html missing; run scripts/build-web.sh first",
+)
 def test_pair_serves_spa_shell_in_local_dev(tmp_path: Path) -> None:
     client = TestClient(create_app(_make_settings(tmp_path)))
     r = client.get("/pair")
@@ -810,6 +826,36 @@ def test_existing_operator_token_path_still_works(tmp_path: Path) -> None:
     assert client.get("/api/runs").status_code == 401
     ok = client.get("/api/runs", headers={"X-Operator-Token": "op-secret"})
     assert ok.status_code == 200
+
+
+def test_operator_bearer_alone_rejected_when_cf_required(
+    tmp_path: Path, monkeypatch, rsa_key, kid
+) -> None:
+    """Operator token must NOT bypass CF Access when cf_access_required=True."""
+    _patch_jwks(monkeypatch, _jwks_for(rsa_key, kid))
+    settings = _make_settings(
+        tmp_path,
+        WABOT_AGENT_CF_ACCESS_TEAM_DOMAIN="example.cloudflareaccess.com",
+        WABOT_AGENT_CF_ACCESS_AUD="test-aud",
+        WABOT_AGENT_CF_ACCESS_REQUIRED=True,
+        WABOT_AGENT_OPERATOR_TOKEN="op-secret",
+    )
+    client = TestClient(create_app(settings))
+    r = client.get("/pair", headers={"Authorization": "Bearer op-secret"})
+    assert r.status_code == 401
+
+
+def test_cf_required_but_no_team_domain_returns_401(tmp_path: Path) -> None:
+    """Misconfiguration produces a clean 401, not a 500."""
+    settings = _make_settings(
+        tmp_path,
+        WABOT_AGENT_CF_ACCESS_REQUIRED=True,
+        WABOT_AGENT_CF_ACCESS_AUD="test-aud",
+        # team_domain intentionally omitted
+    )
+    client = TestClient(create_app(settings))
+    r = client.get("/pair", headers={"Cf-Access-Jwt-Assertion": "anything"})
+    assert r.status_code == 401
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -841,6 +887,7 @@ changes.
 
 from __future__ import annotations
 
+import secrets
 from dataclasses import dataclass
 from typing import Literal
 
@@ -875,15 +922,20 @@ def _verify_operator_token(
     authorization: str | None,
     operator_session: str | None,
 ) -> AuthSource | None:
-    """Return the source name if a token matches, None otherwise."""
+    """Return the source name if a token matches, None otherwise.
+
+    Uses `secrets.compare_digest` to avoid timing oracles on the token.
+    """
     if not settings.operator_token:
         return "open"
     expected = settings.operator_token
-    if x_operator_token == expected:
+    if x_operator_token is not None and secrets.compare_digest(x_operator_token, expected):
         return "operator-header"
-    if authorization == f"Bearer {expected}":
-        return "operator-header"
-    if operator_session == expected:
+    if authorization is not None and authorization.lower().startswith("bearer "):
+        candidate = authorization[7:]
+        if secrets.compare_digest(candidate, expected):
+            return "operator-header"
+    if operator_session is not None and secrets.compare_digest(operator_session, expected):
         return "operator-cookie"
     return None
 
@@ -985,7 +1037,36 @@ human_dependency = Depends(verify_human_factory(settings))
 
 4. Add the import: `from .auth import verify_human_factory`.
 
-5. Add a helper `_maybe_mint_operator_cookie(response, request, settings)` that, if `request.state.cf_access_identity` is set and `settings.operator_token` is truthy and the cookie is missing on the request, calls `response.set_cookie(...)` with the same flags as the existing `GET /` flow.
+5. Add a helper `_maybe_mint_operator_cookie(response, request, settings)`:
+
+```python
+def _maybe_mint_operator_cookie(
+    response: Response, request: Request, settings: Settings
+) -> None:
+    """Mint the operator cookie after a successful CF Access verification.
+
+    Only acts when ALL of these are true:
+    - an operator token is configured
+    - the request was authorized via CF Access (request.state has the identity)
+    - the cookie isn't already present on the request
+
+    Flags match the existing `GET /` flow: HttpOnly, SameSite=Strict.
+    """
+    if not settings.operator_token:
+        return
+    if request.cookies.get("wabot_agent_operator_token") == settings.operator_token:
+        return
+    if not getattr(request.state, "cf_access_identity", None):
+        return
+    response.set_cookie(
+        key="wabot_agent_operator_token",
+        value=settings.operator_token,
+        httponly=True,
+        samesite="strict",
+        secure=False,  # cloudflared terminates TLS; FastAPI sees plain HTTP on loopback
+        max_age=60 * 60 * 24 * 30,  # 30 days
+    )
+```
 
 - [ ] **Step 5: Add `GET /pair` route**
 
@@ -1467,7 +1548,7 @@ import App from "./App";
 import PairView from "./components/PairView";
 import "./styles.css";
 
-function selectRoot(): JSX.Element {
+function selectRoot() {
   const path = window.location.pathname.replace(/\/+$/, "");
   if (path === "/pair") return <PairView />;
   return <App />;
