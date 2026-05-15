@@ -100,6 +100,25 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("WABOT_AGENT_MAX_AGENT_TURNS", "VIGNESH_MAX_AGENT_TURNS"),
     )
 
+    cf_access_team_domain: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_CF_ACCESS_TEAM_DOMAIN", "VIGNESH_CF_ACCESS_TEAM_DOMAIN"
+        ),
+    )
+    cf_access_aud: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_CF_ACCESS_AUD", "VIGNESH_CF_ACCESS_AUD"
+        ),
+    )
+    cf_access_required: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_CF_ACCESS_REQUIRED", "VIGNESH_CF_ACCESS_REQUIRED"
+        ),
+    )
+
     @field_validator("allowed_recipients", mode="before")
     @classmethod
     def parse_allowed_recipients(cls, value: object) -> set[str]:
