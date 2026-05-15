@@ -280,10 +280,10 @@ Every push and pull request runs [`.github/workflows/ci.yml`](.github/workflows/
 
 The uv tool cache is keyed on `uv.lock`, the npm cache on `web/package-lock.json`; warm re-runs install in seconds.
 
-`main` is a protected branch. PRs require **all three checks green** and **one approving review** before merge, and linear history is enforced — rebase onto `main` rather than merging it back in. To reproduce the gates locally, run the [offline checks](#verification) and:
+Pull requests into `main` must clear **all three checks** and **one approving review** before merge, and linear history is enforced — rebase onto `main` rather than merging it back in. To reproduce the gates locally, run the [offline checks](#verification) and:
 
 ```bash
-cd web && npm run test && npm run build
+cd web && npm run test -- --run && npm run build
 ```
 
 ## Repository Layout
