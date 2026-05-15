@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import type { UiEnvelope } from "@/types/ui-envelope";
+import type { PairingState } from "@/api/pairing";
 
 export type ReadinessVariant = "ok" | "warn" | "bad" | "pending";
 
@@ -30,6 +31,7 @@ interface State {
   messages: ChatMessage[];
   readiness: Readiness;
   slideOver: SlideOverId;
+  pairing: PairingState | null;
 
   addUser: (text: string) => string;
   startAssistant: () => string;
@@ -39,6 +41,7 @@ interface State {
   openSlideOver: (which: Exclude<SlideOverId, null>) => void;
   closeSlideOver: () => void;
   setReadiness: (r: Partial<Readiness>) => void;
+  setPairing: (p: PairingState | null) => void;
 }
 
 const pendingRow: ReadinessRow = { label: "Checking…", variant: "pending" };
@@ -53,6 +56,7 @@ function deriveOverall(r: Readiness): ReadinessVariant {
 export const useStore = create<State>((set) => ({
   messages: [],
   slideOver: null,
+  pairing: null,
   readiness: {
     overall: "pending",
     model: pendingRow,
@@ -94,4 +98,5 @@ export const useStore = create<State>((set) => ({
       const next = { ...s.readiness, ...r };
       return { readiness: { ...next, overall: deriveOverall(next) } };
     }),
+  setPairing: (p) => set({ pairing: p }),
 }));

@@ -1,0 +1,26 @@
+# Cloudflare Tunnel config for wabot-agent.
+#
+# Copy this to /etc/cloudflared/config.yml on the vignesh VPS, then replace
+# the placeholders with values from `cloudflared tunnel create wabot-agent`.
+# The helper script scripts/setup-cloudflared.sh does this automatically.
+#
+# Safety: this config only routes the FastAPI service on 127.0.0.1:8787.
+# wabot (127.0.0.1:7777) is NEVER exposed here — and never should be.
+# The webhook path /whatsapp/inbound is loopback-only too (wabot calls it
+# directly), so Cloudflare Access does not protect it; that's by design.
+
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: /etc/cloudflared/REPLACE_WITH_TUNNEL_UUID.json
+
+# Origin requests stay on loopback.
+ingress:
+  - hostname: wabot.REPLACE_WITH_YOUR_DOMAIN
+    service: http://127.0.0.1:8787
+    originRequest:
+      noTLSVerify: true
+      connectTimeout: 10s
+      # Long-poll friendly for SSE pairing stream.
+      tcpKeepAlive: 30s
+
+  # Required catch-all (Cloudflare Tunnel rejects configs without one).
+  - service: http_status:404
