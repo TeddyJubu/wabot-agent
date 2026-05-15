@@ -286,6 +286,16 @@ Pull requests into `main` must clear **all three checks** and **one approving re
 cd web && npm run test -- --run && npm run build
 ```
 
+## Dependency Updates
+
+Dependency updates are automated with [`.github/dependabot.yml`](.github/dependabot.yml):
+
+- **Cadence:** weekly on Monday (UTC) for Python (`/`), web (`/web`), and GitHub Actions.
+- **Grouping:** minor + patch updates are grouped per ecosystem; major updates stay separate for review.
+- **Merge policy:** dependency PRs follow the same branch protections as any other PR (all CI checks green + one approving review before merge into `main`).
+
+Because Dependabot opens normal pull requests, the standard CI workflow (`backend`, `evals`, `web`) runs on dependency PRs automatically.
+
 ## Repository Layout
 
 ```text
