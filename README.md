@@ -229,6 +229,26 @@ SSH_HOST=vignesh ./scripts/deploy-to-vignesh.sh
 
 The systemd unit is in `deploy/systemd/wabot-agent.service`.
 
+## Public Access (Optional)
+
+To pair WhatsApp from any phone or laptop browser — without SSHing into the VPS — run the Cloudflare Tunnel installer:
+
+```bash
+sudo ./scripts/setup-cloudflared.sh wabot.your-domain.com
+```
+
+This installs `cloudflared`, creates a tunnel from the VPS to Cloudflare's edge, routes DNS to it, and starts a systemd service. **No inbound ports are opened on the VPS.** `wabot` stays on loopback. The script prints the manual steps to add a Cloudflare Access policy (Google login or one-time-PIN email), after which you set three env vars in `.env`:
+
+```dotenv
+WABOT_AGENT_CF_ACCESS_TEAM_DOMAIN=<yourteam>.cloudflareaccess.com
+WABOT_AGENT_CF_ACCESS_AUD=<Application Audience tag from CF dashboard>
+WABOT_AGENT_CF_ACCESS_REQUIRED=true
+```
+
+Open `https://wabot.<your-domain>/pair` on a phone — sign in through Access, scan the QR with WhatsApp, done. The QR re-renders live as `wabot` rotates the pairing code (SSE-driven).
+
+See [docs/superpowers/specs/2026-05-15-public-pairing-website-design.md](docs/superpowers/specs/2026-05-15-public-pairing-website-design.md) for the full design, threat model, and what's intentionally NOT included (accounts, per-user instances, billing — those are future sub-projects).
+
 ## Verification
 
 Offline checks:

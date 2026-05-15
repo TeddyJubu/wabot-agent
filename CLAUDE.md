@@ -59,6 +59,16 @@ Key modules in [src/wabot_agent/](src/wabot_agent/):
 
 The Agents SDK `SQLiteSession` reuses `WABOT_AGENT_DB_PATH`, keyed by `session_id` (defaults to the sender's phone for inbound, or `"operator"` for the dashboard). Cross-contact memory leaks are prevented by this keying — preserve it.
 
+### Public access
+
+Public access — for pairing WhatsApp from any phone or laptop browser without SSH — is opt-in via **Cloudflare Tunnel** running on the VPS. `cloudflared` opens an outbound connection to Cloudflare's edge and proxies inbound traffic to FastAPI on `127.0.0.1:8787`. **No inbound ports are opened on the VPS**, and `wabot` (`127.0.0.1:7777`) is *not* part of the tunnel ingress.
+
+In front of the tunnel, **Cloudflare Access** prompts the operator for a Google login or one-time-PIN email before the request reaches the VPS. The Access JWT is verified server-side by [src/wabot_agent/cf_access.py](src/wabot_agent/cf_access.py) using the JWKS at `https://<team-domain>/cdn-cgi/access/certs`, cached for 6 hours. The dependency [src/wabot_agent/auth.py](src/wabot_agent/auth.py) (`verify_human`) replaces the old `verify_operator` on all human routes — but **`POST /whatsapp/inbound` is untouched** because `wabot` calls it over loopback with its own `WABOT_INBOUND_TOKEN`. Cloudflare never sees that path.
+
+`/pair` is a mobile-first page served by the same React bundle as `/`; `web/src/main.tsx` picks `<PairView />` based on `window.location.pathname`. The Zustand `pairing` slice is fed by a single `EventSource('/api/stream')` opened in `web/src/hooks/usePairingStream.ts`, so the QR re-renders instantly when `wabot` rotates the pairing code.
+
+Set `WABOT_AGENT_CF_ACCESS_TEAM_DOMAIN`, `WABOT_AGENT_CF_ACCESS_AUD`, and `WABOT_AGENT_CF_ACCESS_REQUIRED=true` to enable the path; `scripts/setup-cloudflared.sh` automates the tunnel side. See [docs/superpowers/specs/2026-05-15-public-pairing-website-design.md](docs/superpowers/specs/2026-05-15-public-pairing-website-design.md) for the full threat model.
+
 ## Safety Rules That Affect Code Changes
 
 These constraints are non-obvious and should shape any change:
