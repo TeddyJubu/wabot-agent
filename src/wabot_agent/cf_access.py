@@ -14,8 +14,9 @@ the network. The JWKS is cached in a module-level dict keyed by team domain;
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, Protocol
+from typing import Protocol
 
 import httpx
 import jwt
@@ -87,7 +88,7 @@ def verify_access_jwt(
     token: str,
     cfg: CfAccessConfig,
     *,
-    fetcher: Callable[[str], dict] = _default_fetcher,
+    fetcher: Callable[[str], dict] | None = None,
 ) -> AccessIdentity:
     """Verify a Cloudflare Access JWT and return the identity claims.
 
@@ -98,7 +99,12 @@ def verify_access_jwt(
     - ``iss`` pinned to ``https://<team-domain>`` (rejects tokens from other CF teams).
     - ``aud`` matches the configured Application Audience.
     - ``exp`` required and enforced by PyJWT.
+
+    The default fetcher is resolved at call time so tests can swap it via
+    ``monkeypatch.setattr(cf_access, "_default_fetcher", ...)``.
     """
+    if fetcher is None:
+        fetcher = _default_fetcher
     if not cfg.team_domain:
         raise CfAccessError("cf_access team_domain is not configured")
     if not cfg.aud:

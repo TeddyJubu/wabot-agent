@@ -13,13 +13,14 @@ from urllib.parse import urlparse
 
 import qrcode
 import uvicorn
-from fastapi import Cookie, Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from qrcode.image.svg import SvgPathImage
 
 from .agent import run_agent, run_agent_streamed
+from .auth import AuthIdentity, maybe_mint_operator_cookie, verify_human_factory
 from .config import Settings, get_settings
 from .events import EventHub, EventLog
 from .memory import InboundMessage, MemoryStore
@@ -174,35 +175,32 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return FileResponse(favicon_path, media_type="image/svg+xml")
         return Response(status_code=204)
 
-    async def verify_operator(
-        x_operator_token: str | None = Header(default=None),
-        authorization: str | None = Header(default=None),
-        operator_session: str | None = Cookie(default=None, alias="wabot_agent_operator_token"),
-    ) -> None:
-        _verify_operator_auth(settings, x_operator_token, authorization, operator_session)
-
-    operator_dependency = Depends(verify_operator)
+    verify_human = verify_human_factory(settings)
+    human_dependency = Depends(verify_human)
 
     @app.get("/")
     async def dashboard(
-        token: str | None = Query(default=None),
-        operator_session: str | None = Cookie(default=None, alias="wabot_agent_operator_token"),
+        request: Request,
+        identity: AuthIdentity = Depends(verify_human),  # noqa: B008 — FastAPI idiom
     ) -> FileResponse:
-        if settings.operator_token:
-            if token:
-                _verify_operator_auth(settings, token, None, None)
-                file_response = _dashboard_file(static_dir)
-                file_response.set_cookie(
-                    "wabot_agent_operator_token",
-                    token,
-                    httponly=True,
-                    secure=False,
-                    samesite="strict",
-                )
-                return file_response
-            _verify_operator_auth(settings, None, None, operator_session)
         file_response = _dashboard_file(static_dir)
         file_response.headers["Cache-Control"] = "no-store"
+        maybe_mint_operator_cookie(file_response, request, settings)
+        return file_response
+
+    @app.get("/pair")
+    async def pair_page(
+        request: Request,
+        identity: AuthIdentity = Depends(verify_human),  # noqa: B008 — FastAPI idiom
+    ) -> FileResponse:
+        """Mobile-first WhatsApp pairing page.
+
+        Serves the same React bundle as ``/`` — ``web/src/main.tsx`` picks
+        ``<PairView />`` when ``window.location.pathname === '/pair'``.
+        """
+        file_response = _dashboard_file(static_dir)
+        file_response.headers["Cache-Control"] = "no-store"
+        maybe_mint_operator_cookie(file_response, request, settings)
         return file_response
 
     def _dashboard_file(static_dir: Path) -> FileResponse:
@@ -215,7 +213,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def health() -> dict[str, Any]:
         return {"ok": True, "service": "wabot-agent", "env": settings.env}
 
-    @app.get("/ready", dependencies=[operator_dependency])
+    @app.get("/ready", dependencies=[human_dependency])
     async def ready() -> dict[str, Any]:
         wabot_health = await wabot.health()
         return redact(
@@ -235,7 +233,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
         )
 
-    @app.get("/api/whatsapp/pairing", dependencies=[operator_dependency])
+    @app.get("/api/whatsapp/pairing", dependencies=[human_dependency])
     async def whatsapp_pairing() -> dict[str, Any]:
         # _pairing_payload defines the canonical shape; both the SSE
         # `pairing_changed` event and this REST endpoint emit it.
@@ -243,7 +241,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get(
         "/api/whatsapp/pairing.svg",
-        dependencies=[operator_dependency],
+        dependencies=[human_dependency],
         include_in_schema=False,
         response_model=None,
     )
@@ -259,7 +257,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers={"Cache-Control": "no-store"},
         )
 
-    @app.post("/api/chat", response_model=ChatResponse, dependencies=[operator_dependency])
+    @app.post("/api/chat", response_model=ChatResponse, dependencies=[human_dependency])
     async def chat(payload: ChatRequest) -> ChatResponse:
         result = await run_agent(
             payload.message,
@@ -278,7 +276,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post(
         "/api/chat/stream",
-        dependencies=[operator_dependency],
+        dependencies=[human_dependency],
         response_model=None,
     )
     async def chat_stream(payload: ChatRequest, request: Request) -> StreamingResponse:
@@ -378,11 +376,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "output": result.final_output,
         }
 
-    @app.get("/api/memory/{contact}", dependencies=[operator_dependency])
+    @app.get("/api/memory/{contact}", dependencies=[human_dependency])
     async def contact_memory(contact: str) -> dict[str, Any]:
         return redact(memory.recall_contact(contact))
 
-    @app.get("/api/runs", dependencies=[operator_dependency])
+    @app.get("/api/runs", dependencies=[human_dependency])
     async def recent_runs(limit: int = Query(default=20, ge=0, le=100)) -> list[dict[str, Any]]:
         return memory.recent_runs(limit=limit)
 
@@ -419,7 +417,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
         )
 
-    @app.get("/api/stream", dependencies=[operator_dependency])
+    @app.get("/api/stream", dependencies=[human_dependency])
     async def event_stream(
         request: Request,
         last_event_id: str | None = Header(default=None, alias="Last-Event-ID"),
@@ -471,7 +469,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         )
 
-    @app.get("/api/settings", dependencies=[operator_dependency])
+    @app.get("/api/settings", dependencies=[human_dependency])
     async def read_settings(
         if_none_match: str | None = Header(default=None, alias="If-None-Match"),
     ) -> Response:
@@ -485,7 +483,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return Response(status_code=304, headers={"ETag": etag})
         return JSONResponse(view, headers={"ETag": etag, "Cache-Control": "no-cache"})
 
-    @app.patch("/api/settings", dependencies=[operator_dependency])
+    @app.patch("/api/settings", dependencies=[human_dependency])
     async def update_settings(patch: SettingsPatch) -> dict[str, Any]:
         # Build the override dict from non-None fields only.
         proposed: dict[str, Any] = {}
@@ -567,7 +565,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return _settings_view(settings)
 
-    @app.post("/api/settings/test/openrouter", dependencies=[operator_dependency])
+    @app.post("/api/settings/test/openrouter", dependencies=[human_dependency])
     async def test_openrouter() -> dict[str, Any]:
         if not settings.openrouter_api_key:
             return {"ok": False, "detail": "OPENROUTER_API_KEY is not configured."}
@@ -590,7 +588,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "detail": f"OpenRouter returned HTTP {resp.status_code}: {resp.text[:200]}",
         }
 
-    @app.post("/api/settings/test/wabot", dependencies=[operator_dependency])
+    @app.post("/api/settings/test/wabot", dependencies=[human_dependency])
     async def test_wabot() -> dict[str, Any]:
         health = await wabot.health()
         return {
@@ -700,25 +698,6 @@ def _verify_inbound_auth(settings: Settings, authorization: str | None) -> None:
     expected = f"Bearer {settings.wabot_inbound_token}"
     if not authorization or not secrets.compare_digest(authorization, expected):
         raise HTTPException(status_code=401, detail="unauthorized")
-
-
-def _verify_operator_auth(
-    settings: Settings,
-    x_operator_token: str | None,
-    authorization: str | None,
-    operator_session: str | None,
-) -> None:
-    if not settings.operator_token:
-        return
-    candidates = [x_operator_token, operator_session]
-    if authorization and authorization.lower().startswith("bearer "):
-        candidates.append(authorization.split(" ", 1)[1])
-    if any(
-        candidate and secrets.compare_digest(candidate, settings.operator_token)
-        for candidate in candidates
-    ):
-        return
-    raise HTTPException(status_code=401, detail="operator auth required")
 
 
 def main() -> None:
