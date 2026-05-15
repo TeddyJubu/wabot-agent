@@ -18,6 +18,7 @@ import PairingPanel from "@/components/slide-overs/PairingPanel";
 import RunsPanel from "@/components/slide-overs/RunsPanel";
 import SettingsPanel from "@/components/slide-overs/SettingsPanel";
 import { matchSlash } from "@/hooks/useSlashCommands";
+import { usePairingStream } from "@/hooks/usePairingStream";
 import { postChatStream } from "@/api/chat";
 import { fetchSettings } from "@/api/settings";
 import { useStore, type SlideOverId } from "@/store";
@@ -40,6 +41,10 @@ export default function App() {
 
   const firstToken = input.split(/\s/)[0] ?? "";
   const slashMatches = matchSlash(firstToken);
+
+  // Live pairing — feeds the Zustand pairing slice so PairingPanel re-renders
+  // whenever wabot rotates the QR or transitions linked/unlinked.
+  usePairingStream();
 
   useEffect(() => {
     fetchSettings()
