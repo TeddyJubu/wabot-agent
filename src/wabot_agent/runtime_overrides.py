@@ -33,11 +33,14 @@ MUTABLE_FIELDS: frozenset[str] = frozenset(
         "send_policy",
         "allowed_recipients",
         "max_agent_turns",
-        "cf_access_team_domain",
-        "cf_access_aud",
-        "cf_access_required",
     }
 )
+
+# cf_access_* fields are deliberately NOT in MUTABLE_FIELDS — they configure
+# the auth boundary itself, so allowing them to be changed at runtime via the
+# API they protect creates a self-referential downgrade path (operator session
+# could disable the CF Access gate that's protecting it). They are restart-
+# required, same trust level as operator_token.
 
 # Fields whose values are secrets and must be masked when read back over the API.
 SECRET_FIELDS: frozenset[str] = frozenset(

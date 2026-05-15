@@ -122,6 +122,9 @@ def verify_access_jwt(
     jwks = _get_jwks(cfg.team_domain, cfg.jwks_ttl_seconds, fetcher)
     pyjwk = _find_key(jwks, kid)
 
+    # 30s leeway absorbs typical VPS clock drift without materially loosening
+    # security — Cloudflare Access tokens are short-lived (minutes) and the
+    # WhatsApp QR they protect rotates faster than the leeway window.
     try:
         jwt.decode(
             token,
@@ -130,6 +133,7 @@ def verify_access_jwt(
             audience=cfg.aud,
             issuer=f"https://{cfg.team_domain}",
             options={"require": ["aud", "iss", "exp"]},
+            leeway=30,
         )
     except jwt.ExpiredSignatureError as exc:
         raise CfAccessError(f"Token expired: {exc}") from exc

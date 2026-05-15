@@ -295,3 +295,56 @@ def test_existing_operator_token_path_still_works(tmp_path: Path) -> None:
     assert client.get("/api/runs").status_code == 401
     ok = client.get("/api/runs", headers={"X-Operator-Token": "op-secret"})
     assert ok.status_code == 200
+
+
+def test_cf_access_fields_not_runtime_mutable(tmp_path: Path) -> None:
+    """An operator session MUST NOT be able to disable CF Access via the API.
+
+    Even though the SettingsPatch model currently doesn't expose cf_access_*
+    fields, the MUTABLE_FIELDS allowlist is the security-critical guard —
+    confirm those three fields aren't in it.
+    """
+    from wabot_agent.runtime_overrides import MUTABLE_FIELDS
+
+    assert "cf_access_required" not in MUTABLE_FIELDS
+    assert "cf_access_team_domain" not in MUTABLE_FIELDS
+    assert "cf_access_aud" not in MUTABLE_FIELDS
+
+
+def test_minted_cookie_is_secure_when_cf_access_required(
+    tmp_path: Path, monkeypatch, rsa_key, kid
+) -> None:
+    """Defence-in-depth: the operator cookie must carry Secure=True when CF
+    Access is enforcing HTTPS at the edge, so it's refused if the FastAPI
+    port is ever inadvertently exposed over plain HTTP."""
+    _patch_jwks(monkeypatch, _jwks_for(rsa_key, kid))
+    settings = _make_settings(
+        tmp_path,
+        WABOT_AGENT_CF_ACCESS_TEAM_DOMAIN="example.cloudflareaccess.com",
+        WABOT_AGENT_CF_ACCESS_AUD="test-aud",
+        WABOT_AGENT_CF_ACCESS_REQUIRED=True,
+        WABOT_AGENT_OPERATOR_TOKEN="op-secret",
+    )
+    client = TestClient(create_app(settings))
+    token = _mint(rsa_key, kid)
+
+    r = client.get("/pair", headers={"Cf-Access-Jwt-Assertion": token})
+    set_cookie = r.headers.get("set-cookie", "")
+    assert "secure" in set_cookie.lower()
+
+
+def test_minted_cookie_is_not_secure_in_legacy_mode(tmp_path: Path) -> None:
+    """In legacy operator-token mode the cookie is minted over loopback HTTP
+    in local dev, so Secure must stay False to avoid breaking the bootstrap."""
+    settings = _make_settings(
+        tmp_path,
+        WABOT_AGENT_OPERATOR_TOKEN="op-secret",
+    )
+    client = TestClient(create_app(settings))
+
+    # ?token=… bootstrap path triggers the cookie mint.
+    r = client.get("/?token=op-secret")
+    set_cookie = r.headers.get("set-cookie", "")
+    assert "wabot_agent_operator_token=op-secret" in set_cookie
+    # Secure is absent (or False).
+    assert "secure" not in set_cookie.lower()

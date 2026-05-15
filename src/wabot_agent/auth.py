@@ -180,9 +180,17 @@ def maybe_mint_operator_cookie(
     or via the ``?token=`` query bootstrap.
 
     Idempotent — no-ops if the cookie is already present or if the operator
-    token is unset. Flags match the existing ``GET /`` bootstrap:
-    ``HttpOnly``, ``SameSite=Strict``. ``Secure=False`` because cloudflared
-    terminates TLS at the edge and FastAPI sees plain HTTP on loopback.
+    token is unset.
+
+    Flag selection:
+    - ``HttpOnly`` always — the cookie should never be readable from JS.
+    - ``SameSite=Strict`` always — same as the existing ``GET /`` bootstrap.
+    - ``Secure`` is True when ``cf_access_required=True``. Under that mode,
+      cloudflared terminates TLS at the edge and the only legitimate path to
+      this code is via an HTTPS-fronted tunnel; setting Secure=True ensures
+      the cookie is refused over plain HTTP in case the FastAPI port is
+      ever inadvertently exposed. In legacy operator-token mode the cookie
+      may be set over loopback HTTP for local dev, so Secure stays False.
     """
     if not settings.operator_token:
         return
@@ -197,6 +205,6 @@ def maybe_mint_operator_cookie(
         value=settings.operator_token,
         httponly=True,
         samesite="strict",
-        secure=False,
+        secure=settings.cf_access_required,
         max_age=60 * 60 * 24 * 30,  # 30 days
     )

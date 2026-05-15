@@ -131,11 +131,22 @@ def test_wrong_audience_rejected(rsa_key, kid, cfg):
 
 
 def test_expired_token_rejected(rsa_key, kid, cfg):
-    token = _make_jwt(rsa_key, kid, exp_offset=-10)
+    # Use -120s to clearly exceed the 30s leeway window in cf_access.py.
+    token = _make_jwt(rsa_key, kid, exp_offset=-120)
     fetcher = _fake_fetcher(_jwks_for(rsa_key, kid))
 
     with pytest.raises(CfAccessError, match="expired"):
         verify_access_jwt(token, cfg, fetcher=fetcher)
+
+
+def test_slightly_expired_token_within_leeway_accepted(rsa_key, kid, cfg):
+    """A token that just barely expired must still verify under the 30s leeway
+    — this absorbs typical VPS clock drift without weakening security."""
+    token = _make_jwt(rsa_key, kid, exp_offset=-5)
+    fetcher = _fake_fetcher(_jwks_for(rsa_key, kid))
+
+    identity = verify_access_jwt(token, cfg, fetcher=fetcher)
+    assert identity.email == "user@example.com"
 
 
 def test_unknown_kid_rejected(rsa_key, kid, cfg):

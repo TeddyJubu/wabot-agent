@@ -101,7 +101,7 @@ wabot daemon (loopback only, never via Cloudflare)
 |---|---|
 | `src/wabot_agent/config.py` | Add `cf_access_team_domain: str \| None`, `cf_access_aud: str \| None`, `cf_access_required: bool = False`. All under `WABOT_AGENT_*` with `VIGNESH_*` aliases for consistency. |
 | `src/wabot_agent/api.py` | (a) Replace `operator_dependency` with `human_dependency = Depends(verify_human)` on all human routes. (b) Add `GET /pair` returning the SPA shell with the same cookie-minting logic as `GET /`. (c) Pass `AuthIdentity.tenant_id` through to `run_agent(session_id=...)` for the chat APIs (today's behavior preserved when identity is `"operator"`). (d) `GET /api/stream` keeps emitting `pairing_changed` — the React side now subscribes. |
-| `src/wabot_agent/runtime_overrides.py` | Extend `MUTABLE_FIELDS` to include `cf_access_team_domain`, `cf_access_aud`, `cf_access_required`. They're config, not secrets, but only the operator should change them. |
+| `src/wabot_agent/runtime_overrides.py` | Document why `cf_access_team_domain`, `cf_access_aud`, `cf_access_required` are NOT in `MUTABLE_FIELDS` — they configure the auth boundary itself, so making them runtime-mutable via the API they protect would create a self-referential downgrade path. Same trust level as `operator_token`: restart-required. |
 | `pyproject.toml` | Add `pyjwt[crypto]>=2.8` to `dependencies`. |
 | `web/src/main.tsx` | Path-based render: if `window.location.pathname.replace(/\/$/, "") === "/pair"` render `<PairView />`, else `<App />`. Both wrapped in `<StrictMode>`. |
 | `web/src/store/index.ts` | Add `pairing` slice: `pairing: PairingState \| null`, `setPairing(p)`. Re-uses the existing `PairingState` type from `web/src/api/pairing.ts`. |
@@ -151,7 +151,7 @@ Reconnection: `EventSource` auto-reconnects on error. We add a 1-second initial 
 | Access JWT expired | 401, `{"detail": "Cloudflare Access token expired"}`. |
 | JWKS fetch fails on first call | 503, `{"detail": "Auth provider temporarily unavailable"}`. Retried on next request. JWKS cached for ~6h on success. |
 | Access valid but no operator token configured | Allow. `tenant_id` set from email. Operator cookie NOT minted (nothing to mint). |
-| Access valid and operator token configured but cookie missing | Mint cookie (`HttpOnly`, `SameSite=Strict`, `Secure=True` when behind HTTPS — same flags as today's `?token=` flow on `GET /`). |
+| Access valid and operator token configured but cookie missing | Mint cookie (`HttpOnly`, `SameSite=Strict`, `Secure=True` when `cf_access_required=True`; `Secure=False` otherwise to preserve the existing local-dev flow over loopback HTTP). |
 | wabot daemon unreachable | `/api/whatsapp/pairing` returns `{supported, reachable:false, detail:"…"}`. `PairView` shows "wabot unreachable" status pill, hides QR. No error toast. |
 | SSE stream disconnects mid-session | `EventSource` reconnects automatically. `PairView` shows a small "reconnecting…" pill until the next event arrives, then clears it. |
 | Two phones scan within the same window | Whoever's WhatsApp processes the link first wins; the other gets an error in the WhatsApp app. The bot's `store.db` reflects the winner. This is unchanged WhatsApp behavior. |
