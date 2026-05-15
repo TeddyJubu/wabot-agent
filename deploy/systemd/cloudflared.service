@@ -1,0 +1,20 @@
+[Unit]
+Description=Cloudflare Tunnel for wabot-agent
+After=network.target wabot-agent.service
+Wants=network.target
+
+[Service]
+Type=notify
+ExecStart=/usr/local/bin/cloudflared --no-autoupdate tunnel --config /etc/cloudflared/config.yml run
+Restart=on-failure
+RestartSec=5s
+User=cloudflared
+Group=cloudflared
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadOnlyPaths=/etc/cloudflared
+
+[Install]
+WantedBy=multi-user.target
