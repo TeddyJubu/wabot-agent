@@ -4,6 +4,25 @@ import { act, render, screen } from "@testing-library/react";
 import PairingPanel from "@/components/slide-overs/PairingPanel";
 import PairView from "@/components/PairView";
 import { useStore } from "@/store";
+import type { PairingState } from "@/types/pairing";
+
+// `PairingState` now mirrors the Python PairingPayload one-to-one (every
+// Optional field is `T | null`). These tests only care about a handful of
+// fields, so this helper fills the rest with safe defaults.
+function pairingFixture(overrides: Partial<PairingState>): PairingState {
+  return {
+    supported: true,
+    reachable: false,
+    logged_in: null,
+    connected: null,
+    qr_available: false,
+    event: null,
+    updated_at: null,
+    expires_at: null,
+    detail: null,
+    ...overrides,
+  };
+}
 
 beforeEach(() => {
   // Mock EventSource — jsdom doesn't ship one and PairView mounts a
@@ -26,12 +45,11 @@ describe("PairingPanel (slide-over)", () => {
   it("renders 'Linked & connected' when the bot is linked and online", () => {
     act(() => {
       useStore.setState({
-        pairing: {
-          qr_available: false,
+        pairing: pairingFixture({
           logged_in: true,
           connected: true,
           reachable: true,
-        },
+        }),
       });
     });
     render(<PairingPanel />);
@@ -41,12 +59,11 @@ describe("PairingPanel (slide-over)", () => {
   it("renders 'wabot unreachable' when pairing.reachable is false", () => {
     act(() => {
       useStore.setState({
-        pairing: {
-          qr_available: false,
+        pairing: pairingFixture({
           logged_in: false,
           connected: false,
           reachable: false,
-        },
+        }),
       });
     });
     render(<PairingPanel />);
@@ -67,12 +84,11 @@ describe("PairView (public /pair page)", () => {
   it("shows the connected state when the bot is linked and online", () => {
     act(() => {
       useStore.setState({
-        pairing: {
-          qr_available: false,
+        pairing: pairingFixture({
           logged_in: true,
           connected: true,
           reachable: true,
-        },
+        }),
       });
     });
     render(<PairView />);
@@ -85,12 +101,12 @@ describe("PairView (public /pair page)", () => {
   it("shows the QR card when a pairing code is available", () => {
     act(() => {
       useStore.setState({
-        pairing: {
+        pairing: pairingFixture({
           qr_available: true,
           logged_in: false,
           connected: false,
           reachable: true,
-        },
+        }),
       });
     });
     render(<PairView />);
@@ -103,12 +119,11 @@ describe("PairView (public /pair page)", () => {
   it("shows 'wabot unreachable' when reachable is false", () => {
     act(() => {
       useStore.setState({
-        pairing: {
-          qr_available: false,
+        pairing: pairingFixture({
           logged_in: false,
           connected: false,
           reachable: false,
-        },
+        }),
       });
     });
     render(<PairView />);

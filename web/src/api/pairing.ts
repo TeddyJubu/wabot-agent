@@ -1,21 +1,20 @@
-export interface PairingState {
-  qr_available: boolean;
-  logged_in: boolean | null;
-  connected: boolean | null;
-  reachable: boolean;
-  detail?: string | null;
-  updated_at?: string | null;
-  supported?: boolean;
-}
+import type { PairingState } from "@/types/pairing";
+
+export type { PairingState };
 
 export async function fetchPairing(): Promise<PairingState> {
   const res = await fetch("/api/whatsapp/pairing", { credentials: "include" });
   if (!res.ok) {
     return {
-      qr_available: false,
+      supported: false,
+      reachable: false,
       logged_in: null,
       connected: null,
-      reachable: false,
+      qr_available: false,
+      event: null,
+      updated_at: null,
+      expires_at: null,
+      detail: null,
     };
   }
   return res.json();
