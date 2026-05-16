@@ -127,6 +127,31 @@ Legend: **Done** = exposed via wabot + agent tool. **Partial** = limited. **Miss
 
 ---
 
+## PR workflow (default)
+
+`main` is protected: **no direct pushes** — use a branch + pull request.
+
+```bash
+# wabot-agent
+cd wabot-agent
+git checkout main && git pull
+git checkout -b cursor/phase-3-message-lifecycle
+# … edit, commit …
+git push -u origin HEAD
+gh pr create --base main --title "…" --body "…"
+# /babysit in Cursor until CI green, then merge on GitHub
+```
+
+**wabot** (sibling repo): same pattern; CI check name is `test`. Link both PRs in descriptions when a feature touches daemon + agent.
+
+Required checks before merge:
+- **wabot-agent:** `backend (ruff + pytest offline)`, `evals (offline)`, `web (vitest + build)`
+- **wabot:** `test`
+
+Branch naming: `cursor/<short-topic>` or `feat/<issue>-<topic>`.
+
+---
+
 ## Local ops cheatsheet
 
 ```bash
