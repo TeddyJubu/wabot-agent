@@ -260,6 +260,14 @@ class MemoryStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def bulk_record_inbound(self, messages: list[InboundMessage]) -> dict[str, Any]:
+        """Persist history-sync rows without marking them processed for auto-reply."""
+        stored = 0
+        for inbound in messages:
+            self.record_inbound(inbound)
+            stored += 1
+        return {"stored": stored, "count": len(messages)}
+
     def record_inbound(self, inbound: InboundMessage) -> None:
         safe_text = str(redact(inbound.text))
         with self.connect() as conn:

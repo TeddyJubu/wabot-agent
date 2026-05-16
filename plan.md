@@ -72,7 +72,7 @@ Legend: **Done** = exposed via wabot + agent tool. **Partial** = limited. **Miss
 | Reactions / edit / revoke | **Done** | `/messages/react`, `/messages/edit`, `DELETE /messages/{id}` | react/edit/revoke tools |
 | Polls | Missing | `/polls/*` | — |
 | App state (mute/pin/archive) | **Done** | `POST /chats/{jid}/mute|archive|pin` | mute/archive/pin tools |
-| History sync | Partial | webhook summary `WABOT_HISTORY_SYNC_URL` | — |
+| History sync | **Done** | `WABOT_HISTORY_SYNC_URL`, `WABOT_HISTORY_URL`, optional `WABOT_HISTORY_DB` | `POST /whatsapp/history` (backfill, no auto-reply) |
 | Blocklist / privacy | Missing | `/blocklist`, `/privacy` | — |
 | Newsletters | Missing | `/newsletters/*` | — |
 | Voice/video calls | N/A | whatsmeow does not support | — |
@@ -123,9 +123,16 @@ Legend: **Done** = exposed via wabot + agent tool. **Partial** = limited. **Miss
 - [x] `get_whatsapp_user_info`, `download_whatsapp_profile_picture` → `data/media/avatars/`
 - [x] UI envelope `user_profile` + `UserProfileCard`
 
-### Phase 5B — History-sync backfill (planned)
-**wabot:** parse `events.HistorySync`, optional `WABOT_HISTORY_DB`, batched history webhook.
-**wabot-agent:** `POST /whatsapp/history`, `bulk_record_inbound`, no auto-reply on history rows.
+### Phase 5B — History-sync backfill (done)
+**wabot**
+- [x] Parse `events.HistorySync` conversations via `ParseWebMessage` → batched `WABOT_HISTORY_URL`
+- [x] Optional `WABOT_HISTORY_DB` sqlite cache; caps via `WABOT_HISTORY_BATCH_SIZE` / `WABOT_HISTORY_MAX_MESSAGES`
+- [x] Summary webhook `WABOT_HISTORY_SYNC_URL` includes chunk/progress
+
+**wabot-agent**
+- [x] `POST /whatsapp/history` + `POST /whatsapp/history-sync` (inbound token auth)
+- [x] `bulk_record_inbound` — stores rows only, no `run_agent` / no `claim_message`
+- [x] SSE: `whatsapp_history_sync`, `whatsapp_history_batch`
 
 ---
 
