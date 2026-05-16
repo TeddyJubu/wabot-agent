@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import time
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -10,8 +12,10 @@ from typing import Any
 from agents import Agent, RunConfig, Runner, SQLiteSession
 from agents.tracing import set_tracing_disabled
 
+from .agent_hooks import RunObservabilityHooks
 from .config import Settings
 from .events import EventLog
+from .logging_config import run_id_context
 from .mcp import connected_mcp_servers
 from .memory import InboundMessage, MemoryStore
 from .models import build_model, model_settings
@@ -22,6 +26,8 @@ from .ui_envelopes import build_ui_envelope
 from .wabot import WabotClient
 
 set_tracing_disabled(True)
+
+logger = logging.getLogger("wabot_agent.agent")
 
 
 INSTRUCTIONS = """You are wabot-agent, a careful WhatsApp operations agent running on a VPS.
@@ -95,33 +101,72 @@ async def run_agent(
     )
     event_log.write("agent_run_start", {"run_id": run_id, "session_id": session_key})
 
-    async with connected_mcp_servers(settings.mcp_config) as mcp_servers:
-        agent = build_agent(settings, mcp_servers=mcp_servers)
-        result = await Runner.run(
-            agent,
-            _augment_prompt(prompt, inbound),
-            context=context,
-            max_turns=settings.max_agent_turns,
-            run_config=RunConfig(tracing_disabled=True, workflow_name="wabot-agent"),
-            session=sqlite_session,
+    # `run_id_context` stamps `run_id` on every log record emitted inside the
+    # `with` block — including tool calls via RunObservabilityHooks and any
+    # wabot client HTTP calls made by the tools. The contextvar is reset on
+    # exit (including on exception), so no leakage into the next request.
+    with run_id_context(run_id):
+        logger.info(
+            "agent_run_start",
+            extra={
+                "session_id": session_key,
+                "sender": inbound.sender if inbound else None,
+                "live_model": settings.live_model_enabled,
+                "model": (
+                    settings.openrouter_model if settings.live_model_enabled else "offline"
+                ),
+            },
         )
+        start = time.perf_counter()
+        try:
+            async with connected_mcp_servers(settings.mcp_config) as mcp_servers:
+                agent = build_agent(settings, mcp_servers=mcp_servers)
+                result = await Runner.run(
+                    agent,
+                    _augment_prompt(prompt, inbound),
+                    context=context,
+                    max_turns=settings.max_agent_turns,
+                    run_config=RunConfig(tracing_disabled=True, workflow_name="wabot-agent"),
+                    session=sqlite_session,
+                    hooks=RunObservabilityHooks(),
+                )
+        except Exception as exc:
+            logger.exception(
+                "agent_run_error",
+                extra={
+                    "session_id": session_key,
+                    "error_class": type(exc).__name__,
+                    "error_message": redact(str(exc)),
+                    "latency_ms": int((time.perf_counter() - start) * 1000),
+                },
+            )
+            raise
 
-    final_output = str(result.final_output)
-    memory.record_run(run_id, inbound.sender if inbound else None, prompt, final_output)
-    event_log.write(
-        "agent_run_complete",
-        {
-            "run_id": run_id,
-            "session_id": session_key,
-            "live_model": settings.live_model_enabled,
-            # Carry enough for the dashboard runs panel to render without a
-            # follow-up /api/runs fetch. EventLog passes both through redact()
-            # before broadcast, so the SSE wire payload stays redacted.
-            "sender": inbound.sender if inbound else None,
-            "user_input": prompt,
-            "final_output": final_output,
-        },
-    )
+        final_output = str(result.final_output)
+        memory.record_run(run_id, inbound.sender if inbound else None, prompt, final_output)
+        event_log.write(
+            "agent_run_complete",
+            {
+                "run_id": run_id,
+                "session_id": session_key,
+                "live_model": settings.live_model_enabled,
+                # Carry enough for the dashboard runs panel to render without a
+                # follow-up /api/runs fetch. EventLog passes both through redact()
+                # before broadcast, so the SSE wire payload stays redacted.
+                "sender": inbound.sender if inbound else None,
+                "user_input": prompt,
+                "final_output": final_output,
+            },
+        )
+        logger.info(
+            "agent_run_end",
+            extra={
+                "session_id": session_key,
+                "latency_ms": int((time.perf_counter() - start) * 1000),
+                "live_model": settings.live_model_enabled,
+                "final_output_len": len(final_output),
+            },
+        )
     return AgentRunResult(
         run_id=run_id,
         final_output=final_output,
@@ -174,97 +219,136 @@ async def run_agent_streamed(
     final_output = ""
     errored: Exception | None = None
 
-    async with connected_mcp_servers(settings.mcp_config) as mcp_servers:
-        agent = build_agent(settings, mcp_servers=mcp_servers)
-        run_config = RunConfig(tracing_disabled=True, workflow_name="wabot-agent")
-
-        # Try the real streaming path. OfflineModel raises NotImplementedError
-        # from stream_response — when that happens, or the SDK lacks streaming,
-        # fall back to a single delta/final pair so the wire contract holds.
-        # Gate on live_model_enabled (not just offline_mode) since the offline
-        # echo model is also used when there's no OPENROUTER_API_KEY.
-        use_streaming = hasattr(Runner, "run_streamed") and settings.live_model_enabled
-
-        if use_streaming:
-            try:
-                stream_result = Runner.run_streamed(
-                    agent,
-                    augmented,
-                    context=context,
-                    max_turns=settings.max_agent_turns,
-                    run_config=run_config,
-                    session=sqlite_session,
-                )
-                try:
-                    state: dict[str, str] = {}
-                    async for event in stream_result.stream_events():
-                        for payload in _translate_stream_event(event, state):
-                            yield payload
-                except Exception as exc:  # noqa: BLE001 — surface but cleanup
-                    errored = exc
-                    try:
-                        stream_result.cancel()
-                    except Exception:  # noqa: BLE001
-                        pass
-                else:
-                    final_output = str(stream_result.final_output or "")
-            except NotImplementedError:
-                # Model doesn't implement stream_response — fall through to the
-                # non-streamed Runner.run() path below.
-                use_streaming = False
-            except Exception as exc:  # noqa: BLE001
-                errored = exc
-
-        if not use_streaming and errored is None:
-            # Single-event fallback path (offline echo model, SDK without
-            # streaming, etc.). Identical wire contract: one synthetic delta
-            # carrying the entire final output, then the final marker.
-            try:
-                result = await Runner.run(
-                    agent,
-                    augmented,
-                    context=context,
-                    max_turns=settings.max_agent_turns,
-                    run_config=run_config,
-                    session=sqlite_session,
-                )
-                final_output = str(result.final_output)
-                if final_output:
-                    yield {"type": "delta", "text": final_output}
-            except Exception as exc:  # noqa: BLE001
-                errored = exc
-
-    if errored is not None:
-        message = redact(str(errored))
-        event_log.write(
-            "agent_run_failed",
-            {"run_id": run_id, "session_id": session_key, "error": message},
+    # `run_id_context` propagates `run_id` onto every log record emitted while
+    # the agent run is active. Stays bound across the streaming `async for`
+    # because `contextvars` are async-task-aware.
+    with run_id_context(run_id):
+        logger.info(
+            "agent_run_start",
+            extra={
+                "session_id": session_key,
+                "sender": inbound.sender if inbound else None,
+                "live_model": settings.live_model_enabled,
+                "model": (
+                    settings.openrouter_model if settings.live_model_enabled else "offline"
+                ),
+                "streaming": True,
+            },
         )
-        yield {"type": "error", "message": message}
-        return
+        start = time.perf_counter()
+        async with connected_mcp_servers(settings.mcp_config) as mcp_servers:
+            agent = build_agent(settings, mcp_servers=mcp_servers)
+            run_config = RunConfig(tracing_disabled=True, workflow_name="wabot-agent")
+            obs_hooks = RunObservabilityHooks()
 
-    memory.record_run(run_id, inbound.sender if inbound else None, prompt, final_output)
-    event_log.write(
-        "agent_run_complete",
-        {
+            # Try the real streaming path. OfflineModel raises NotImplementedError
+            # from stream_response — when that happens, or the SDK lacks streaming,
+            # fall back to a single delta/final pair so the wire contract holds.
+            # Gate on live_model_enabled (not just offline_mode) since the offline
+            # echo model is also used when there's no OPENROUTER_API_KEY.
+            use_streaming = hasattr(Runner, "run_streamed") and settings.live_model_enabled
+
+            if use_streaming:
+                try:
+                    stream_result = Runner.run_streamed(
+                        agent,
+                        augmented,
+                        context=context,
+                        max_turns=settings.max_agent_turns,
+                        run_config=run_config,
+                        session=sqlite_session,
+                        hooks=obs_hooks,
+                    )
+                    try:
+                        state: dict[str, str] = {}
+                        async for event in stream_result.stream_events():
+                            for payload in _translate_stream_event(event, state):
+                                yield payload
+                    except Exception as exc:  # noqa: BLE001 — surface but cleanup
+                        errored = exc
+                        try:
+                            stream_result.cancel()
+                        except Exception:  # noqa: BLE001
+                            pass
+                    else:
+                        final_output = str(stream_result.final_output or "")
+                except NotImplementedError:
+                    # Model doesn't implement stream_response — fall through to the
+                    # non-streamed Runner.run() path below.
+                    use_streaming = False
+                except Exception as exc:  # noqa: BLE001
+                    errored = exc
+
+            if not use_streaming and errored is None:
+                # Single-event fallback path (offline echo model, SDK without
+                # streaming, etc.). Identical wire contract: one synthetic delta
+                # carrying the entire final output, then the final marker.
+                try:
+                    result = await Runner.run(
+                        agent,
+                        augmented,
+                        context=context,
+                        max_turns=settings.max_agent_turns,
+                        run_config=run_config,
+                        session=sqlite_session,
+                        hooks=obs_hooks,
+                    )
+                    final_output = str(result.final_output)
+                    if final_output:
+                        yield {"type": "delta", "text": final_output}
+                except Exception as exc:  # noqa: BLE001
+                    errored = exc
+
+        if errored is not None:
+            message = redact(str(errored))
+            event_log.write(
+                "agent_run_failed",
+                {"run_id": run_id, "session_id": session_key, "error": message},
+            )
+            logger.error(
+                "agent_run_error",
+                extra={
+                    "session_id": session_key,
+                    "error_class": type(errored).__name__,
+                    "error_message": message,
+                    "latency_ms": int((time.perf_counter() - start) * 1000),
+                },
+            )
+            yield {"type": "error", "message": message}
+            return
+
+        memory.record_run(run_id, inbound.sender if inbound else None, prompt, final_output)
+        event_log.write(
+            "agent_run_complete",
+            {
+                "run_id": run_id,
+                "session_id": session_key,
+                "live_model": settings.live_model_enabled,
+                # Match the non-streaming run_agent payload so the dashboard SSE
+                # handler can render the run card without a follow-up /api/runs
+                # fetch on the streaming path too. EventLog.write redacts.
+                "sender": inbound.sender if inbound else None,
+                "user_input": prompt,
+                "final_output": final_output,
+            },
+        )
+        logger.info(
+            "agent_run_end",
+            extra={
+                "session_id": session_key,
+                "latency_ms": int((time.perf_counter() - start) * 1000),
+                "live_model": settings.live_model_enabled,
+                "final_output_len": len(final_output),
+                "streaming": True,
+            },
+        )
+        yield {
+            "type": "final",
             "run_id": run_id,
             "session_id": session_key,
+            "output": final_output,
             "live_model": settings.live_model_enabled,
-            # Match the non-streaming run_agent payload so the dashboard SSE
-            # handler can render the run card without a follow-up /api/runs
-            # fetch on the streaming path too. EventLog.write redacts.
-            "sender": inbound.sender if inbound else None,
-            "user_input": prompt,
-            "final_output": final_output,
-        },
-    )
-    yield {
-        "type": "final",
-        "run_id": run_id,
-        "session_id": session_key,
-        "output": final_output,
-        "live_model": settings.live_model_enabled,
-    }
+        }
 
 
 def _translate_stream_event(
