@@ -150,6 +150,43 @@ def test_inbound_requires_token(tmp_path: Path) -> None:
     assert client.post("/whatsapp/inbound", json=payload).status_code == 401
 
 
+def test_receipt_webhook_requires_token(tmp_path: Path) -> None:
+    client = TestClient(create_app(make_settings(tmp_path)))
+    payload = {
+        "chat": "15550001111@s.whatsapp.net",
+        "message_ids": ["abc"],
+        "receipt_type": "read",
+    }
+    assert client.post("/whatsapp/receipt", json=payload).status_code == 401
+
+
+def test_receipt_webhook_accepted(tmp_path: Path) -> None:
+    client = TestClient(create_app(make_settings(tmp_path)))
+    payload = {
+        "chat": "15550001111@s.whatsapp.net",
+        "message_ids": ["abc"],
+        "receipt_type": "read",
+        "timestamp": "2026-05-16T12:00:00Z",
+    }
+    headers = {"Authorization": "Bearer inbound-secret"}
+    resp = client.post("/whatsapp/receipt", json=payload, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["accepted"] is True
+
+
+def test_presence_webhook_accepted(tmp_path: Path) -> None:
+    client = TestClient(create_app(make_settings(tmp_path)))
+    payload = {
+        "chat": "15550001111@s.whatsapp.net",
+        "sender": "15550002222@s.whatsapp.net",
+        "state": "composing",
+    }
+    headers = {"Authorization": "Bearer inbound-secret"}
+    resp = client.post("/whatsapp/presence", json=payload, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["accepted"] is True
+
+
 def test_inbound_is_idempotent(tmp_path: Path) -> None:
     client = TestClient(create_app(make_settings(tmp_path)))
     payload = {"id": "msg-1", "from": "+15550001111", "text": "hello"}

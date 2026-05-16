@@ -63,6 +63,24 @@ class InboundPayload(BaseModel):
     has_media: bool = False
 
 
+class ReceiptPayload(BaseModel):
+    type: str = "receipt"
+    chat: str
+    message_ids: list[str] = Field(default_factory=list)
+    receipt_type: str
+    timestamp: str | None = None
+    sender: str | None = None
+    message_sender: str | None = None
+
+
+class PresencePayload(BaseModel):
+    type: str = "chat_presence"
+    chat: str
+    sender: str
+    state: str
+    media: str | None = None
+
+
 class SettingsPatch(BaseModel):
     """Partial update to runtime-mutable settings.
 
@@ -398,6 +416,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "run_id": result.run_id,
             "output": result.final_output,
         }
+
+    @app.post("/whatsapp/receipt")
+    async def whatsapp_receipt(
+        payload: ReceiptPayload,
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        _verify_inbound_auth(settings, authorization)
+        body = payload.model_dump()
+        hub.publish("whatsapp_receipt", body)
+        event_log.write(
+            "whatsapp_receipt",
+            {
+                "chat": payload.chat,
+                "receipt_type": payload.receipt_type,
+                "message_ids": payload.message_ids,
+            },
+        )
+        return {"accepted": True}
+
+    @app.post("/whatsapp/presence")
+    async def whatsapp_presence(
+        payload: PresencePayload,
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        _verify_inbound_auth(settings, authorization)
+        body = payload.model_dump()
+        hub.publish("whatsapp_presence", body)
+        event_log.write(
+            "whatsapp_presence",
+            {"chat": payload.chat, "sender": payload.sender, "state": payload.state},
+        )
+        return {"accepted": True}
 
     @app.get("/api/memory/{contact}", dependencies=[human_dependency])
     async def contact_memory(contact: str) -> dict[str, Any]:

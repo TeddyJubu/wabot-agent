@@ -183,6 +183,26 @@ class WabotClient:
             body["media"] = media
         return await self._post_json("/presence/typing", body)
 
+    async def mute_chat(
+        self, chat: str, mute: bool, duration_hours: int = 0
+    ) -> dict[str, Any]:
+        return await self._post_json(
+            f"/chats/{quote(chat, safe='')}/mute",
+            {"mute": mute, "duration_hours": duration_hours},
+        )
+
+    async def archive_chat(self, chat: str, archive: bool) -> dict[str, Any]:
+        return await self._post_json(
+            f"/chats/{quote(chat, safe='')}/archive",
+            {"archive": archive},
+        )
+
+    async def pin_chat(self, chat: str, pin: bool) -> dict[str, Any]:
+        return await self._post_json(
+            f"/chats/{quote(chat, safe='')}/pin",
+            {"pin": pin},
+        )
+
     async def inbox_recent(self, limit: int = 20) -> dict[str, Any]:
         if not self.token:
             return {
@@ -406,6 +426,17 @@ class FakeWabotClient(WabotClient):
         self, to: str, state: str = "composing", media: str | None = None
     ) -> dict[str, Any]:
         return {"ok": True, "to": to, "state": state}
+
+    async def mute_chat(
+        self, chat: str, mute: bool, duration_hours: int = 0
+    ) -> dict[str, Any]:
+        return {"ok": True, "chat": chat, "muted": mute}
+
+    async def archive_chat(self, chat: str, archive: bool) -> dict[str, Any]:
+        return {"ok": True, "chat": chat, "archived": archive}
+
+    async def pin_chat(self, chat: str, pin: bool) -> dict[str, Any]:
+        return {"ok": True, "chat": chat, "pinned": pin}
 
     async def react_message(
         self,

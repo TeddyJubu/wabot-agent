@@ -67,12 +67,12 @@ Legend: **Done** = exposed via wabot + agent tool. **Partial** = limited. **Miss
 | Group admin / invites | **Partial** | `POST /groups`, `GET /groups/{jid}`, invite, join | group lifecycle tools |
 | Mark read | **Done** | `POST /chats/read` | `mark_whatsapp_read` |
 | Typing presence | **Done** | `POST /presence/typing` | `send_whatsapp_typing` |
-| Receipt events | Missing | webhook `WABOT_RECEIPT_URL` | — |
-| Presence events | Missing | webhook | — |
+| Receipt events | **Done** | webhook `WABOT_RECEIPT_URL` | SSE `whatsapp_receipt` |
+| Presence events | **Done** | webhook `WABOT_PRESENCE_URL` | SSE `whatsapp_presence` |
 | Reactions / edit / revoke | **Done** | `/messages/react`, `/messages/edit`, `DELETE /messages/{id}` | react/edit/revoke tools |
 | Polls | Missing | `/polls/*` | — |
-| App state (mute/pin/archive) | Missing | `/chats/{jid}/*` | — |
-| History sync | Missing | background job | — |
+| App state (mute/pin/archive) | **Done** | `POST /chats/{jid}/mute|archive|pin` | mute/archive/pin tools |
+| History sync | Partial | webhook summary `WABOT_HISTORY_SYNC_URL` | — |
 | Blocklist / privacy | Missing | `/blocklist`, `/privacy` | — |
 | Newsletters | Missing | `/newsletters/*` | — |
 | Voice/video calls | N/A | whatsmeow does not support | — |
@@ -104,15 +104,15 @@ Legend: **Done** = exposed via wabot + agent tool. **Partial** = limited. **Miss
 - [x] `react_whatsapp_message`, `edit_whatsapp_message`, `revoke_whatsapp_message`
 - [x] `create_whatsapp_group`, `get_whatsapp_group`, `get_whatsapp_group_invite`, `join_whatsapp_group`
 
-### Phase 4 — Events + app state
+### Phase 4 — Events + app state (done)
 **wabot**
-- Webhooks: `WABOT_RECEIPT_URL`, `WABOT_PRESENCE_URL` (optional)
-- Subscribe to `events.Receipt`, `events.ChatPresence`, `events.HistorySync` (selective)
-- `POST /chats/{jid}/mute`, archive, pin via app state APIs
+- [x] Webhooks: `WABOT_RECEIPT_URL`, `WABOT_PRESENCE_URL`, optional `WABOT_HISTORY_SYNC_URL` (summary only)
+- [x] `events.Receipt`, `events.ChatPresence`, `events.HistorySync` in `eventHandler`
+- [x] `POST /chats/{jid}/mute`, `/archive`, `/pin` via `SendAppState`
 
 **wabot-agent**
-- SSE `pairing_changed`-style events for receipts/presence
-- Tools for mute/archive when needed
+- [x] `POST /whatsapp/receipt`, `/whatsapp/presence` → SSE `whatsapp_receipt`, `whatsapp_presence`
+- [x] `mute_whatsapp_chat`, `archive_whatsapp_chat`, `pin_whatsapp_chat`
 
 ---
 
