@@ -1,0 +1,145 @@
+#!/usr/bin/env python3
+"""Apply local/VPS production hygiene defaults (idempotent).
+
+- send_policy: allowlist (never allow_all)
+- allowed_recipients: union of .env + inbound_messages DB
+- operator token: generate if missing in .env
+- secret file modes: 0o600
+- wabot bind check: 127.0.0.1 only
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import secrets
+import sqlite3
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from wabot_agent.runtime_overrides import load_overrides, save_overrides  # noqa: E402
+
+
+def _chmod600(path: Path) -> None:
+    if path.exists():
+        os.chmod(path, 0o600)
+
+
+def _read_env(path: Path) -> dict[str, str]:
+    out: dict[str, str] = {}
+    if not path.exists():
+        return out
+    for line in path.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        out[key.strip()] = value.strip()
+    return out
+
+
+def _write_env_key(path: Path, key: str, value: str) -> None:
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    pattern = re.compile(rf"^{re.escape(key)}=.*$", re.MULTILINE)
+    replacement = f"{key}={value}"
+    if pattern.search(text):
+        text = pattern.sub(replacement, text, count=1)
+    else:
+        text = text.rstrip() + f"\n{replacement}\n"
+    path.write_text(text, encoding="utf-8")
+    _chmod600(path)
+
+
+def _contacts_from_db(db_path: Path) -> set[str]:
+    if not db_path.exists():
+        return set()
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            "select distinct sender, chat from inbound_messages"
+        ).fetchall()
+    finally:
+        conn.close()
+    out: set[str] = set()
+    for sender, chat in rows:
+        if sender:
+            out.add(str(sender).strip())
+        if chat:
+            out.add(str(chat).strip())
+    return {x for x in out if x}
+
+
+def main() -> int:
+    env_path = ROOT / ".env"
+    overrides_path = ROOT / "data" / "runtime_overrides.json"
+    db_path = ROOT / "data" / "wabot-agent.db"
+    wabot_env = Path(
+        os.environ.get("WABOT_ENV", str(ROOT.parent.parent.parent / "wabot" / "wabot.env"))
+    ).expanduser()
+
+    env = _read_env(env_path)
+    recipients: set[str] = set()
+    raw = env.get("WABOT_AGENT_ALLOWED_RECIPIENTS") or env.get("VIGNESH_ALLOWED_RECIPIENTS") or ""
+    recipients |= {p.strip() for p in raw.replace(",", " ").split() if p.strip()}
+    recipients |= _contacts_from_db(db_path)
+
+    if not recipients:
+        print(
+            "warning: no allowed_recipients yet — sends will be blocked until you add "
+            "numbers/JIDs via Settings or WABOT_AGENT_ALLOWED_RECIPIENTS",
+            file=sys.stderr,
+        )
+
+    # Bootstrap .env for VPS (immutable source of truth).
+    _write_env_key(env_path, "WABOT_AGENT_SEND_POLICY", "allowlist")
+    if recipients:
+        _write_env_key(
+            env_path,
+            "WABOT_AGENT_ALLOWED_RECIPIENTS",
+            ",".join(sorted(recipients)),
+        )
+
+    op_key = "WABOT_AGENT_OPERATOR_TOKEN"
+    if not env.get(op_key):
+        token = secrets.token_hex(32)
+        _write_env_key(env_path, op_key, token)
+        hint = ROOT / "data" / "operator-token.txt"
+        hint.parent.mkdir(parents=True, exist_ok=True)
+        hint.write_text(
+            f"{token}\n\nUse as ?token= on first dashboard visit or X-Operator-Token header.\n",
+            encoding="utf-8",
+        )
+        _chmod600(hint)
+        print(f"generated operator token → {hint} (also in .env)")
+
+    # Runtime overrides (what the running agent reads after restart).
+    overrides = load_overrides(overrides_path)
+    overrides["send_policy"] = "allowlist"
+    overrides["allowed_recipients"] = sorted(recipients)
+    save_overrides(overrides_path, overrides)
+    _chmod600(overrides_path)
+
+    if wabot_env.exists():
+        _chmod600(wabot_env)
+        bind = _read_env(wabot_env).get("WABOT_HTTP_ADDR", "127.0.0.1:7777")
+        host = bind.rsplit(":", 1)[0] if ":" in bind else bind
+        if host not in ("127.0.0.1", "localhost"):
+            print(f"error: wabot must bind loopback only, got {bind!r}", file=sys.stderr)
+            return 1
+        for key in ("WABOT_INBOUND_URL", "WABOT_RECEIPT_URL", "WABOT_PRESENCE_URL"):
+            url = _read_env(wabot_env).get(key, "")
+            if url and "127.0.0.1" not in url and "localhost" not in url:
+                print(f"warning: {key} should use loopback, got {url}", file=sys.stderr)
+
+    print("ok: send_policy=allowlist")
+    print(f"ok: allowed_recipients={len(recipients)}")
+    print("ok: secret file permissions 0600")
+    print("next: restart wabot-agent to load overrides; set CF Access before exposing tunnel")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
