@@ -354,6 +354,34 @@ async def _wabot_ready_or_block(
     return payload
 
 
+async def _dry_run_block(
+    ctx: RunContextWrapper[RuntimeContext], tool_name: str
+) -> dict[str, Any] | None:
+    if ctx.context.settings.send_policy != "dry_run":
+        return None
+    payload = {"ok": False, "reason": "dry_run"}
+    ctx.context.memory.record_tool_event(ctx.context.run_id, f"{tool_name}.blocked", payload)
+    return payload
+
+
+async def _invoke_chat_message_action(
+    ctx: RunContextWrapper[RuntimeContext],
+    tool_name: str,
+    chat: str,
+    invoke: Any,
+) -> dict[str, Any]:
+    ok, _, blocked = await _chat_send_or_block(ctx, tool_name, chat)
+    if not ok:
+        return blocked or {"ok": False}
+    try:
+        result = await invoke()
+        payload = {"ok": True, "chat": mask_phone(chat), "result": redact(result)}
+    except Exception as exc:
+        payload = {"ok": False, "detail": str(exc)}
+    ctx.context.memory.record_tool_event(ctx.context.run_id, tool_name, payload)
+    return payload
+
+
 async def _chat_send_or_block(
     ctx: RunContextWrapper[RuntimeContext], tool_name: str, chat: str
 ) -> tuple[bool, str, dict[str, Any] | None]:
@@ -382,16 +410,12 @@ async def react_whatsapp_message(
     sender: str | None = None,
 ) -> dict[str, Any]:
     """React to a WhatsApp message (emoji). Pass empty reaction to remove."""
-    ok, _, blocked = await _chat_send_or_block(ctx, "react_whatsapp_message", chat)
-    if not ok:
-        return blocked or {"ok": False}
-    try:
-        payload = await ctx.context.wabot.react_message(chat, message_id, reaction, sender=sender)
-        payload = {"ok": True, "chat": mask_phone(chat), "result": redact(payload)}
-    except Exception as exc:
-        payload = {"ok": False, "detail": str(exc)}
-    ctx.context.memory.record_tool_event(ctx.context.run_id, "react_whatsapp_message", payload)
-    return payload
+    return await _invoke_chat_message_action(
+        ctx,
+        "react_whatsapp_message",
+        chat,
+        lambda: ctx.context.wabot.react_message(chat, message_id, reaction, sender=sender),
+    )
 
 
 @function_tool
@@ -399,16 +423,12 @@ async def edit_whatsapp_message(
     ctx: RunContextWrapper[RuntimeContext], chat: str, message_id: str, text: str
 ) -> dict[str, Any]:
     """Edit a message you sent (within WhatsApp edit window)."""
-    ok, _, blocked = await _chat_send_or_block(ctx, "edit_whatsapp_message", chat)
-    if not ok:
-        return blocked or {"ok": False}
-    try:
-        payload = await ctx.context.wabot.edit_message(chat, message_id, text)
-        payload = {"ok": True, "chat": mask_phone(chat), "result": redact(payload)}
-    except Exception as exc:
-        payload = {"ok": False, "detail": str(exc)}
-    ctx.context.memory.record_tool_event(ctx.context.run_id, "edit_whatsapp_message", payload)
-    return payload
+    return await _invoke_chat_message_action(
+        ctx,
+        "edit_whatsapp_message",
+        chat,
+        lambda: ctx.context.wabot.edit_message(chat, message_id, text),
+    )
 
 
 @function_tool
@@ -419,16 +439,12 @@ async def revoke_whatsapp_message(
     sender: str | None = None,
 ) -> dict[str, Any]:
     """Revoke (delete for everyone) a message. For others' messages in groups, pass sender."""
-    ok, _, blocked = await _chat_send_or_block(ctx, "revoke_whatsapp_message", chat)
-    if not ok:
-        return blocked or {"ok": False}
-    try:
-        payload = await ctx.context.wabot.revoke_message(chat, message_id, sender=sender)
-        payload = {"ok": True, "chat": mask_phone(chat), "result": redact(payload)}
-    except Exception as exc:
-        payload = {"ok": False, "detail": str(exc)}
-    ctx.context.memory.record_tool_event(ctx.context.run_id, "revoke_whatsapp_message", payload)
-    return payload
+    return await _invoke_chat_message_action(
+        ctx,
+        "revoke_whatsapp_message",
+        chat,
+        lambda: ctx.context.wabot.revoke_message(chat, message_id, sender=sender),
+    )
 
 
 @function_tool
@@ -436,12 +452,8 @@ async def create_whatsapp_group(
     ctx: RunContextWrapper[RuntimeContext], name: str, participants: list[str]
 ) -> dict[str, Any]:
     """Create a WhatsApp group with the given name and participant phone numbers."""
-    if ctx.context.settings.send_policy == "dry_run":
-        payload = {"ok": False, "reason": "dry_run"}
-        ctx.context.memory.record_tool_event(
-            ctx.context.run_id, "create_whatsapp_group.blocked", payload
-        )
-        return payload
+    if blocked := await _dry_run_block(ctx, "create_whatsapp_group"):
+        return blocked
     blocked = await _wabot_ready_or_block(ctx, "create_whatsapp_group")
     if blocked is not None:
         return blocked
@@ -475,12 +487,8 @@ async def get_whatsapp_group_invite(
     ctx: RunContextWrapper[RuntimeContext], group_jid: str, reset: bool = False
 ) -> dict[str, Any]:
     """Get (or reset) the invite link for a group you administer."""
-    if ctx.context.settings.send_policy == "dry_run":
-        payload = {"ok": False, "reason": "dry_run"}
-        ctx.context.memory.record_tool_event(
-            ctx.context.run_id, "get_whatsapp_group_invite.blocked", payload
-        )
-        return payload
+    if blocked := await _dry_run_block(ctx, "get_whatsapp_group_invite"):
+        return blocked
     blocked = await _wabot_ready_or_block(ctx, "get_whatsapp_group_invite")
     if blocked is not None:
         return blocked
@@ -497,12 +505,8 @@ async def join_whatsapp_group(
     ctx: RunContextWrapper[RuntimeContext], invite_link: str
 ) -> dict[str, Any]:
     """Join a group using a chat.whatsapp.com invite link."""
-    if ctx.context.settings.send_policy == "dry_run":
-        payload = {"ok": False, "reason": "dry_run"}
-        ctx.context.memory.record_tool_event(
-            ctx.context.run_id, "join_whatsapp_group.blocked", payload
-        )
-        return payload
+    if blocked := await _dry_run_block(ctx, "join_whatsapp_group"):
+        return blocked
     blocked = await _wabot_ready_or_block(ctx, "join_whatsapp_group")
     if blocked is not None:
         return blocked
