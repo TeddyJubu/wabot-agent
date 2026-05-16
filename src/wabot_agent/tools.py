@@ -338,6 +338,182 @@ async def _send_whatsapp_media(
     return payload
 
 
+async def _wabot_ready_or_block(
+    ctx: RunContextWrapper[RuntimeContext], tool_name: str
+) -> dict[str, Any] | None:
+    health = await ctx.context.wabot.health()
+    if health.ready:
+        return None
+    payload = {
+        "ok": False,
+        "reason": "wabot_not_ready",
+        "ready": health.ready,
+        "detail": health.detail,
+    }
+    ctx.context.memory.record_tool_event(ctx.context.run_id, f"{tool_name}.blocked", payload)
+    return payload
+
+
+async def _chat_send_or_block(
+    ctx: RunContextWrapper[RuntimeContext], tool_name: str, chat: str
+) -> tuple[bool, str, dict[str, Any] | None]:
+    allowed, reason = _is_send_allowed(ctx.context.settings, chat)
+    if not allowed:
+        payload = {
+            "ok": False,
+            "sent": False,
+            "reason": reason,
+            "chat": mask_phone(chat),
+        }
+        ctx.context.memory.record_tool_event(ctx.context.run_id, f"{tool_name}.blocked", payload)
+        return False, reason, payload
+    blocked = await _wabot_ready_or_block(ctx, tool_name)
+    if blocked is not None:
+        return False, reason, blocked
+    return True, reason, None
+
+
+@function_tool
+async def react_whatsapp_message(
+    ctx: RunContextWrapper[RuntimeContext],
+    chat: str,
+    message_id: str,
+    reaction: str,
+    sender: str | None = None,
+) -> dict[str, Any]:
+    """React to a WhatsApp message (emoji). Pass empty reaction to remove."""
+    ok, _, blocked = await _chat_send_or_block(ctx, "react_whatsapp_message", chat)
+    if not ok:
+        return blocked or {"ok": False}
+    try:
+        payload = await ctx.context.wabot.react_message(chat, message_id, reaction, sender=sender)
+        payload = {"ok": True, "chat": mask_phone(chat), "result": redact(payload)}
+    except Exception as exc:
+        payload = {"ok": False, "detail": str(exc)}
+    ctx.context.memory.record_tool_event(ctx.context.run_id, "react_whatsapp_message", payload)
+    return payload
+
+
+@function_tool
+async def edit_whatsapp_message(
+    ctx: RunContextWrapper[RuntimeContext], chat: str, message_id: str, text: str
+) -> dict[str, Any]:
+    """Edit a message you sent (within WhatsApp edit window)."""
+    ok, _, blocked = await _chat_send_or_block(ctx, "edit_whatsapp_message", chat)
+    if not ok:
+        return blocked or {"ok": False}
+    try:
+        payload = await ctx.context.wabot.edit_message(chat, message_id, text)
+        payload = {"ok": True, "chat": mask_phone(chat), "result": redact(payload)}
+    except Exception as exc:
+        payload = {"ok": False, "detail": str(exc)}
+    ctx.context.memory.record_tool_event(ctx.context.run_id, "edit_whatsapp_message", payload)
+    return payload
+
+
+@function_tool
+async def revoke_whatsapp_message(
+    ctx: RunContextWrapper[RuntimeContext],
+    chat: str,
+    message_id: str,
+    sender: str | None = None,
+) -> dict[str, Any]:
+    """Revoke (delete for everyone) a message. For others' messages in groups, pass sender."""
+    ok, _, blocked = await _chat_send_or_block(ctx, "revoke_whatsapp_message", chat)
+    if not ok:
+        return blocked or {"ok": False}
+    try:
+        payload = await ctx.context.wabot.revoke_message(chat, message_id, sender=sender)
+        payload = {"ok": True, "chat": mask_phone(chat), "result": redact(payload)}
+    except Exception as exc:
+        payload = {"ok": False, "detail": str(exc)}
+    ctx.context.memory.record_tool_event(ctx.context.run_id, "revoke_whatsapp_message", payload)
+    return payload
+
+
+@function_tool
+async def create_whatsapp_group(
+    ctx: RunContextWrapper[RuntimeContext], name: str, participants: list[str]
+) -> dict[str, Any]:
+    """Create a WhatsApp group with the given name and participant phone numbers."""
+    if ctx.context.settings.send_policy == "dry_run":
+        payload = {"ok": False, "reason": "dry_run"}
+        ctx.context.memory.record_tool_event(
+            ctx.context.run_id, "create_whatsapp_group.blocked", payload
+        )
+        return payload
+    blocked = await _wabot_ready_or_block(ctx, "create_whatsapp_group")
+    if blocked is not None:
+        return blocked
+    try:
+        payload = await ctx.context.wabot.create_group(name, participants)
+        payload = {"ok": True, "result": redact(payload)}
+    except Exception as exc:
+        payload = {"ok": False, "detail": str(exc)}
+    ctx.context.memory.record_tool_event(ctx.context.run_id, "create_whatsapp_group", payload)
+    return payload
+
+
+@function_tool
+async def get_whatsapp_group(
+    ctx: RunContextWrapper[RuntimeContext], group_jid: str
+) -> dict[str, Any]:
+    """Get metadata and participants for a group by JID."""
+    blocked = await _wabot_ready_or_block(ctx, "get_whatsapp_group")
+    if blocked is not None:
+        return blocked
+    try:
+        payload = await ctx.context.wabot.get_group(group_jid)
+    except Exception as exc:
+        payload = {"ok": False, "detail": str(exc)}
+    ctx.context.memory.record_tool_event(ctx.context.run_id, "get_whatsapp_group", payload)
+    return redact(payload)
+
+
+@function_tool
+async def get_whatsapp_group_invite(
+    ctx: RunContextWrapper[RuntimeContext], group_jid: str, reset: bool = False
+) -> dict[str, Any]:
+    """Get (or reset) the invite link for a group you administer."""
+    if ctx.context.settings.send_policy == "dry_run":
+        payload = {"ok": False, "reason": "dry_run"}
+        ctx.context.memory.record_tool_event(
+            ctx.context.run_id, "get_whatsapp_group_invite.blocked", payload
+        )
+        return payload
+    blocked = await _wabot_ready_or_block(ctx, "get_whatsapp_group_invite")
+    if blocked is not None:
+        return blocked
+    try:
+        payload = await ctx.context.wabot.get_group_invite(group_jid, reset=reset)
+    except Exception as exc:
+        payload = {"ok": False, "detail": str(exc)}
+    ctx.context.memory.record_tool_event(ctx.context.run_id, "get_whatsapp_group_invite", payload)
+    return redact(payload)
+
+
+@function_tool
+async def join_whatsapp_group(
+    ctx: RunContextWrapper[RuntimeContext], invite_link: str
+) -> dict[str, Any]:
+    """Join a group using a chat.whatsapp.com invite link."""
+    if ctx.context.settings.send_policy == "dry_run":
+        payload = {"ok": False, "reason": "dry_run"}
+        ctx.context.memory.record_tool_event(
+            ctx.context.run_id, "join_whatsapp_group.blocked", payload
+        )
+        return payload
+    blocked = await _wabot_ready_or_block(ctx, "join_whatsapp_group")
+    if blocked is not None:
+        return blocked
+    try:
+        payload = await ctx.context.wabot.join_group(invite_link)
+    except Exception as exc:
+        payload = {"ok": False, "detail": str(exc)}
+    ctx.context.memory.record_tool_event(ctx.context.run_id, "join_whatsapp_group", payload)
+    return redact(payload)
+
+
 @function_tool
 async def download_whatsapp_media(
     ctx: RunContextWrapper[RuntimeContext],
@@ -546,6 +722,13 @@ def core_tools() -> list[Any]:
         send_whatsapp_document,
         send_whatsapp_audio,
         send_whatsapp_video,
+        react_whatsapp_message,
+        edit_whatsapp_message,
+        revoke_whatsapp_message,
+        create_whatsapp_group,
+        get_whatsapp_group,
+        get_whatsapp_group_invite,
+        join_whatsapp_group,
         recall_contact_memory,
         remember_contact_fact,
         recall_agent_notes,

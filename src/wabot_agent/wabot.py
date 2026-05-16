@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -85,11 +86,74 @@ class WabotClient:
             raise WabotError(f"wabot returned HTTP {resp.status_code}: {resp.text[:300]}")
         return resp.json()
 
+    async def _patch_json(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.patch(
+                f"{self.endpoint}{path}",
+                json=body,
+                headers=self._headers(),
+            )
+        return self._handle_response(resp)
+
+    async def _delete_json(self, path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.delete(
+                f"{self.endpoint}{path}",
+                params=params,
+                headers=self._headers(),
+            )
+        return self._handle_response(resp)
+
     async def contacts_lookup(self, phones: list[str]) -> dict[str, Any]:
         return await self._post_json("/contacts/lookup", {"phones": phones})
 
     async def list_groups(self) -> dict[str, Any]:
         return await self._get_json("/groups")
+
+    async def react_message(
+        self,
+        chat: str,
+        message_id: str,
+        reaction: str,
+        sender: str | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {
+            "chat": chat,
+            "message_id": message_id,
+            "reaction": reaction,
+        }
+        if sender:
+            body["sender"] = sender
+        return await self._post_json("/messages/react", body)
+
+    async def edit_message(self, chat: str, message_id: str, text: str) -> dict[str, Any]:
+        return await self._patch_json(
+            "/messages/edit",
+            {"chat": chat, "message_id": message_id, "text": text},
+        )
+
+    async def revoke_message(
+        self, chat: str, message_id: str, sender: str | None = None
+    ) -> dict[str, Any]:
+        params = {"chat": chat}
+        if sender:
+            params["sender"] = sender
+        return await self._delete_json(f"/messages/{quote(message_id, safe='')}", params)
+
+    async def create_group(self, name: str, participants: list[str]) -> dict[str, Any]:
+        return await self._post_json("/groups", {"name": name, "participants": participants})
+
+    async def get_group(self, jid: str) -> dict[str, Any]:
+        return await self._get_json(f"/groups/{quote(jid, safe='')}")
+
+    async def get_group_invite(self, jid: str, reset: bool = False) -> dict[str, Any]:
+        return await self._post_json(
+            f"/groups/{quote(jid, safe='')}/invite",
+            {"reset": reset},
+        )
+
+    async def join_group(self, invite_link: str) -> dict[str, Any]:
+        return await self._post_json("/groups/join", {"invite_link": invite_link})
 
     async def mark_read(
         self,
@@ -336,6 +400,35 @@ class FakeWabotClient(WabotClient):
         self, to: str, state: str = "composing", media: str | None = None
     ) -> dict[str, Any]:
         return {"ok": True, "to": to, "state": state}
+
+    async def react_message(
+        self,
+        chat: str,
+        message_id: str,
+        reaction: str,
+        sender: str | None = None,
+    ) -> dict[str, Any]:
+        return {"ok": True, "chat": chat, "message_id": message_id, "reaction": reaction}
+
+    async def edit_message(self, chat: str, message_id: str, text: str) -> dict[str, Any]:
+        return {"ok": True, "chat": chat, "message_id": message_id}
+
+    async def revoke_message(
+        self, chat: str, message_id: str, sender: str | None = None
+    ) -> dict[str, Any]:
+        return {"ok": True, "chat": chat, "message_id": message_id}
+
+    async def create_group(self, name: str, participants: list[str]) -> dict[str, Any]:
+        return {"ok": True, "group": {"jid": "fake@g.us", "name": name}}
+
+    async def get_group(self, jid: str) -> dict[str, Any]:
+        return {"ok": True, "group": {"jid": jid, "name": "fake group"}}
+
+    async def get_group_invite(self, jid: str, reset: bool = False) -> dict[str, Any]:
+        return {"ok": True, "invite_link": "https://chat.whatsapp.com/fake"}
+
+    async def join_group(self, invite_link: str) -> dict[str, Any]:
+        return {"ok": True, "jid": "fake@g.us"}
 
     async def send_text(self, to: str, text: str) -> dict[str, Any]:
         payload = {"id": f"fake-{len(self.sent) + 1}", "to": to, "text": text}

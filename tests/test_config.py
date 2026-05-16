@@ -70,6 +70,9 @@ def test_cf_access_settings_accept_vignesh_aliases(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("WABOT_AGENT_OFFLINE_MODE", "true")
+    monkeypatch.delenv("WABOT_AGENT_CF_ACCESS_TEAM_DOMAIN", raising=False)
+    monkeypatch.delenv("WABOT_AGENT_CF_ACCESS_AUD", raising=False)
+    monkeypatch.delenv("WABOT_AGENT_CF_ACCESS_REQUIRED", raising=False)
     monkeypatch.setenv(
         "VIGNESH_CF_ACCESS_TEAM_DOMAIN", "legacy.cloudflareaccess.com"
     )
