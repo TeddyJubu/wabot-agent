@@ -103,17 +103,9 @@ export default function App() {
             const id = ensureAssistant();
             if (e.ui) {
               attachCard(id, e.ui);
-            } else if (e.result !== undefined) {
-              // Non-envelope tool results are emitted with a redacted `result`
-              // payload — inline a minimal preview so the operator still sees
-              // that a tool ran and what it returned.
-              const preview =
-                typeof e.result === "string"
-                  ? e.result
-                  : JSON.stringify(e.result);
-              const tag = e.name ? `[${e.name}]` : "[tool]";
-              appendDelta(id, `\n\n${tag} ${preview}\n`);
             }
+            // Skip dumping raw tool JSON into the chat bubble — cards + the
+            // model's final prose are enough.
           } else if (e.type === "final") {
             const id = ensureAssistant();
             if (!deltaSeen && e.output) appendDelta(id, e.output);
@@ -182,11 +174,7 @@ export default function App() {
                         key={idx}
                         envelope={env}
                         onAction={(actionId) => {
-                          if (env.kind === "send_confirm" && actionId === "approve") {
-                            void submit("approved");
-                          } else if (env.kind === "send_confirm" && actionId === "cancel") {
-                            void submit("cancel — do not send");
-                          } else if (env.kind === "wabot_status" && actionId === "recheck") {
+                          if (env.kind === "wabot_status" && actionId === "recheck") {
                             void submit("recheck wabot health");
                           } else if (env.kind === "pairing_qr" && actionId === "refresh") {
                             // No real tool maps to __pairing_qr; route the

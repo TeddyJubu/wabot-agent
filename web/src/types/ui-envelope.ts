@@ -2,7 +2,8 @@ export type ToolKind =
   | "wabot_status"
   | "pairing_qr"
   | "send_confirm"
-  | "memory";
+  | "memory"
+  | "inbox_message";
 
 export interface ToolAction {
   id: string;
@@ -48,4 +49,16 @@ export interface MemoryFact {
 export interface MemoryData {
   contact_masked: string;
   facts: MemoryFact[];
+}
+
+export interface InboxPreviewMessage {
+  sender: string;
+  text: string;
+}
+
+export interface InboxMessageData {
+  count: number;
+  found: boolean;
+  messages: InboxPreviewMessage[];
+  source?: string;
 }

@@ -11,6 +11,25 @@ from __future__ import annotations
 from wabot_agent.ui_envelopes import build_ui_envelope
 
 
+def test_get_last_inbound_builds_inbox_card() -> None:
+    env = build_ui_envelope(
+        "get_last_whatsapp_inbound_message",
+        {
+            "found": True,
+            "message": {
+                "from": "+15550001111",
+                "text": "hello there",
+                "push_name": "Teddy",
+            },
+            "source": "wabot_daemon",
+        },
+    )
+    assert env is not None
+    assert env["kind"] == "inbox_message"
+    assert env["data"]["messages"][0]["sender"] == "Teddy"
+    assert env["data"]["messages"][0]["text"] == "hello there"
+
+
 def test_unknown_tool_returns_none() -> None:
     assert build_ui_envelope("not_a_tool", {"foo": 1}) is None
 

@@ -132,6 +132,30 @@ def _memory(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _inbox_message(result: dict[str, Any]) -> dict[str, Any]:
+    """Compact card for inbox read tools — never dump raw JSON in chat."""
+    messages: list[dict[str, Any]] = []
+    if isinstance(result.get("message"), dict):
+        messages = [result["message"]]
+    elif isinstance(result.get("messages"), list):
+        messages = [m for m in result["messages"] if isinstance(m, dict)]
+    preview: list[dict[str, str]] = []
+    for msg in messages[-5:]:
+        sender = str(msg.get("push_name") or msg.get("from") or msg.get("sender") or "unknown")
+        text = _truncate(msg.get("text") or "", 120)
+        preview.append({"sender": sender, "text": text or "(no text)"})
+    return {
+        "kind": "inbox_message",
+        "data": {
+            "count": len(messages) if messages else int(result.get("count") or 0),
+            "found": bool(result.get("found", messages)),
+            "messages": preview,
+            "source": result.get("source"),
+        },
+        "actions": [],
+    }
+
+
 def _pairing_qr(result: dict[str, Any]) -> dict[str, Any]:
     return {
         "kind": "pairing_qr",
@@ -155,6 +179,8 @@ _BUILDERS: dict[str, _Builder] = {
     "send_whatsapp_video": lambda r: _send_confirm("send_whatsapp_video", r),
     "recall_contact_memory": _memory,
     "remember_contact_fact": _memory,
+    "get_last_whatsapp_inbound_message": _inbox_message,
+    "list_whatsapp_inbound_messages": _inbox_message,
     "__pairing_qr": _pairing_qr,
 }
 
