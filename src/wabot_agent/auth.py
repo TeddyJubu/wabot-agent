@@ -27,6 +27,8 @@ without route changes.
 
 from __future__ import annotations
 
+import hashlib
+import logging
 import secrets
 from dataclasses import dataclass
 from typing import Literal
@@ -35,6 +37,20 @@ from fastapi import Cookie, Header, HTTPException, Query, Request, status
 
 from .cf_access import CfAccessConfig, CfAccessError, verify_access_jwt
 from .config import Settings
+
+logger = logging.getLogger("wabot_agent.auth")
+
+
+def _hash_sub(sub: str | None) -> str | None:
+    """Compute sha256(sub)[:16] for audit logs.
+
+    The raw JWT ``sub`` (often an email or stable user id) is never persisted
+    to logs — only the truncated digest goes onto the ``auth_login`` event so
+    operators can correlate logins across requests without storing PII.
+    """
+    if not sub:
+        return None
+    return hashlib.sha256(sub.encode("utf-8")).hexdigest()[:16]
 
 AuthSource = Literal[
     "operator-cookie",
@@ -117,6 +133,13 @@ def verify_human_factory(settings: Settings):
         # 1. Cloudflare Access path (required mode).
         if settings.cf_access_required:
             if not cf_access_jwt:
+                logger.warning(
+                    "auth_denied",
+                    extra={
+                        "source_attempted": "cf-access",
+                        "reason": "missing_jwt",
+                    },
+                )
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Cloudflare Access required",
@@ -130,11 +153,27 @@ def verify_human_factory(settings: Settings):
                     ),
                 )
             except CfAccessError as exc:
+                logger.warning(
+                    "auth_denied",
+                    extra={
+                        "source_attempted": "cf-access",
+                        "reason": str(exc)[:200],
+                    },
+                )
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail=f"Cloudflare Access: {exc}",
                 ) from exc
             request.state.cf_access_identity = access
+            logger.info(
+                "auth_login",
+                extra={
+                    "source": "cf-access",
+                    "tenant_id": _OPERATOR_TENANT_ID,
+                    # Hashed truncated sub only — raw email never lands here.
+                    "email_hash": _hash_sub(access.sub),
+                },
+            )
             return AuthIdentity(
                 tenant_id=_OPERATOR_TENANT_ID,
                 email=access.email,
@@ -158,11 +197,26 @@ def verify_human_factory(settings: Settings):
             request.state.pending_cookie_token = token
 
         if source is None:
+            logger.warning(
+                "auth_denied",
+                extra={
+                    "source_attempted": "operator",
+                    "reason": "no_credential_matched",
+                },
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="operator auth required",
             )
 
+        logger.info(
+            "auth_login",
+            extra={
+                "source": source,
+                "tenant_id": _OPERATOR_TENANT_ID,
+                "email_hash": None,
+            },
+        )
         return AuthIdentity(
             tenant_id=_OPERATOR_TENANT_ID,
             email=None,
