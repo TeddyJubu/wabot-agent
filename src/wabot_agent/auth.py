@@ -13,8 +13,8 @@ Two paths, picked at request time by the `cf_access_required` setting:
      - ``X-Operator-Token`` header
      - ``Authorization: Bearer <token>``
      - ``wabot_agent_operator_token`` cookie
-     - ``?token=`` query string (legacy bootstrap, used by GET / and /pair on
-       first visit before the cookie is set)
+     - ``?token=`` query string (legacy bootstrap, still supported)
+     - ``POST /api/auth/login`` with ``dashboard_password`` or operator token
 
 When ``settings.operator_token`` is unset, the operator-token path returns
 the synthetic source ``"open"`` — preserving today's local-dev behavior
@@ -60,6 +60,45 @@ class AuthIdentity:
 
 
 _OPERATOR_TENANT_ID = "operator"
+_COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
+
+
+def request_is_https(request: Request) -> bool:
+    if request.url.scheme == "https":
+        return True
+    forwarded = request.headers.get("x-forwarded-proto", "")
+    return forwarded.split(",")[0].strip().lower() == "https"
+
+
+def password_grants_dashboard_access(settings: Settings, password: str) -> bool:
+    """True when password matches the optional dashboard PIN or operator token."""
+    if settings.dashboard_password and secrets.compare_digest(
+        password, settings.dashboard_password
+    ):
+        return True
+    if settings.operator_token and secrets.compare_digest(
+        password, settings.operator_token
+    ):
+        return True
+    return False
+
+
+def mint_operator_session_cookie(
+    response, request: Request, settings: Settings
+) -> None:
+    """Set the HttpOnly operator session cookie (idempotent)."""
+    if not settings.operator_token:
+        return
+    if request.cookies.get("wabot_agent_operator_token") == settings.operator_token:
+        return
+    response.set_cookie(
+        key="wabot_agent_operator_token",
+        value=settings.operator_token,
+        httponly=True,
+        samesite="strict",
+        secure=settings.cf_access_required or request_is_https(request),
+        max_age=_COOKIE_MAX_AGE,
+    )
 
 
 def _verify_operator_token(
@@ -173,6 +212,43 @@ def verify_human_factory(settings: Settings):
     return verify_human
 
 
+def resolve_human_factory(settings: Settings):
+    """Like ``verify_human_factory`` but returns ``None`` instead of raising."""
+
+    verify_human = verify_human_factory(settings)
+
+    async def resolve_human(
+        request: Request,
+        token: str | None = Query(default=None),
+        x_operator_token: str | None = Header(default=None),
+        authorization: str | None = Header(default=None),
+        operator_session: str | None = Cookie(
+            default=None, alias="wabot_agent_operator_token"
+        ),
+        cf_access_jwt: str | None = Header(
+            default=None, alias="Cf-Access-Jwt-Assertion"
+        ),
+    ) -> AuthIdentity | None:
+        try:
+            return await verify_human(
+                request=request,
+                token=token,
+                x_operator_token=x_operator_token,
+                authorization=authorization,
+                operator_session=operator_session,
+                cf_access_jwt=cf_access_jwt,
+            )
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_401_UNAUTHORIZED:
+                # CF Access mode must 401 so the edge can challenge, not /login.
+                if settings.cf_access_required:
+                    raise
+                return None
+            raise
+
+    return resolve_human
+
+
 def maybe_mint_operator_cookie(
     response, request: Request, settings: Settings
 ) -> None:
@@ -181,16 +257,6 @@ def maybe_mint_operator_cookie(
 
     Idempotent — no-ops if the cookie is already present or if the operator
     token is unset.
-
-    Flag selection:
-    - ``HttpOnly`` always — the cookie should never be readable from JS.
-    - ``SameSite=Strict`` always — same as the existing ``GET /`` bootstrap.
-    - ``Secure`` is True when ``cf_access_required=True``. Under that mode,
-      cloudflared terminates TLS at the edge and the only legitimate path to
-      this code is via an HTTPS-fronted tunnel; setting Secure=True ensures
-      the cookie is refused over plain HTTP in case the FastAPI port is
-      ever inadvertently exposed. In legacy operator-token mode the cookie
-      may be set over loopback HTTP for local dev, so Secure stays False.
     """
     if not settings.operator_token:
         return
@@ -200,11 +266,59 @@ def maybe_mint_operator_cookie(
     has_cf_access = getattr(request.state, "cf_access_identity", None) is not None
     if not (pending or has_cf_access):
         return
-    response.set_cookie(
-        key="wabot_agent_operator_token",
-        value=settings.operator_token,
-        httponly=True,
-        samesite="strict",
-        secure=settings.cf_access_required,
-        max_age=60 * 60 * 24 * 30,  # 30 days
+    mint_operator_session_cookie(response, request, settings)
+
+
+LOGIN_PAGE_HTML = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>wabot — sign in</title>
+  <style>
+    :root { color-scheme: light dark; font-family: system-ui, sans-serif; }
+    body {
+      margin: 0; min-height: 100dvh; display: grid; place-items: center;
+      background: #0f1419; color: #e7e9ea;
+    }
+    form {
+      width: min(22rem, 92vw); padding: 1.75rem; border-radius: 12px;
+      background: #15202b; box-shadow: 0 8px 32px rgba(0,0,0,.35);
+    }
+    h1 { margin: 0 0 .25rem; font-size: 1.25rem; font-weight: 600; }
+    p { margin: 0 0 1.25rem; font-size: .9rem; color: #8b98a5; }
+    label { display: block; font-size: .85rem; margin-bottom: .35rem; }
+    input {
+      width: 100%; box-sizing: border-box; padding: .65rem .75rem;
+      border: 1px solid #38444d; border-radius: 8px; background: #0f1419;
+      color: inherit; font-size: 1rem;
+    }
+    button {
+      margin-top: 1rem; width: 100%; padding: .7rem; border: 0; border-radius: 8px;
+      background: #1d9bf0; color: #fff; font-size: 1rem; font-weight: 600;
+      cursor: pointer;
+    }
+    button:hover { background: #1a8cd8; }
+    .err { margin-top: .75rem; color: #f4212e; font-size: .85rem; }
+  </style>
+</head>
+<body>
+  <form method="post" action="/api/auth/login">
+    <input type="hidden" name="next" value="{next}" />
+    <h1>wabot dashboard</h1>
+    <p>Enter your dashboard password to continue.</p>
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" autofocus required />
+    {error}
+    <button type="submit">Sign in</button>
+  </form>
+</body>
+</html>
+"""
+
+
+def render_login_page(*, error_html: str = "", next_path: str = "/") -> str:
+    safe_next = next_path if next_path.startswith("/") and not next_path.startswith("//") else "/"
+    return (
+        LOGIN_PAGE_HTML.replace("{error}", error_html).replace("{next}", safe_next)
     )

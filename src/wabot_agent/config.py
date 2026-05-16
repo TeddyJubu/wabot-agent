@@ -86,6 +86,12 @@ class Settings(BaseSettings):
         default=None,
         validation_alias=AliasChoices("WABOT_AGENT_OPERATOR_TOKEN", "VIGNESH_OPERATOR_TOKEN"),
     )
+    dashboard_password: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_DASHBOARD_PASSWORD", "VIGNESH_DASHBOARD_PASSWORD"
+        ),
+    )
 
     send_policy: Literal["dry_run", "allowlist", "allow_all"] = Field(
         default="dry_run",

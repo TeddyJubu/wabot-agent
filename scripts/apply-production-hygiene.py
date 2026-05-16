@@ -146,8 +146,26 @@ def main() -> int:
         if host not in ("127.0.0.1", "localhost"):
             print(f"error: wabot must bind loopback only, got {bind!r}", file=sys.stderr)
             return 1
-        for key in ("WABOT_INBOUND_URL", "WABOT_RECEIPT_URL", "WABOT_PRESENCE_URL"):
-            url = _read_env(wabot_env).get(key, "")
+        loopback_defaults = {
+            "WABOT_INBOUND_URL": "http://127.0.0.1:8787/whatsapp/inbound",
+            "WABOT_RECEIPT_URL": "http://127.0.0.1:8787/whatsapp/receipt",
+            "WABOT_PRESENCE_URL": "http://127.0.0.1:8787/whatsapp/presence",
+            "WABOT_HISTORY_SYNC_URL": "http://127.0.0.1:8787/whatsapp/history-sync",
+            "WABOT_HISTORY_URL": "http://127.0.0.1:8787/whatsapp/history",
+            "WABOT_HISTORY_DB": str(wabot_env.parent / "history.db"),
+            "WABOT_HISTORY_BATCH_SIZE": "50",
+            "WABOT_HISTORY_MAX_MESSAGES": "500",
+        }
+        wabot_values = _read_env(wabot_env)
+        for key, default in loopback_defaults.items():
+            if not wabot_values.get(key):
+                _write_env_key(wabot_env, key, default)
+                print(f"ok: set {key} in wabot.env")
+        wabot_values = _read_env(wabot_env)
+        for key in loopback_defaults:
+            if key in ("WABOT_HISTORY_DB", "WABOT_HISTORY_BATCH_SIZE", "WABOT_HISTORY_MAX_MESSAGES"):
+                continue
+            url = wabot_values.get(key, "")
             if url and "127.0.0.1" not in url and "localhost" not in url:
                 print(f"warning: {key} should use loopback, got {url}", file=sys.stderr)
 
