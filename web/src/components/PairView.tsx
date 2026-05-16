@@ -1,7 +1,8 @@
+import { useState } from "react";
 import { useStore } from "@/store";
 import { usePairingStream } from "@/hooks/usePairingStream";
 import PairingQrCard from "@/components/tool-cards/PairingQrCard";
-import type { PairingState } from "@/api/pairing";
+import { fetchPairing, requestNewPairingQr, type PairingState } from "@/api/pairing";
 
 function statusText(p: PairingState | null): string {
   if (!p) return "Checking…";
@@ -28,6 +29,10 @@ function statusClass(p: PairingState | null): string {
 export default function PairView() {
   usePairingStream();
   const pairing = useStore((s) => s.pairing);
+  const setPairing = useStore((s) => s.setPairing);
+  const [refreshing, setRefreshing] = useState(false);
+  const [requestingQr, setRequestingQr] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   return (
     <div className="mx-auto flex min-h-full w-full max-w-[480px] flex-col px-4 py-8">
@@ -50,15 +55,45 @@ export default function PairView() {
               available: !!pairing?.qr_available,
               linked_device: null,
             }}
-            actions={[]}
-            onAction={() => {}}
+            actions={[
+              {
+                id: "new_qr",
+                label: requestingQr ? "Starting…" : "New QR",
+                tool: "__pairing_qr",
+                args: {},
+              },
+              {
+                id: "refresh",
+                label: refreshing ? "Refreshing…" : "Refresh",
+                tool: "__pairing_qr",
+                args: {},
+              },
+            ]}
+            onAction={(id) => {
+              if (id === "new_qr") {
+                setRequestingQr(true);
+                setError(null);
+                void requestNewPairingQr()
+                  .then(setPairing)
+                  .catch((err) =>
+                    setError(err instanceof Error ? err.message : "Could not request a new QR."),
+                  )
+                  .finally(() => setRequestingQr(false));
+                return;
+              }
+              setRefreshing(true);
+              setError(null);
+              void fetchPairing()
+                .then(setPairing)
+                .finally(() => setRefreshing(false));
+            }}
           />
         )}
       </div>
 
-      {pairing?.detail && (
+      {(error || pairing?.detail) && (
         <p className="mt-3 rounded-card border border-border bg-bg-app p-3 text-xs text-fg-muted">
-          {pairing.detail}
+          {error ?? pairing?.detail}
         </p>
       )}
 

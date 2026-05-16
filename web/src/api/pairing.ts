@@ -21,6 +21,19 @@ export async function fetchPairing(): Promise<PairingState> {
   return res.json();
 }
 
+/** Restart wabot and wait for a fresh pairing QR from the daemon. */
+export async function requestNewPairingQr(): Promise<PairingState> {
+  const res = await fetch("/api/whatsapp/pairing/restart", {
+    method: "POST",
+    credentials: "include",
+  });
+  const body = (await res.json().catch(() => ({}))) as PairingState & { detail?: string };
+  if (!res.ok) {
+    throw new Error(body.detail ?? `Could not request a new QR (${res.status})`);
+  }
+  return body;
+}
+
 export interface PairingSubscription {
   close: () => void;
 }

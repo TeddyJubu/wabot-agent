@@ -94,6 +94,15 @@ class MemoryStore:
                     payload text not null,
                     created_at text not null
                 );
+                create table if not exists inbound_messages (
+                    message_id text primary key,
+                    sender text not null,
+                    chat text,
+                    text text not null,
+                    push_name text,
+                    is_group integer not null default 0,
+                    received_at text not null
+                );
                 """
             )
             self._ensure_column(
@@ -242,6 +251,62 @@ class MemoryStore:
                 "select key, value, updated_at from agent_notes order by updated_at desc limit 100"
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def record_inbound(self, inbound: InboundMessage) -> None:
+        safe_text = str(redact(inbound.text))
+        with self.connect() as conn:
+            conn.execute(
+                """
+                insert into inbound_messages (
+                    message_id, sender, chat, text, push_name, is_group, received_at
+                ) values (?, ?, ?, ?, ?, ?, ?)
+                on conflict(message_id) do update set
+                  sender = excluded.sender,
+                  chat = excluded.chat,
+                  text = excluded.text,
+                  push_name = excluded.push_name,
+                  is_group = excluded.is_group,
+                  received_at = excluded.received_at
+                """,
+                (
+                    inbound.id,
+                    inbound.sender,
+                    inbound.chat,
+                    safe_text,
+                    inbound.push_name,
+                    1 if inbound.is_group else 0,
+                    inbound.timestamp or now_iso(),
+                ),
+            )
+
+    def recent_inbound(self, limit: int = 20) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                select message_id, sender, chat, text, push_name, is_group, received_at
+                from inbound_messages
+                order by received_at desc
+                limit ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [redact(dict(row)) for row in rows]
+
+    def last_inbound(self, contact: str | None = None) -> dict[str, Any] | None:
+        query = """
+            select message_id, sender, chat, text, push_name, is_group, received_at
+            from inbound_messages
+        """
+        params: tuple[Any, ...]
+        if contact:
+            query += " where sender = ? or chat = ?"
+            params = (contact, contact, 1)
+        else:
+            params = (1,)
+        query += " order by received_at desc limit ?"
+        with self.connect() as conn:
+            row = conn.execute(query, params).fetchone()
+        return redact(dict(row)) if row else None
 
     def record_run(
         self, run_id: str, sender: str | None, user_input: str, final_output: str

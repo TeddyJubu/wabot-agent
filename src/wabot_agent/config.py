@@ -78,6 +78,10 @@ class Settings(BaseSettings):
         default=Path("~/.config/wabot/token"), alias="WABOT_TOKEN_FILE"
     )
     wabot_inbound_token: str | None = Field(default=None, alias="WABOT_INBOUND_TOKEN")
+    wabot_home: Path | None = Field(default=None, alias="WABOT_AGENT_WABOT_HOME")
+    wabot_restart_command: str | None = Field(
+        default=None, alias="WABOT_AGENT_WABOT_RESTART_COMMAND"
+    )
     operator_token: str | None = Field(
         default=None,
         validation_alias=AliasChoices("WABOT_AGENT_OPERATOR_TOKEN", "VIGNESH_OPERATOR_TOKEN"),

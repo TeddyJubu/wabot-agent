@@ -43,6 +43,55 @@ def test_health_and_ready(tmp_path: Path) -> None:
     assert ready["send_policy"] == "dry_run"
 
 
+def test_pairing_restart_requires_wabot_home(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("WABOT_AGENT_WABOT_HOME", raising=False)
+    monkeypatch.delenv("WABOT_AGENT_WABOT_RESTART_COMMAND", raising=False)
+    settings = make_settings(tmp_path).model_copy(
+        update={"wabot_home": None, "wabot_restart_command": None}
+    )
+    client = TestClient(create_app(settings))
+
+    resp = client.post("/api/whatsapp/pairing/restart")
+
+    assert resp.status_code == 503
+    assert "WABOT_AGENT_WABOT_HOME" in resp.json()["detail"]
+
+
+def test_pairing_restart_returns_fresh_qr(tmp_path: Path, monkeypatch) -> None:
+    from wabot_agent.wabot import WabotPairingQR
+
+    settings = make_settings(tmp_path).model_copy(
+        update={"WABOT_AGENT_WABOT_HOME": str(tmp_path / "wabot")}
+    )
+    client = TestClient(create_app(settings))
+
+    async def fake_restart(_settings) -> None:
+        return None
+
+    async def fake_pairing_qr():
+        return WabotPairingQR(
+            supported=True,
+            reachable=True,
+            logged_in=False,
+            connected=True,
+            qr="fresh-code",
+            event="code",
+        )
+
+    from wabot_agent import wabot_process
+
+    monkeypatch.setattr(wabot_process, "restart_wabot_daemon", fake_restart)
+
+    app = client.app
+    wabot = app.state.wabot
+    wabot.pairing_qr = fake_pairing_qr  # type: ignore[method-assign]
+
+    resp = client.post("/api/whatsapp/pairing/restart")
+
+    assert resp.status_code == 200
+    assert resp.json()["qr_available"] is True
+
+
 def test_pairing_endpoint_reports_missing_token(tmp_path: Path) -> None:
     client = TestClient(create_app(make_settings(tmp_path)))
 
@@ -60,7 +109,7 @@ def test_qr_svg_renderer() -> None:
 
     assert svg.startswith(b"<?xml")
     assert b"<svg" in svg
-    assert b"path" in svg
+    assert b'fill="white"' in svg
 
 
 def test_operator_endpoints_require_token_when_configured(tmp_path: Path) -> None:

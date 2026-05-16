@@ -111,17 +111,25 @@ def build_model(settings: Settings) -> Model:
     )
 
 
+def _omit_tool_choice(model: str) -> bool:
+    """OpenRouter free Nemotron endpoints reject explicit tool_choice values."""
+    lowered = model.lower()
+    return "nemotron" in lowered or ":free" in lowered
+
+
 def model_settings(settings: Settings) -> ModelSettings:
-    return ModelSettings(
-        temperature=0.2,
-        max_tokens=1800,
-        parallel_tool_calls=False,
-        tool_choice=_tool_choice_auto(),
-        extra_headers={
+    kwargs: dict[str, Any] = {
+        "temperature": 0.2,
+        "max_tokens": 1800,
+        "parallel_tool_calls": False,
+        "extra_headers": {
             "HTTP-Referer": settings.openrouter_site_url,
             "X-Title": settings.openrouter_app_title,
         },
-    )
+    }
+    if not _omit_tool_choice(settings.openrouter_model):
+        kwargs["tool_choice"] = _tool_choice_auto()
+    return ModelSettings(**kwargs)
 
 
 def _tool_choice_auto() -> ToolChoice:

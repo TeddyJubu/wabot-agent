@@ -65,6 +65,92 @@ class WabotClient:
             detail=payload.get("detail"),
         )
 
+    async def _post_json(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.post(
+                f"{self.endpoint}{path}",
+                json=body,
+                headers=self._headers(),
+            )
+        if resp.status_code >= 400:
+            raise WabotError(f"wabot returned HTTP {resp.status_code}: {resp.text[:300]}")
+        if not resp.content:
+            return {"ok": True}
+        return resp.json()
+
+    async def _get_json(self, path: str) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.get(f"{self.endpoint}{path}", headers=self._headers())
+        if resp.status_code >= 400:
+            raise WabotError(f"wabot returned HTTP {resp.status_code}: {resp.text[:300]}")
+        return resp.json()
+
+    async def contacts_lookup(self, phones: list[str]) -> dict[str, Any]:
+        return await self._post_json("/contacts/lookup", {"phones": phones})
+
+    async def list_groups(self) -> dict[str, Any]:
+        return await self._get_json("/groups")
+
+    async def mark_read(
+        self,
+        chat: str,
+        message_ids: list[str],
+        sender: str | None = None,
+        timestamp: str | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"chat": chat, "message_ids": message_ids}
+        if sender:
+            body["sender"] = sender
+        if timestamp:
+            body["timestamp"] = timestamp
+        return await self._post_json("/chats/read", body)
+
+    async def send_typing(
+        self, to: str, state: str = "composing", media: str | None = None
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {"to": to, "state": state}
+        if media:
+            body["media"] = media
+        return await self._post_json("/presence/typing", body)
+
+    async def inbox_recent(self, limit: int = 20) -> dict[str, Any]:
+        if not self.token:
+            return {
+                "reachable": False,
+                "messages": [],
+                "detail": "WABOT_TOKEN is not configured and WABOT_TOKEN_FILE was not readable.",
+            }
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    f"{self.endpoint}/inbox/recent",
+                    params={"limit": limit},
+                    headers=self._headers(),
+                )
+        except httpx.HTTPError as exc:
+            return {"reachable": False, "messages": [], "detail": str(exc)}
+        if resp.status_code == 404:
+            return {
+                "reachable": True,
+                "messages": [],
+                "detail": "The running wabot daemon does not expose /inbox/recent yet. Upgrade wabot.",
+            }
+        if resp.status_code == 401:
+            return {
+                "reachable": True,
+                "messages": [],
+                "detail": "wabot rejected WABOT_TOKEN with HTTP 401.",
+            }
+        if resp.status_code != 200:
+            return {
+                "reachable": False,
+                "messages": [],
+                "detail": f"HTTP {resp.status_code}: {resp.text[:200]}",
+            }
+        payload = resp.json()
+        payload["reachable"] = True
+        return payload
+
     async def pairing_qr(self) -> WabotPairingQR:
         if not self.token:
             return WabotPairingQR(
@@ -173,6 +259,37 @@ class FakeWabotClient(WabotClient):
             connected=True,
             detail="fake",
         )
+
+    async def inbox_recent(self, limit: int = 20) -> dict[str, Any]:
+        return {
+            "reachable": True,
+            "count": 1,
+            "messages": [
+                {
+                    "id": "fake-1",
+                    "from": "+15550001111",
+                    "chat": "+15550001111",
+                    "text": "hello from fake inbox",
+                    "timestamp": "2026-05-16T00:00:00Z",
+                    "is_group": False,
+                }
+            ],
+            "note": "fake inbox",
+        }
+
+    async def contacts_lookup(self, phones: list[str]) -> dict[str, Any]:
+        return {"results": [{"jid": "+15550001111@s.whatsapp.net", "query": phones[0], "is_on": True}]}
+
+    async def list_groups(self) -> dict[str, Any]:
+        return {"count": 0, "groups": []}
+
+    async def mark_read(
+        self, chat: str, message_ids: list[str], sender: str | None = None, timestamp: str | None = None
+    ) -> dict[str, Any]:
+        return {"ok": True, "chat": chat, "marked": len(message_ids)}
+
+    async def send_typing(self, to: str, state: str = "composing", media: str | None = None) -> dict[str, Any]:
+        return {"ok": True, "to": to, "state": state}
 
     async def send_text(self, to: str, text: str) -> dict[str, Any]:
         payload = {"id": f"fake-{len(self.sent) + 1}", "to": to, "text": text}

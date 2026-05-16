@@ -17,7 +17,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from qrcode.image.svg import SvgPathImage
+from qrcode.image.svg import SvgFillImage
 
 from .agent import run_agent, run_agent_streamed
 from .auth import AuthIdentity, maybe_mint_operator_cookie, verify_human_factory
@@ -34,6 +34,7 @@ from .runtime_overrides import (
     save_overrides,
 )
 from .wabot import WabotClient
+from .wabot_process import WabotRestartError, restart_wabot_daemon, wait_for_fresh_pairing
 
 
 class ChatRequest(BaseModel):
@@ -257,6 +258,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers={"Cache-Control": "no-store"},
         )
 
+    @app.post("/api/whatsapp/pairing/restart", dependencies=[human_dependency])
+    async def whatsapp_pairing_restart() -> dict[str, Any]:
+        try:
+            await restart_wabot_daemon(settings)
+        except WabotRestartError as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        pairing = await wait_for_fresh_pairing(wabot.pairing_qr)
+        payload = redact(_pairing_payload(pairing))
+        pairing_state["last"] = payload
+        hub.publish("pairing_changed", payload)
+        return payload
+
     @app.post("/api/chat", response_model=ChatResponse, dependencies=[human_dependency])
     async def chat(payload: ChatRequest) -> ChatResponse:
         result = await run_agent(
@@ -344,6 +358,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             push_name=payload.push_name,
             is_group=payload.is_group,
         )
+        memory.record_inbound(inbound)
         if not memory.claim_message(inbound.id, inbound.sender):
             return {"accepted": True, "duplicate": True, "message_id": inbound.id}
         event_log.write(
@@ -686,7 +701,13 @@ def _qr_svg(payload: str) -> bytes:
     qr = qrcode.QRCode(border=2, error_correction=qrcode.constants.ERROR_CORRECT_M)
     qr.add_data(payload)
     qr.make(fit=True)
-    image = qr.make_image(image_factory=SvgPathImage)
+    # SvgFillImage embeds a white backdrop; SvgPathImage is transparent and
+    # disappears on the dashboard's dark pairing panel.
+    image = qr.make_image(
+        image_factory=SvgFillImage,
+        fill_color="black",
+        back_color="white",
+    )
     out = io.BytesIO()
     image.save(out)
     return out.getvalue()
