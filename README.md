@@ -270,6 +270,94 @@ wa health
 
 Then use the dashboard to ask for a health check and a draft response before enabling real sends.
 
+## Observability
+
+`wabot-agent` emits structured JSON log records to stdout — one object per line — at every meaningful boundary: HTTP request, agent run, tool call, outbound HTTP, auth event. The records are journalctl-friendly on the VPS and `jq`-pipeable locally.
+
+### Configuration
+
+```env
+# Both restart-required (not exposed via /api/settings). Legacy VIGNESH_*
+# aliases also accepted.
+WABOT_AGENT_LOG_LEVEL=INFO    # DEBUG | INFO | WARNING | ERROR
+WABOT_AGENT_LOG_FORMAT=json   # json (default, journalctl) | text (human dev)
+```
+
+`/health` and `/ready` are always logged at DEBUG so VPS uptime-check noise (hit every minute) doesn't dominate the INFO journalctl stream.
+
+### Record schema
+
+Every record carries the same six top-level fields:
+
+| Field | Notes |
+|---|---|
+| `ts` | ISO-8601 UTC, microsecond precision. |
+| `level` | `info` / `warning` / `error` / `debug`. |
+| `logger` | e.g. `wabot_agent.middleware`, `wabot_agent.agent`. |
+| `event` | Short snake_case slug (`request`, `tool_call`, etc.). Never a sentence. |
+| `request_id` | Stamped on every record emitted inside an HTTP request. |
+| `run_id` | Stamped on every record emitted inside an agent run. |
+
+Event-specific fields:
+
+- `request` — `route`, `method`, `status`, `latency_ms`, `request_id_source` (`header` / `minted`), `client_ip` (`loopback` / `remote`).
+- `auth_login` — `source` (`cf-access`, `operator-header`, `operator-cookie`, `operator-query`, `open`), `tenant_id`, `email_hash` (sha256[:16] of the CF Access `sub`, only on the CF path — raw email is never persisted).
+- `auth_denied` — `source_attempted`, `reason`.
+- `inbound_message_received` — `message_id`, `sender` (mask_phone'd), `is_group`, `duplicate`.
+- `agent_run_start` — `session_id`, `sender` (masked), `live_model`, `model`.
+- `agent_run_end` — `session_id`, `latency_ms`, `live_model`, `final_output_len`.
+- `agent_run_error` — `session_id`, `error_class`, `error_message` (redacted), `exc_info`.
+- `tool_call` — `tool_name`, `call_id`, `args_redacted`.
+- `tool_result` — `tool_name`, `call_id`, `ok`, `latency_ms`, `result_kind`.
+- `outbound_http` — `endpoint_path`, `status_code`, `ok`, `latency_ms`.
+- `send_blocked` — `policy`, `reason`, `to` (masked), `tool`.
+- `settings_updated` — `fields` (sorted list of changed field names — never values).
+
+### Redaction
+
+Every key whose name contains `key`, `token`, `secret`, `password`, `authorization`, or `cookie` is replaced with `[REDACTED]`. `email` keys are masked to `first***last@domain` via `mask_email()`. Phone numbers, bearer tokens, and OpenRouter API keys are masked in any string value. `tool_call.args_redacted` is the full argument dict run through `redact()` before logging — the LLM can pass user input as a tool argument, so this matters.
+
+### Correlation IDs
+
+- **`request_id`** — minted per HTTP request by `RequestIdMiddleware`, or honored from an inbound `X-Request-ID` header when it matches `^[A-Za-z0-9_-]{12,64}$`. Always echoed on the response header.
+- **`run_id`** — minted by `run_agent()` / `run_agent_streamed()`. Stamped on every log record emitted inside that run, including tool calls (via `RunObservabilityHooks`) and any wabot client HTTP calls made on behalf of the agent.
+
+Both flow across `await` boundaries via `contextvars`.
+
+### Trace a run end-to-end
+
+```bash
+# 1. Grab the request_id from the response header (or read it from the `request` log line).
+curl -s -H 'X-Operator-Token: ...' -X POST http://127.0.0.1:8787/api/chat \
+  -H 'content-type: application/json' \
+  -d '{"message":"check wabot health"}' -i | grep -i 'x-request-id'
+# X-Request-ID: a1b2c3d4e5f6
+
+# 2. Follow that request through all the logs:
+journalctl -u wabot-agent -o cat | jq -c '. | select(.request_id == "a1b2c3d4e5f6")'
+
+# 3. The run_id appears on the agent_run_start record. Pivot:
+journalctl -u wabot-agent -o cat \
+  | jq -c '. | select(.run_id == "5e7f9b22-3a44-4cd1-9d50-1f9e0fb33df1")'
+```
+
+For local development, set `WABOT_AGENT_LOG_FORMAT=text` and the text formatter prints one human-readable line per record (still secrets-scrubbed):
+
+```text
+14:22:03 INFO    wabot_agent.middleware rid=a1b2c3d4e5f6 run=- request route=/api/chat method=POST status=200 latency_ms=1842
+14:22:01 INFO    wabot_agent.agent      rid=a1b2c3d4e5f6 run=5e7f9b22 agent_run_start session_id=operator live_model=True
+14:22:02 INFO    wabot_agent.agent_hooks rid=a1b2c3d4e5f6 run=5e7f9b22 tool_call tool_name=wabot_health
+```
+
+### Relationship with `events.jsonl` and `/api/runs`
+
+The new stdout JSON log is an **additional** sink for ops debugging via journalctl. It does NOT replace:
+
+- `data/events.jsonl` — the operator-UI feed for the SSE dashboard, with full result payloads.
+- The SQLite `runs` and `tool_events` tables — queried by `/api/runs`.
+
+Both remain unchanged. The new logs gain `request_id` and per-event `latency_ms` that the DB events don't carry; the DB events have the full result payloads that we deliberately keep out of stdout logs. Streaming endpoints (`/api/stream`, `/api/chat/stream`) emit a single `request` record on completion in v1 — phase=start/end sub-request timing is deferred.
+
 ## Continuous Integration
 
 Every push and pull request runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml) with three jobs:

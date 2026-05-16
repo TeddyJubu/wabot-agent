@@ -90,6 +90,10 @@ These constraints are non-obvious and should shape any change:
 - Use the existing fixtures in [tests/conftest.py](tests/conftest.py) (`settings`, `memory`, etc.) which already wire offline mode and a temp dir; don't construct `Settings()` ad hoc in new tests.
 - The eval harness ([evals/run_local.py](evals/run_local.py)) reads [evals/cases.jsonl](evals/cases.jsonl) and writes `evals/results/latest.jsonl`. Add new cases there rather than inventing a parallel harness.
 
+### Observability
+
+Structured JSON logs go to stdout via stdlib `logging`, configured in [src/wabot_agent/logging_config.py](src/wabot_agent/logging_config.py). Every record carries `request_id` (and, inside an agent run, `run_id`) via `contextvars`. New call sites use `logging.getLogger("wabot_agent.<module>")` and pass structured fields via `extra={...}` — never format secrets into the message string. The JSON formatter passes `extra` through `redact()` as defence-in-depth, but caller-side discipline still matters. See the "Observability" section of the README for the full schema and `trace a run` walkthrough.
+
 ## Frontend
 
 The operator dashboard is a Vite + React + TypeScript SPA in [web/](web/). FastAPI keeps serving the *built* assets from `static/`; the build pipeline mirrors `web/dist/` into `static/`:
