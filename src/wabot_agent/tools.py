@@ -104,7 +104,9 @@ async def get_last_whatsapp_inbound_message(
         "note": inbox.get("note"),
         "source": inbox.get("source"),
     }
-    ctx.context.memory.record_tool_event(ctx.context.run_id, "get_last_whatsapp_inbound_message", payload)
+    ctx.context.memory.record_tool_event(
+        ctx.context.run_id, "get_last_whatsapp_inbound_message", payload
+    )
     return redact(payload)
 
 

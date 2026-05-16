@@ -133,7 +133,9 @@ class WabotClient:
             return {
                 "reachable": True,
                 "messages": [],
-                "detail": "The running wabot daemon does not expose /inbox/recent yet. Upgrade wabot.",
+                "detail": (
+                    "The running wabot daemon does not expose /inbox/recent yet. Upgrade wabot."
+                ),
             }
         if resp.status_code == 401:
             return {
@@ -278,17 +280,27 @@ class FakeWabotClient(WabotClient):
         }
 
     async def contacts_lookup(self, phones: list[str]) -> dict[str, Any]:
-        return {"results": [{"jid": "+15550001111@s.whatsapp.net", "query": phones[0], "is_on": True}]}
+        return {
+            "results": [
+                {"jid": "+15550001111@s.whatsapp.net", "query": phones[0], "is_on": True}
+            ]
+        }
 
     async def list_groups(self) -> dict[str, Any]:
         return {"count": 0, "groups": []}
 
     async def mark_read(
-        self, chat: str, message_ids: list[str], sender: str | None = None, timestamp: str | None = None
+        self,
+        chat: str,
+        message_ids: list[str],
+        sender: str | None = None,
+        timestamp: str | None = None,
     ) -> dict[str, Any]:
         return {"ok": True, "chat": chat, "marked": len(message_ids)}
 
-    async def send_typing(self, to: str, state: str = "composing", media: str | None = None) -> dict[str, Any]:
+    async def send_typing(
+        self, to: str, state: str = "composing", media: str | None = None
+    ) -> dict[str, Any]:
         return {"ok": True, "to": to, "state": state}
 
     async def send_text(self, to: str, text: str) -> dict[str, Any]:
