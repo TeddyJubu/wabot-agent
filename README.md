@@ -1,318 +1,188 @@
 # wabot-agent
 
-wabot-agent is a VPS-ready WhatsApp automation agent built around the OpenAI Agents SDK, OpenRouter, and [`wabot`](https://github.com/TeddyJubu/wabot). It is designed to run locally first, then upload cleanly to the SSH host named `vignesh`.
+[![CI](https://github.com/TeddyJubu/wabot-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/TeddyJubu/wabot-agent/actions/workflows/ci.yml)
+
+Production-oriented WhatsApp automation: **OpenAI Agents SDK** + **OpenRouter**, with [`wabot`](https://github.com/TeddyJubu/wabot) (whatsmeow) as the only send/receive path.
 
 ![Architecture](docs/agent-interactions.png)
 
-## What It Does
+## Features
 
-- Runs an Agents SDK agent behind a FastAPI service.
-- Uses OpenRouter through the OpenAI-compatible Chat Completions API.
-- Treats `wabot` as the primary side-effect tool for WhatsApp.
-- Keeps durable local memory in SQLite: contact facts, agent notes, processed inbound ids, runs, and tool events.
-- Supports local skills under `skills/*/SKILL.md`.
-- Supports optional MCP servers through `WABOT_AGENT_MCP_CONFIG`.
-- Exposes a small operator dashboard at `/`.
-- Defaults to `dry_run` send policy so fresh installs cannot send WhatsApp messages by accident.
+- FastAPI control plane with operator dashboard (React SPA at `/`)
+- Mobile-friendly WhatsApp pairing at `/pair` (live QR via SSE)
+- Simple sign-in at `/login` (dashboard password + session cookie)
+- Guarded agent tools (send policy, allowlist, dry-run default)
+- SQLite memory: inbound messages, contact facts, runs, idempotency
+- Webhooks from wabot: inbound, receipt, presence, history backfill
+- VPS deploy scripts, production hygiene checks, optional Cloudflare Tunnel
 
-## Architecture
-
-![Inbound sequence](docs/agent-sequence.png)
-
-The model can plan and choose tools, but the Python harness owns execution. WhatsApp sends go through a narrow `wabot` client that checks send policy and daemon readiness before calling `/send` or `/send-image`.
-
-The FastAPI backend serves a local React SPA (Vite + TypeScript, source in `web/`, built into `static/`) rather than a hosted Agent Builder or Vercel-first UI because the critical dependency is a loopback-only `wabot` daemon on the VPS. That keeps WhatsApp session state, tokens, and send authorization close to the host that owns them. A Vercel or AgentKit frontend can still be added later against this API if you want a hosted operator surface.
-
-```text
-Operator / wabot inbound webhook
-  -> FastAPI control plane
-  -> Agents SDK runner
-  -> OpenRouter model
-  -> guarded tools
-  -> local wabot daemon
-  -> WhatsApp linked device
-```
-
-## Local Quickstart
+## Quickstart (local)
 
 ```bash
 uv sync --all-extras
 cp .env.example .env
-./scripts/build-web.sh        # builds the React SPA into static/
+./scripts/build-web.sh
 uv run python main.py
 ```
 
-Open [http://127.0.0.1:8787](http://127.0.0.1:8787).
+Open [http://127.0.0.1:8787/login](http://127.0.0.1:8787/login) (or [http://127.0.0.1:8787](http://127.0.0.1:8787) with `?token=` if `WABOT_AGENT_OPERATOR_TOKEN` is set).
 
-With no `OPENROUTER_API_KEY`, the service runs in offline mode. This is intentional: the app can boot, render, and test without network credentials.
+Without `OPENROUTER_API_KEY`, the agent runs in **offline mode** (boot and test without network credentials).
 
 ### Frontend dev (HMR)
 
-The operator dashboard is a React SPA in `web/`. For hot module reload while developing:
-
 ```bash
-cd web && npm install         # one-time
-cd web && npm run dev         # Vite at http://127.0.0.1:5173
-# in another terminal:
-uv run python main.py         # FastAPI at http://127.0.0.1:8787
+cd web && npm install && npm run dev    # http://127.0.0.1:5173
+uv run python main.py                   # http://127.0.0.1:8787
 ```
 
-Vite proxies `/api`, `/whatsapp`, `/health`, and `/ready` back to FastAPI on 8787.
+Vite proxies `/api`, `/whatsapp`, `/health`, and `/ready` to FastAPI.
 
-To ship a fresh build into the static bundle (also called by `deploy-to-vignesh.sh`):
+## Prerequisites: wabot
 
-```bash
-./scripts/build-web.sh
-```
-
-## Connect OpenRouter
-
-Edit `.env`:
-
-```bash
-OPENROUTER_API_KEY=...
-OPENROUTER_MODEL=openai/gpt-5.2
-OPENROUTER_BASE_URL=https://openrouter.ai/api/v1
-```
-
-Secrets stay in `.env`, which is ignored by git. Do not paste OpenRouter keys into chat prompts, skills, memory, README files, or MCP config.
-
-The current environment prefix is `WABOT_AGENT_*`. Existing `VIGNESH_*` variables are still accepted as backward-compatible aliases during migration.
-
-## Connect WhatsApp
-
-`wabot` uses the WhatsApp Web linked-device protocol through `whatsmeow`. It does not automate the browser tab at `web.whatsapp.com`; it creates a linked device that your phone can remove at any time from WhatsApp settings.
-
-The dashboard includes a WhatsApp linking panel. With a recent `wabot` daemon, open `/`, scan the QR shown under **WhatsApp Link**, and wait for readiness to switch to connected.
-
-Install and pair `wabot` first when bootstrapping manually:
+Clone and pair [wabot](https://github.com/TeddyJubu/wabot) on the same host (loopback only):
 
 ```bash
 git clone https://github.com/TeddyJubu/wabot.git
-cd wabot
-./scripts/install.sh --prefix /usr/local
-wa setup
-wa doctor
-wa health
+cd wabot && ./scripts/install.sh
+wa setup && wa doctor && wa health
 ```
 
-The agent expects:
+Agent `.env` (see `.env.example`):
 
-```bash
+```dotenv
 WABOT_ENDPOINT=http://127.0.0.1:7777
 WABOT_TOKEN=...
-WABOT_TOKEN_FILE=~/.config/wabot/token
 WABOT_INBOUND_TOKEN=...
 ```
 
-Use `WABOT_HTTP_ADDR=127.0.0.1:7777` for the daemon. Do not expose the wabot daemon directly to the public internet.
+Point wabot webhooks at the agent (loopback in production):
 
-Older `wabot` builds only print QR codes to stdout or `journalctl -u wabot -f`. Upgrade `wabot` if the dashboard says `/pairing/qr` is unavailable.
-
-## Send Policy
-
-The default is safe:
-
-```bash
-WABOT_AGENT_SEND_POLICY=dry_run
+```dotenv
+WABOT_INBOUND_URL=http://127.0.0.1:8787/whatsapp/inbound
+WABOT_RECEIPT_URL=http://127.0.0.1:8787/whatsapp/receipt
+WABOT_PRESENCE_URL=http://127.0.0.1:8787/whatsapp/presence
+WABOT_HISTORY_SYNC_URL=http://127.0.0.1:8787/whatsapp/history-sync
+WABOT_HISTORY_URL=http://127.0.0.1:8787/whatsapp/history
 ```
 
-Production recommendation:
+Never expose the wabot daemon (`:7777`) on the public internet.
 
-```bash
+## Operator authentication
+
+| Layer | Purpose |
+|--------|---------|
+| **`/login`** | Browser sign-in with `WABOT_AGENT_DASHBOARD_PASSWORD` (or operator token); sets a 30-day HttpOnly cookie |
+| **`WABOT_AGENT_OPERATOR_TOKEN`** | API header `X-Operator-Token` / `Authorization: Bearer` for scripts |
+| **Cloudflare Access** (optional) | Edge identity when `WABOT_AGENT_CF_ACCESS_REQUIRED=true` |
+
+Legacy bootstrap still works: `https://your-host/?token=<operator-token>` once, then the cookie is minted.
+
+## Send policy
+
+```dotenv
 WABOT_AGENT_SEND_POLICY=allowlist
-WABOT_AGENT_ALLOWED_RECIPIENTS=+15550001111,+15550002222
-WABOT_AGENT_OPERATOR_TOKEN=<long-random-dashboard-token>
+WABOT_AGENT_ALLOWED_RECIPIENTS=1234567890@lid,other@lid
 ```
 
-`allow_all` exists for controlled environments, but it removes the recipient guard. Use it deliberately.
+Defaults to `dry_run` in `.env.example`. Use `allow_all` only in controlled environments.
 
-When `WABOT_AGENT_OPERATOR_TOKEN` is set, open the dashboard once with:
+Apply production defaults (allowlist, loopback checks, history URLs in `wabot.env`, operator token generation):
 
-```text
-http://127.0.0.1:8787/?token=<long-random-dashboard-token>
+```bash
+uv run python scripts/apply-production-hygiene.py
+./scripts/check-production-hygiene.sh
 ```
 
-The service stores that token in an HTTP-only same-site cookie for same-origin dashboard calls. Direct API callers can use either `X-Operator-Token` or `Authorization: Bearer ...`.
+Restart `wabot-agent` after hygiene changes.
 
-## HTTP API
+## Production VPS
+
+1. Bootstrap once: `sudo APP_DIR=/opt/wabot-agent APP_USER=wabotagent ./scripts/bootstrap-vps.sh`
+2. Configure `/opt/wabot-agent/.env` and `/opt/wabot/wabot.env` (tokens, OpenRouter, allowlist).
+3. Deploy from your machine: `SSH_HOST=your-host APP_DIR=/opt/wabot-agent ./scripts/deploy-to-vignesh.sh`
+4. Put HTTPS in front of the agent only (e.g. Caddy → `127.0.0.1:8787`). Use `/login` + `/pair` for onboarding.
+5. Set `WABOT_AGENT_WABOT_HOME=/opt/wabot` so **New QR** works in the pairing UI.
+
+Pairing checklist for a new operator:
+
+1. Reset any old linked device (WhatsApp → Linked devices, or dashboard **New QR**).
+2. Share `https://<your-domain>/login` and the dashboard password (secure channel).
+3. Open `https://<your-domain>/pair` and scan the QR.
+4. Add their JID to `WABOT_AGENT_ALLOWED_RECIPIENTS` after the first inbound message.
+
+Optional: [Cloudflare Tunnel + Access](docs/superpowers/specs/2026-05-15-public-pairing-website-design.md) via `scripts/setup-cloudflared.sh`.
+
+## HTTP API (summary)
 
 ```text
 GET   /health
-GET   /ready
+GET   /login
+POST  /api/auth/login
+GET   /ready                          # requires operator auth
 GET   /api/whatsapp/pairing
-GET   /api/whatsapp/pairing.svg
+POST  /api/whatsapp/pairing/restart
 POST  /api/chat
-POST  /api/chat/stream              # NDJSON delta/tool_call/tool_result/final events
-GET   /api/stream                   # SSE event hub (pairing, runs, settings deltas)
-GET   /api/runs
-GET   /api/memory/{contact}
+POST  /api/chat/stream
+GET   /api/stream                     # SSE
 GET   /api/settings
 PATCH /api/settings
-POST  /api/settings/test/openrouter
-POST  /api/settings/test/wabot
-POST  /whatsapp/inbound
+POST  /whatsapp/inbound               # wabot webhook (Bearer)
+POST  /whatsapp/history               # history backfill batches
+POST  /whatsapp/history-sync
+POST  /whatsapp/receipt
+POST  /whatsapp/presence
 ```
 
-Inbound webhook payload from `wabot`:
+Inbound webhook shape:
 
 ```json
 {
   "id": "message-id",
   "timestamp": "2026-05-13T12:00:00Z",
-  "from": "+15550001111",
-  "chat": "+15550001111",
+  "from": "1234567890@lid",
+  "chat": "1234567890@lid",
   "is_group": false,
-  "push_name": "wabot-agent",
   "text": "hello"
 }
 ```
 
-If `WABOT_INBOUND_TOKEN` is set, `/whatsapp/inbound` requires:
+## Agent tools
 
-```text
-Authorization: Bearer <WABOT_INBOUND_TOKEN>
-```
-
-Inbound messages are deduped by `id`.
-
-## Tools
-
-The core tool set is intentionally narrow:
-
-- `wabot_health`
-- `send_whatsapp_text`
-- `send_whatsapp_image`
-- `recall_contact_memory`
-- `remember_contact_fact`
-- `recall_agent_notes`
-- `remember_agent_note`
-- `list_local_skills`
-- `read_local_skill`
-
-Tool results and logs are redacted before persistence.
-
-Image sends are confined to `WABOT_AGENT_MEDIA_DIR` (`./data/media` by default). Put approved outbound media there before asking the agent to send it.
-
-## Skills And MCP
-
-Local skills live in:
-
-```text
-skills/<name>/SKILL.md
-```
-
-MCP servers are configured by JSON:
-
-```bash
-WABOT_AGENT_MCP_CONFIG=./configs/mcp.example.json
-```
-
-Every example MCP server is disabled by default. Enable only trusted servers and keep privileged tools behind approval or an allowlist.
-
-## VPS Deployment
-
-On the VPS:
-
-```bash
-sudo APP_DIR=/opt/wabot-agent APP_USER=wabotagent ./scripts/bootstrap-vps.sh
-sudo nano /opt/wabot-agent/.env
-sudo systemctl restart wabot-agent
-sudo journalctl -u wabot-agent -f
-```
-
-From this local machine after the VPS is bootstrapped:
-
-```bash
-SSH_HOST=vignesh ./scripts/deploy-to-vignesh.sh
-```
-
-The systemd unit is in `deploy/systemd/wabot-agent.service`.
-
-## Public Access (Optional)
-
-To pair WhatsApp from any phone or laptop browser — without SSHing into the VPS — run the Cloudflare Tunnel installer:
-
-```bash
-sudo ./scripts/setup-cloudflared.sh wabot.your-domain.com
-```
-
-This installs `cloudflared`, creates a tunnel from the VPS to Cloudflare's edge, routes DNS to it, and starts a systemd service. **No inbound ports are opened on the VPS.** `wabot` stays on loopback. The script prints the manual steps to add a Cloudflare Access policy (Google login or one-time-PIN email), after which you set three env vars in `.env`:
-
-```dotenv
-WABOT_AGENT_CF_ACCESS_TEAM_DOMAIN=<yourteam>.cloudflareaccess.com
-WABOT_AGENT_CF_ACCESS_AUD=<Application Audience tag from CF dashboard>
-WABOT_AGENT_CF_ACCESS_REQUIRED=true
-```
-
-Open `https://wabot.<your-domain>/pair` on a phone — sign in through Access, scan the QR with WhatsApp, done. The QR re-renders live as `wabot` rotates the pairing code (SSE-driven).
-
-See [docs/superpowers/specs/2026-05-15-public-pairing-website-design.md](docs/superpowers/specs/2026-05-15-public-pairing-website-design.md) for the full design, threat model, and what's intentionally NOT included (accounts, per-user instances, billing — those are future sub-projects).
+Core WhatsApp tools include inbox reads, send text/image/media, contacts, groups, read/typing, reactions, mute/archive/pin, profile info, and media download. See `src/wabot_agent/tools.py` and `skills/whatsapp-operator/SKILL.md`.
 
 ## Verification
 
-Offline checks:
-
 ```bash
-uv run --with '.[dev]' ruff check .
-uv run --with '.[dev]' python -m pytest -q
+uv run ruff check .
+uv run pytest -q -m "not live"
 uv run python evals/run_local.py
-```
-
-Credentialed smoke checks, when the VPS is ready:
-
-```bash
-curl -fsS http://127.0.0.1:8787/health
-curl -fsS http://127.0.0.1:8787/ready
-wa doctor
-wa health
-```
-
-Then use the dashboard to ask for a health check and a draft response before enabling real sends.
-
-## Continuous Integration
-
-Every push and pull request runs [`.github/workflows/ci.yml`](.github/workflows/ci.yml) with three jobs:
-
-- **backend** — `uv sync --all-extras`, `ruff check .`, `pytest -m "not live"` (offline tests).
-- **evals** — the local eval harness at [`evals/run_local.py`](evals/run_local.py).
-- **web** — Vitest unit tests and the production Vite build.
-
-The uv tool cache is keyed on `uv.lock`, the npm cache on `web/package-lock.json`; warm re-runs install in seconds.
-
-Pull requests into `main` must clear **all three checks** and **one approving review** before merge, and linear history is enforced — rebase onto `main` rather than merging it back in. To reproduce the gates locally, run the [offline checks](#verification) and:
-
-```bash
 cd web && npm run test -- --run && npm run build
 ```
 
-## Repository Layout
+With wabot running: `./scripts/verify-phase1.sh` (or `SKIP_LIVE=1`).
+
+## Repository layout
 
 ```text
-src/wabot_agent/
-  agent.py          # Agents SDK orchestration
-  api.py            # FastAPI app and webhook surface
-  models.py         # OpenRouter and offline model wiring
-  tools.py          # Agent tools and send policy checks
-  memory.py         # SQLite memory and idempotency
-  wabot.py          # HTTP client for wabot
-  ui_envelopes.py   # Polished tool-result UI envelopes for the SPA
-web/                # React SPA source (Vite + TypeScript + Tailwind)
-static/             # Built React SPA (auto-generated by scripts/build-web.sh)
-skills/             # Local agent skills
-configs/            # MCP config examples
-deploy/             # systemd assets
-scripts/            # VPS + build-web.sh + diagram helpers
-tests/              # Offline Python test suite
-evals/              # Local eval harness
-docs/               # Architecture diagrams, prompt notes, specs/plans
+src/wabot_agent/     # FastAPI app, agent, tools, memory
+web/                 # React dashboard (Vite)
+static/              # Built SPA (scripts/build-web.sh)
+scripts/             # deploy, hygiene, build-web, cloudflared
+deploy/              # systemd, cloudflared examples
+skills/              # Local agent skills
+tests/               # Offline pytest suite
+plan.md              # Roadmap and handoff
+docs/                # Architecture diagrams and design specs
 ```
 
-## Safety Notes
+## Contributing
 
-- Keep `.env`, `store.db`, `wabot.env`, and `sends.log` out of git.
-- Back up `store.db`; it is the WhatsApp linked-device identity.
-- Treat `logged_in=false` or `connected=false` as an operational incident.
-- Keep `wabot` bound to loopback.
-- Use allowlists for production sending.
-- Rotate secrets if they ever appear in prompts, logs, memory, traces, or screenshots.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Roadmap: [plan.md](plan.md).
+
+## Safety
+
+- Keep `.env`, `data/`, `store.db`, and tokens out of git.
+- wabot binds to loopback; only the agent dashboard is public HTTPS.
+- Use allowlists in production; rotate secrets if they appear in logs or chat.
+- Inbound messages are stored even when auto-reply fails (OpenRouter errors do not drop the webhook).

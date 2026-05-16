@@ -163,7 +163,12 @@ def main() -> int:
                 print(f"ok: set {key} in wabot.env")
         wabot_values = _read_env(wabot_env)
         for key in loopback_defaults:
-            if key in ("WABOT_HISTORY_DB", "WABOT_HISTORY_BATCH_SIZE", "WABOT_HISTORY_MAX_MESSAGES"):
+            skip_keys = (
+                "WABOT_HISTORY_DB",
+                "WABOT_HISTORY_BATCH_SIZE",
+                "WABOT_HISTORY_MAX_MESSAGES",
+            )
+            if key in skip_keys:
                 continue
             url = wabot_values.get(key, "")
             if url and "127.0.0.1" not in url and "localhost" not in url:

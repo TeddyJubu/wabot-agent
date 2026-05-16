@@ -29,10 +29,10 @@ from qrcode.image.svg import SvgFillImage
 from .agent import run_agent, run_agent_streamed
 from .auth import (
     AuthIdentity,
-    render_login_page,
-    mint_operator_session_cookie,
     maybe_mint_operator_cookie,
+    mint_operator_session_cookie,
     password_grants_dashboard_access,
+    render_login_page,
     resolve_human_factory,
     verify_human_factory,
 )

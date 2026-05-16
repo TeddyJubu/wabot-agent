@@ -308,7 +308,8 @@ LOGIN_PAGE_HTML = """<!doctype html>
     <h1>wabot dashboard</h1>
     <p>Enter your dashboard password to continue.</p>
     <label for="password">Password</label>
-    <input id="password" name="password" type="password" autocomplete="current-password" autofocus required />
+    <input id="password" name="password" type="password"
+      autocomplete="current-password" autofocus required />
     {error}
     <button type="submit">Sign in</button>
   </form>

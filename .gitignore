@@ -6,6 +6,7 @@ __pycache__/
 .ruff_cache/
 .playwright-mcp/
 .mypy_cache/
+.claude/
 .DS_Store
 
 # Runtime state and secrets

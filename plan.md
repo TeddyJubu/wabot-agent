@@ -1,210 +1,109 @@
 # wabot-agent roadmap
 
-Compact handoff for continuing work without full chat history.
+Handoff doc for what shipped, how to run production, and what to build next.
 
-## Session snapshot (2026-05-16)
+## Production snapshot (2026-05-17)
 
-| Item | Value |
+| Item | Status |
 |------|--------|
-| Dashboard | http://127.0.0.1:8787 |
-| wabot daemon | http://127.0.0.1:7777 (loopback only) |
-| wabot repo | `~/Desktop/Code-hub/wabot` |
-| agent repo | `~/Desktop/Code-hub/wabot-agent/wabot-agent` |
-| Model | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` via OpenRouter |
-| WhatsApp | Linked (`/ready` → wabot ready) |
-| Send policy | `allowlist` (run `scripts/apply-production-hygiene.py`) |
-| wabot home | `WABOT_AGENT_WABOT_HOME` → wabot repo (powers **New QR** button) |
+| **Git** | `main` — feature branches merged; use PRs for new work |
+| **VPS stack** | `wabot` @ loopback `:7777`, `wabot-agent` @ `:8787`, Caddy HTTPS |
+| **Public URLs** | `/login`, `/pair`, `/` (dashboard) on your configured hostname |
+| **Auth** | Dashboard password + operator cookie; optional CF Access later |
+| **Send policy** | `allowlist` + `scripts/apply-production-hygiene.py` |
+| **History** | `WABOT_HISTORY_*` webhooks → `inbound_messages` backfill |
+| **Repos** | [wabot-agent](https://github.com/TeddyJubu/wabot-agent), [wabot](https://github.com/TeddyJubu/wabot) |
 
-**Architecture:** Operator → wabot-agent (FastAPI + Agents SDK) → wabot HTTP API → whatsmeow → WhatsApp.
-
-**“Omni” clarification:** Nemotron “Omni” = multimodal LLM name, not full WhatsApp access. Capabilities come from wabot/whatsmeow tools only.
+**Operator onboarding (e.g. new device):** reset old link → `/login` → `/pair` → scan QR → add JID to allowlist.
 
 ---
 
-## Completed in this session
+## Shipped (phases 1–5)
 
-### Operator UX
-- [x] Local run: `uv sync`, `.env`, `uv run python main.py`
-- [x] OpenRouter live model (Nemotron free)
-- [x] Nemotron fix: omit `tool_choice` for `:free` / nemotron models (tools otherwise 404)
-- [x] QR contrast: white panel + `SvgFillImage` white background in SVG
-- [x] **New QR** button → `POST /api/whatsapp/pairing/restart` (restarts wabot via `WABOT_AGENT_WABOT_HOME`)
-- [x] **Refresh** re-fetches current code only
+- **Core:** Agents SDK, OpenRouter, offline mode, SQLite memory, send policies
+- **Dashboard:** React SPA, chat stream, settings, pairing panel, tool cards
+- **Public pairing:** `/pair`, SSE `pairing_changed`, `/login` password gate
+- **wabot integration:** inbox, contacts, groups, media, reactions, app state, user info
+- **Webhooks:** inbound, receipt, presence, history-sync + batched history
+- **Production:** hygiene scripts, VPS deploy, inbound persists on model failure
+- **CI:** ruff, pytest (offline), evals, Vitest + web build
 
-### wabot daemon (`~/Desktop/Code-hub/wabot`)
-- [x] `GET /inbox/recent` — ring buffer of observed inbound messages
-- [x] `POST /contacts/lookup` — `IsOnWhatsApp`
-- [x] `GET /groups` — `GetJoinedGroups`
-- [x] `POST /chats/read` — `MarkRead`
-- [x] `POST /presence/typing` — `SendChatPresence`
-
-### wabot-agent tools
-- [x] `list_whatsapp_inbound_messages`, `get_last_whatsapp_inbound_message`
-- [x] `lookup_whatsapp_contacts`, `list_whatsapp_groups`, `mark_whatsapp_read`, `send_whatsapp_typing`
-- [x] Existing: `wabot_health`, `send_whatsapp_text`, `send_whatsapp_image`, memory, skills
-
-### Inbound pipeline
-- [x] Webhook: wabot → `POST /whatsapp/inbound` (needs `WABOT_INBOUND_URL` + matching tokens)
-- [x] Agent DB table `inbound_messages` (backup if daemon buffer empty)
+Details per phase remain in git history and `docs/superpowers/specs/`.
 
 ---
 
-## whatsmeow feature matrix
+## Next priorities
 
-Legend: **Done** = exposed via wabot + agent tool. **Partial** = limited. **Missing** = not wired.
+### P0 — Production hardening (do first)
 
-| whatsmeow category | Status | wabot API (target) | Agent tool |
-|--------------------|--------|-------------------|------------|
-| Session / connect / QR | **Done** | `/health`, `/pairing/qr` | pairing UI, New QR |
-| Send text | **Done** | `POST /send` | `send_whatsapp_text` |
-| Send image | **Done** | `POST /send-image` | `send_whatsapp_image` |
-| Send video/audio/doc/sticker | **Partial** (doc/audio/video) | `POST /send-media` | `send_whatsapp_document/audio/video` |
-| Receive messages (observe) | **Partial** | `GET /inbox/recent` + webhook | inbox tools |
-| Download media | **Done** | `GET /media/download` | `download_whatsapp_media` |
-| Contact lookup | **Done** | `POST /contacts/lookup` | `lookup_whatsapp_contacts` |
-| User info / avatar | **Done** | `GET /users/{jid}`, `GET /users/{jid}/picture` | `get_whatsapp_user_info`, `download_whatsapp_profile_picture` |
-| List groups | **Done** | `GET /groups` | `list_whatsapp_groups` |
-| Group admin / invites | **Partial** | `POST /groups`, `GET /groups/{jid}`, invite, join | group lifecycle tools |
-| Mark read | **Done** | `POST /chats/read` | `mark_whatsapp_read` |
-| Typing presence | **Done** | `POST /presence/typing` | `send_whatsapp_typing` |
-| Receipt events | **Done** | webhook `WABOT_RECEIPT_URL` | SSE `whatsapp_receipt` |
-| Presence events | **Done** | webhook `WABOT_PRESENCE_URL` | SSE `whatsapp_presence` |
-| Reactions / edit / revoke | **Done** | `/messages/react`, `/messages/edit`, `DELETE /messages/{id}` | react/edit/revoke tools |
-| Polls | Missing | `/polls/*` | — |
-| App state (mute/pin/archive) | **Done** | `POST /chats/{jid}/mute|archive|pin` | mute/archive/pin tools |
-| History sync | **Done** | `WABOT_HISTORY_SYNC_URL`, `WABOT_HISTORY_URL`, optional `WABOT_HISTORY_DB` | `POST /whatsapp/history` (backfill, no auto-reply) |
-| Blocklist / privacy | Missing | `/blocklist`, `/privacy` | — |
-| Newsletters | Missing | `/newsletters/*` | — |
-| Voice/video calls | N/A | whatsmeow does not support | — |
-| Broadcast lists | N/A | not on WhatsApp Web | — |
+- [ ] Set `WABOT_AGENT_WABOT_HOME=/opt/wabot` on VPS (enables **New QR**)
+- [ ] Document operator password rotation (`WABOT_AGENT_DASHBOARD_PASSWORD`)
+- [ ] Ensure `OPENROUTER_API_KEY` in `.env` (not only `runtime_overrides.json`)
+- [ ] Add operator JIDs to allowlist after pairing smoke test
+- [ ] Optional: `scripts/backfill-inbound.sh` for one-off history from `WABOT_HISTORY_DB`
 
-**Unread badges:** Not a single whatsmeow API. Approximate with inbox + read receipts when message IDs are known from webhook/inbox.
+### P1 — Operator experience
 
----
+- [ ] **Inbox panel** in dashboard (table of `inbound_messages`, not only chat tool cards)
+- [ ] **Conversation thread** per contact (session_id = sender JID)
+- [ ] Clear “linked / needs QR” banner on dashboard home
+- [ ] Runbook doc: “hand off to a new operator” (1 page, link from README)
 
-## Implementation phases (remaining)
+### P2 — whatsmeow gaps (daemon + tools)
 
-### Phase 2 — Media (done)
-**wabot**
-- [x] `GET /media/download?chat=&id=` — recent inbound media cache + `DownloadAny`
-- [x] `POST /send-media` — document, audio, video (`kind` + multipart `file`)
-- [x] Inbound webhook + inbox include `media_kind`, `media_mime`, `media_filename`, `has_media`
+- [ ] Polls (`/polls/*`)
+- [ ] Blocklist / privacy settings
+- [ ] Newsletters (if needed)
 
-**wabot-agent**
-- [x] `download_whatsapp_media` → `data/media/inbound/{chat}/…`
-- [x] `send_whatsapp_document`, `send_whatsapp_audio`, `send_whatsapp_video`
-- [x] `./scripts/verify-phase1.sh` (CI + live smoke; rename optional)
+### P3 — Edge auth (optional)
 
-### Phase 3 — Message lifecycle + groups (done)
-**wabot**
-- [x] `POST /messages/react`, `PATCH /messages/edit`, `DELETE /messages/{id}` (revoke; `?chat=&sender=`)
-- [x] `POST /groups` (create), `GET /groups/{jid}`, `POST /groups/{jid}/invite`, `POST /groups/join`
+- [ ] Cloudflare Tunnel + Access instead of or in addition to `/login`
+- [ ] Audit logging for operator sign-in and sends
 
-**wabot-agent**
-- [x] `react_whatsapp_message`, `edit_whatsapp_message`, `revoke_whatsapp_message`
-- [x] `create_whatsapp_group`, `get_whatsapp_group`, `get_whatsapp_group_invite`, `join_whatsapp_group`
+### P4 — Multi-tenant / product (later)
 
-### Phase 4 — Events + app state (done)
-**wabot**
-- [x] Webhooks: `WABOT_RECEIPT_URL`, `WABOT_PRESENCE_URL`, optional `WABOT_HISTORY_SYNC_URL` (summary only)
-- [x] `events.Receipt`, `events.ChatPresence`, `events.HistorySync` in `eventHandler`
-- [x] `POST /chats/{jid}/mute`, `/archive`, `/pin` via `SendAppState`
-
-**wabot-agent**
-- [x] `POST /whatsapp/receipt`, `/whatsapp/presence` → SSE `whatsapp_receipt`, `whatsapp_presence`
-- [x] `mute_whatsapp_chat`, `archive_whatsapp_chat`, `pin_whatsapp_chat`
-
-### Phase 5A — User info + avatar (done)
-**wabot**
-- [x] `GET /users/{jid}` — `GetUserInfo` (status, picture id, devices, verified name)
-- [x] `GET /users/{jid}/picture` — fetch profile image (`preview`, `picture_id` query)
-
-**wabot-agent**
-- [x] `get_whatsapp_user_info`, `download_whatsapp_profile_picture` → `data/media/avatars/`
-- [x] UI envelope `user_profile` + `UserProfileCard`
-
-### Phase 5B — History-sync backfill (done)
-**wabot**
-- [x] Parse `events.HistorySync` conversations via `ParseWebMessage` → batched `WABOT_HISTORY_URL`
-- [x] Optional `WABOT_HISTORY_DB` sqlite cache; caps via `WABOT_HISTORY_BATCH_SIZE` / `WABOT_HISTORY_MAX_MESSAGES`
-- [x] Summary webhook `WABOT_HISTORY_SYNC_URL` includes chunk/progress
-
-**wabot-agent**
-- [x] `POST /whatsapp/history` + `POST /whatsapp/history-sync` (inbound token auth)
-- [x] `bulk_record_inbound` — stores rows only, no `run_agent` / no `claim_message`
-- [x] SSE: `whatsapp_history_sync`, `whatsapp_history_batch`
+- Accounts, billing, per-user instances — **out of scope** for current single-VPS setup (see design spec).
 
 ---
 
 ## Conventions for new features
 
-1. Add **wabot HTTP route** first (auth: `X-Token`, ready-gate like `/send`).
-2. Add **WabotClient** method in `src/wabot_agent/wabot.py`.
-3. Add **`@function_tool`** in `src/wabot_agent/tools.py` + register in `core_tools()`.
-4. Update **`INSTRUCTIONS`** in `agent.py` and **`skills/whatsapp-operator/SKILL.md`**.
-5. Tests: `tests/` in wabot-agent; `go test ./cmd/wabot/...` in wabot.
-6. Rebuild UI if needed: `./scripts/build-web.sh`.
-7. Restart **wabot** then **wabot-agent** (agent does not hot-reload `.env`).
+1. **wabot** HTTP route first (`X-Token`, ready-gate).
+2. **WabotClient** method in `src/wabot_agent/wabot.py`.
+3. **`@function_tool`** + `core_tools()` registration.
+4. Update **`agent.py`** instructions + `skills/whatsapp-operator/SKILL.md`.
+5. Tests in `tests/` (wabot: `go test ./cmd/wabot/...`).
+6. `./scripts/build-web.sh` if UI changes.
+7. Restart **wabot** then **wabot-agent**.
 
 ---
 
-## PR workflow (default)
-
-`main` is protected: **no direct pushes** — use a branch + pull request.
+## PR workflow
 
 ```bash
-# wabot-agent
-cd wabot-agent
 git checkout main && git pull
-git checkout -b cursor/phase-3-message-lifecycle
-# … edit, commit …
-git push -u origin HEAD
-gh pr create --base main --title "…" --body "…"
-# /babysit in Cursor until CI green, then merge on GitHub
+git checkout -b feat/short-topic
+# commit, push
+gh pr create --base main
 ```
 
-**wabot** (sibling repo): same pattern; CI check name is `test`. Link both PRs in descriptions when a feature touches daemon + agent.
-
-Required checks before merge:
-- **wabot-agent:** `backend (ruff + pytest offline)`, `evals (offline)`, `web (vitest + build)`
-- **wabot:** `test`
-
-Branch naming: `cursor/<short-topic>` or `feat/<issue>-<topic>`.
+Required: backend + evals + web CI; one approving review; linear history.
 
 ---
 
-## Local ops cheatsheet
+## Local ops
 
 ```bash
-# Agent
 cd wabot-agent && uv run python main.py
-
-# wabot
-cd ~/Desktop/Code-hub/wabot && set -a && source ./wabot.env && set +a && ./wabot
-
-# Rebuild web
+cd ../wabot && set -a && source ./wabot.env && set +a && ./wabot
 ./scripts/build-web.sh
-
-# New QR (API)
-curl -X POST http://127.0.0.1:8787/api/whatsapp/pairing/restart
-
-# Inbox (daemon)
-curl -H "X-Token: $(cat ~/.config/wabot/token)" http://127.0.0.1:7777/inbox/recent
+uv run python scripts/apply-production-hygiene.py
 ```
 
 ---
 
 ## Security reminders
 
-- Keep `.env`, `store.db`, tokens out of git.
-- Production: `WABOT_AGENT_SEND_POLICY=allowlist`, not `allow_all`.
-- wabot stays on `127.0.0.1`; use Cloudflare Tunnel + Access for remote pairing (see README).
-- `data/runtime_overrides.json` may override model/policy — do not commit secrets.
-
----
-
-## Open questions
-
-1. Prioritize Phase 2 (media) vs Phase 4 (receipt webhooks for true “unread” UX)?
-2. Should wabot history sync backfill inbox DB, or only live webhook + buffer?
-3. Publish wabot inbox/groups APIs in upstream wabot README?
+- wabot and webhooks stay on `127.0.0.1`.
+- Production: `allowlist`, strong dashboard password, separate operator token for API.
+- Do not commit `data/`, `.env`, or WhatsApp `store.db`.
