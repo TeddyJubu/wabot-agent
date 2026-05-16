@@ -72,13 +72,22 @@ def _contacts_from_db(db_path: Path) -> set[str]:
     return {x for x in out if x}
 
 
+def _default_wabot_env() -> Path:
+    candidates = [
+        ROOT.parent / "wabot" / "wabot.env",  # /opt/wabot-agent -> /opt/wabot
+        ROOT.parent.parent / "wabot" / "wabot.env",  # local nested checkout
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
 def main() -> int:
     env_path = ROOT / ".env"
     overrides_path = ROOT / "data" / "runtime_overrides.json"
     db_path = ROOT / "data" / "wabot-agent.db"
-    wabot_env = Path(
-        os.environ.get("WABOT_ENV", str(ROOT.parent.parent.parent / "wabot" / "wabot.env"))
-    ).expanduser()
+    wabot_env = Path(os.environ.get("WABOT_ENV", str(_default_wabot_env()))).expanduser()
 
     env = _read_env(env_path)
     recipients: set[str] = set()

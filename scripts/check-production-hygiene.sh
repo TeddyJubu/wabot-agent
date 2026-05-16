@@ -37,7 +37,13 @@ if [[ -f .env ]]; then
 fi
 
 # --- wabot loopback ---
-WABOT_ENV="${WABOT_ENV:-$ROOT/../../wabot/wabot.env}"
+if [[ -z "${WABOT_ENV:-}" ]]; then
+  if [[ -f "$ROOT/../wabot/wabot.env" ]]; then
+    WABOT_ENV="$ROOT/../wabot/wabot.env"
+  else
+    WABOT_ENV="$ROOT/../../wabot/wabot.env"
+  fi
+fi
 if [[ -f "$WABOT_ENV" ]]; then
   addr="$(grep -E '^WABOT_HTTP_ADDR=' "$WABOT_ENV" | cut -d= -f2- || echo '127.0.0.1:7777')"
   host="${addr%%:*}"
@@ -68,7 +74,7 @@ fi
 # --- secret file modes (best effort) ---
 for f in .env data/runtime_overrides.json "$WABOT_ENV"; do
   [[ -f "$f" ]] || continue
-  mode="$(stat -f '%Lp' "$f" 2>/dev/null || stat -c '%a' "$f" 2>/dev/null || echo '')"
+  mode="$(stat -c '%a' "$f" 2>/dev/null || stat -f '%Lp' "$f" 2>/dev/null || echo '')"
   if [[ -n "$mode" && "$mode" != "600" ]]; then
     warn "$f permissions are $mode (expected 600) — run: chmod 600 $f"
   fi
