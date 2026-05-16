@@ -33,6 +33,7 @@ from .runtime_overrides import (
     mask_secret,
     save_overrides,
 )
+from .schemas import PairingPayload, StreamEventEnvelope
 from .wabot import WabotClient
 
 
@@ -102,41 +103,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Pairing poller state — last published payload + the asyncio task handle.
     pairing_state: dict[str, Any] = {"last": None, "task": None}
 
-    def _pairing_payload(p: Any) -> dict[str, Any]:
-        # Same shape as GET /api/whatsapp/pairing — keep them in sync so the
-        # client can paint from either source.
-        return {
-            "supported": p.supported,
-            "reachable": p.reachable,
-            "logged_in": p.logged_in,
-            "connected": p.connected,
-            "qr_available": p.qr_available,
-            "event": p.event,
-            "updated_at": p.updated_at,
-            "expires_at": p.expires_at,
-            "detail": p.detail,
-        }
-
-    async def _pairing_poll_loop() -> None:
-        """Probe wabot pairing state and publish pairing_changed on diff.
-
-        Polls every 5s on loopback — cheap. We only publish when the snapshot
-        actually changes, so a stable linked session generates zero events
-        beyond the initial state push at startup.
-        """
-        while True:
-            try:
-                pairing = await wabot.pairing_qr()
-                payload = _pairing_payload(pairing)
-            except Exception:  # noqa: BLE001 — never let a transient HTTP error kill the loop
-                payload = None
-            if payload is not None and payload != pairing_state["last"]:
-                pairing_state["last"] = payload
-                hub.publish("pairing_changed", payload)
-            try:
-                await asyncio.sleep(5)
-            except asyncio.CancelledError:
-                return
+    # Construct the FastAPI app early so the lifespan-driven poller and the
+    # initial-snapshot helper can read collaborators from `app.state` at runtime
+    # instead of closing over the local `wabot`/`memory`/etc. variables. Tests
+    # (and operator hot-swaps) override via `app.state.wabot = ...` and the
+    # change reaches handlers and background tasks on the next access.
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -163,6 +134,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.event_log = event_log
     app.state.event_hub = hub
     app.state.wabot = wabot
+
+    async def _pairing_poll_loop() -> None:
+        """Probe wabot pairing state and publish pairing_changed on diff.
+
+        Polls every 5s on loopback — cheap. We only publish when the snapshot
+        actually changes, so a stable linked session generates zero events
+        beyond the initial state push at startup. Reads the wabot client from
+        ``app.state`` on each tick so test injection / operator hot-swap
+        flows through to the live publisher.
+        """
+        while True:
+            try:
+                pairing = await app.state.wabot.pairing_qr()
+                payload: dict[str, Any] | None = PairingPayload.from_wabot(pairing).model_dump()
+            except Exception:  # noqa: BLE001 — never let a transient HTTP error kill the loop
+                payload = None
+            if payload is not None and payload != pairing_state["last"]:
+                pairing_state["last"] = payload
+                hub.publish("pairing_changed", payload)
+            try:
+                await asyncio.sleep(5)
+            except asyncio.CancelledError:
+                return
 
     static_dir = Path(__file__).resolve().parents[2] / "static"
     if static_dir.exists():
@@ -214,8 +208,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"ok": True, "service": "wabot-agent", "env": settings.env}
 
     @app.get("/ready", dependencies=[human_dependency])
-    async def ready() -> dict[str, Any]:
-        wabot_health = await wabot.health()
+    async def ready(request: Request) -> dict[str, Any]:
+        wabot_health = await request.app.state.wabot.health()
         return redact(
             {
                 "ok": True,
@@ -233,11 +227,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
         )
 
-    @app.get("/api/whatsapp/pairing", dependencies=[human_dependency])
-    async def whatsapp_pairing() -> dict[str, Any]:
-        # _pairing_payload defines the canonical shape; both the SSE
-        # `pairing_changed` event and this REST endpoint emit it.
-        return redact(_pairing_payload(await wabot.pairing_qr()))
+    @app.get(
+        "/api/whatsapp/pairing",
+        dependencies=[human_dependency],
+        response_model=PairingPayload,
+    )
+    async def whatsapp_pairing(request: Request) -> PairingPayload:
+        # PairingPayload.from_wabot() applies redact() internally — see
+        # schemas.py. The same constructor is reused by the SSE poller and
+        # the initial snapshot path so all three sites emit identical JSON.
+        return PairingPayload.from_wabot(await request.app.state.wabot.pairing_qr())
 
     @app.get(
         "/api/whatsapp/pairing.svg",
@@ -245,8 +244,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         include_in_schema=False,
         response_model=None,
     )
-    async def whatsapp_pairing_svg() -> Response:
-        pairing = await wabot.pairing_qr()
+    async def whatsapp_pairing_svg(request: Request) -> Response:
+        pairing = await request.app.state.wabot.pairing_qr()
         if not pairing.qr:
             raise HTTPException(
                 status_code=404, detail=pairing.detail or "Pairing QR is unavailable."
@@ -258,13 +257,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
 
     @app.post("/api/chat", response_model=ChatResponse, dependencies=[human_dependency])
-    async def chat(payload: ChatRequest) -> ChatResponse:
+    async def chat(payload: ChatRequest, request: Request) -> ChatResponse:
         result = await run_agent(
             payload.message,
             settings=settings,
             memory=memory,
             event_log=event_log,
-            wabot=wabot,
+            wabot=request.app.state.wabot,
             session_id=payload.session_id,
         )
         return ChatResponse(
@@ -300,7 +299,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 settings=settings,
                 memory=memory,
                 event_log=event_log,
-                wabot=wabot,
+                wabot=request.app.state.wabot,
                 session_id=payload.session_id,
             ).__aiter__()
             try:
@@ -356,7 +355,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 settings=settings,
                 memory=memory,
                 event_log=event_log,
-                wabot=wabot,
+                wabot=request.app.state.wabot,
                 inbound=inbound,
                 session_id=inbound.sender,
             )
@@ -391,13 +390,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         renders completely without follow-up REST calls. Subsequent state
         changes arrive as deltas on the same stream.
         """
-        wabot_health = await wabot.health()
+        wabot_client = app.state.wabot
+        wabot_health = await wabot_client.health()
         # Prefer the poller's cached pairing snapshot (already redacted on
         # publish); on cold start before the first tick fires, fall through
         # to a fresh probe so the client doesn't paint a blank pairing card.
         pairing = pairing_state.get("last")
         if pairing is None:
-            pairing = _pairing_payload(await wabot.pairing_qr())
+            pairing = PairingPayload.from_wabot(await wabot_client.pairing_qr()).model_dump()
         return redact(
             {
                 "ok": True,
@@ -437,13 +437,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         async def generator() -> Any:
             # 1) Initial snapshot — fast first paint, no separate REST round-trips.
             snapshot = await _build_initial_snapshot()
-            yield _sse_frame(event_id=None, name="ready_snapshot", data=snapshot)
+            yield _sse_frame(StreamEventEnvelope(name="ready_snapshot", data=snapshot))
 
             # 2) Backlog (anything we already broadcast past Last-Event-ID) + live.
             backlog, queue = hub.open_subscription(lid)
             try:
                 for event in backlog:
-                    yield _sse_frame(event.id, event.name, event.payload)
+                    yield _sse_frame(
+                        StreamEventEnvelope(id=event.id, name=event.name, data=event.payload)
+                    )
                 while True:
                     if await request.is_disconnected():
                         break
@@ -453,9 +455,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         # Named heartbeat — the client uses it to keep the
                         # staleness pill green during quiet periods. Doubles
                         # as a proxy-keepalive (line traffic every 15s).
-                        yield _sse_frame(event_id=None, name="heartbeat", data={})
+                        yield _sse_frame(StreamEventEnvelope(name="heartbeat", data={}))
                         continue
-                    yield _sse_frame(event.id, event.name, event.payload)
+                    yield _sse_frame(
+                        StreamEventEnvelope(id=event.id, name=event.name, data=event.payload)
+                    )
             finally:
                 hub.close_subscription(queue)
 
@@ -666,15 +670,19 @@ def _settings_view(settings: Settings) -> dict[str, Any]:
     }
 
 
-def _sse_frame(event_id: int | None, name: str, data: Any) -> str:
-    """Format a single SSE frame. Data is JSON-encoded; multi-line bodies are
-    split across multiple `data:` lines per the SSE spec, though our redacted
-    payloads almost never contain newlines."""
+def _sse_frame(envelope: StreamEventEnvelope) -> str:
+    """Format a single SSE frame from a typed envelope.
+
+    Data is JSON-encoded; multi-line bodies are split across multiple `data:`
+    lines per the SSE spec, though our redacted payloads almost never contain
+    newlines. The envelope construction has already validated that ``name`` is
+    a non-empty string and ``data`` is a dict.
+    """
     parts: list[str] = []
-    if event_id is not None:
-        parts.append(f"id: {event_id}")
-    parts.append(f"event: {name}")
-    body = json.dumps(data, ensure_ascii=False)
+    if envelope.id is not None:
+        parts.append(f"id: {envelope.id}")
+    parts.append(f"event: {envelope.name}")
+    body = json.dumps(envelope.data, ensure_ascii=False)
     for line in body.split("\n"):
         parts.append(f"data: {line}")
     parts.append("")

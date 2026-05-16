@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .redaction import redact
+from .schemas import StreamEventEnvelope
 
 # Bounded buffers so the hub can never starve the agent on a slow client.
 # Sized to cover ~5 minutes of typical activity (run.* + inbound.*); a longer
@@ -51,11 +52,19 @@ class EventHub:
         self._loop = loop
 
     def publish(self, name: str, payload: dict[str, Any]) -> Event:
+        # Validate the (name, data) pair at the publish call site so a typo'd
+        # event name or wrong-shape payload fails fast at the publisher rather
+        # than producing a syntactically valid but semantically broken SSE
+        # frame on the wire. Bad names / non-dict payloads raise
+        # pydantic.ValidationError.
+        StreamEventEnvelope(name=name, data=payload)
         with self._lock:
             self._counter += 1
             event = Event(
                 id=self._counter,
                 name=name,
+                # redact() is defense in depth — every documented producer of
+                # pairing data already redacts in PairingPayload.from_wabot().
                 payload=redact(payload) if isinstance(payload, dict) else payload,
                 ts=datetime.now(UTC).isoformat(),
             )
