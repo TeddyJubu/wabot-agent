@@ -1,4 +1,5 @@
 import type {
+  InboxMessageData,
   MemoryData,
   PairingQrData,
   SendConfirmData,
@@ -9,6 +10,7 @@ import WabotStatusCard from "./WabotStatusCard";
 import PairingQrCard from "./PairingQrCard";
 import SendConfirmCard from "./SendConfirmCard";
 import MemoryCard from "./MemoryCard";
+import InboxMessageCard from "./InboxMessageCard";
 
 interface Props {
   envelope: UiEnvelope;
@@ -47,6 +49,13 @@ export default function ToolCard({ envelope, onAction }: Props) {
           data={envelope.data as unknown as MemoryData}
           actions={envelope.actions}
           onAction={onAction}
+        />
+      );
+    case "inbox_message":
+      return (
+        <InboxMessageCard
+          data={envelope.data as unknown as InboxMessageData}
+          actions={envelope.actions}
         />
       );
     default:

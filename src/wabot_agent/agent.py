@@ -56,11 +56,10 @@ Operating rules:
   treat it as privileged and prefer a brief plan unless policy explicitly allows it.
 - Media paths for send/download must stay under WABOT_AGENT_MEDIA_DIR. Use download_whatsapp_media
   for recent inbound media (chat + message_id from inbox/webhook).
-- Before calling any send_whatsapp_* tool when the active send_policy is not dry_run, FIRST reply
-  with a one-line summary of the intended send (recipient and short body) and STOP. Wait for the
-  operator to reply "approved" (or equivalent affirmative) before invoking the send tool. If they
-  decline or stay silent, do not send. The frontend renders a confirmation card from the tool
-  result; do not describe the card's JSON to the user.
+- When send_policy allows sending, call send_whatsapp_* tools directly — do not ask the operator
+  to type "approved" first.
+- Reply in plain English only. Never paste raw tool JSON, function names, or markers like
+  [tool_name] in your messages; the dashboard shows structured cards for tool results.
 """
 
 
