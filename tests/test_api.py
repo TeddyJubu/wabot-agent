@@ -129,11 +129,12 @@ def test_dashboard_token_sets_operator_cookie(tmp_path: Path) -> None:
     settings = make_settings(tmp_path).model_copy(update={"operator_token": "operator-secret"})
     client = TestClient(create_app(settings))
 
-    denied = client.get("/")
+    denied = client.get("/", follow_redirects=False)
     allowed = client.get("/?token=operator-secret")
     ready = client.get("/ready")
 
-    assert denied.status_code == 401
+    assert denied.status_code == 302
+    assert denied.headers["location"] == "/login?next=/"
     assert allowed.status_code == 200
     assert ready.status_code == 200
 

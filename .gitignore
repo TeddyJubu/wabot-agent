@@ -17,6 +17,7 @@ data/*.db-*
 data/*.jsonl
 data/*.log
 data/*.json
+data/operator-token.txt
 evals/results/*
 !evals/results/.gitkeep
 
@@ -29,3 +30,5 @@ sends.log
 web/node_modules/
 web/dist/
 web/.vite/
+
+data/media/

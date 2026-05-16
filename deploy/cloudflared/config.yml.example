@@ -6,8 +6,15 @@
 #
 # Safety: this config only routes the FastAPI service on 127.0.0.1:8787.
 # wabot (127.0.0.1:7777) is NEVER exposed here — and never should be.
-# The webhook path /whatsapp/inbound is loopback-only too (wabot calls it
-# directly), so Cloudflare Access does not protect it; that's by design.
+#
+# Loopback-only webhooks (wabot → agent, Bearer WABOT_INBOUND_TOKEN):
+#   POST /whatsapp/inbound
+#   POST /whatsapp/receipt | /presence | /history | /history-sync
+# Cloudflare does not see these URLs; do not add path rules for them.
+#
+# Before going live: WABOT_AGENT_CF_ACCESS_REQUIRED=true + Access app on
+# this hostname, WABOT_AGENT_OPERATOR_TOKEN set, send_policy=allowlist.
+# Run scripts/check-production-hygiene.sh on the VPS after deploy.
 
 tunnel: REPLACE_WITH_TUNNEL_UUID
 credentials-file: /etc/cloudflared/REPLACE_WITH_TUNNEL_UUID.json

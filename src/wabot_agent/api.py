@@ -13,14 +13,29 @@ from urllib.parse import urlparse
 
 import qrcode
 import uvicorn
-from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
-from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
+from fastapi import Depends, FastAPI, Form, Header, HTTPException, Query, Request
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from qrcode.image.svg import SvgFillImage
 
 from .agent import run_agent, run_agent_streamed
-from .auth import AuthIdentity, maybe_mint_operator_cookie, verify_human_factory
+from .auth import (
+    AuthIdentity,
+    render_login_page,
+    mint_operator_session_cookie,
+    maybe_mint_operator_cookie,
+    password_grants_dashboard_access,
+    resolve_human_factory,
+    verify_human_factory,
+)
 from .config import Settings, get_settings
 from .events import EventHub, EventLog
 from .memory import InboundMessage, MemoryStore
@@ -217,13 +232,54 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return Response(status_code=204)
 
     verify_human = verify_human_factory(settings)
+    resolve_human = resolve_human_factory(settings)
     human_dependency = Depends(verify_human)
+
+    def _safe_next_path(next_path: str) -> str:
+        if next_path.startswith("/") and not next_path.startswith("//"):
+            return next_path
+        return "/"
+
+    @app.get("/login", include_in_schema=False, response_model=None)
+    async def login_page(
+        request: Request,
+        identity: AuthIdentity | None = Depends(resolve_human),  # noqa: B008
+        next_path: str = Query("/", alias="next"),
+        err: str | None = Query(None),
+    ) -> Response:
+        if identity is not None:
+            return RedirectResponse(url=_safe_next_path(next_path), status_code=302)
+        error_html = f'<p class="err">{err}</p>' if err else ""
+        return HTMLResponse(render_login_page(error_html=error_html, next_path=next_path))
+
+    @app.post("/api/auth/login", include_in_schema=False, response_model=None)
+    async def login_submit(
+        request: Request,
+        password: str = Form(...),
+        next_path: str = Form("/", alias="next"),
+    ) -> Response:
+        if not settings.operator_token:
+            raise HTTPException(status_code=503, detail="operator token not configured")
+        safe_next = _safe_next_path(next_path)
+        if not password_grants_dashboard_access(settings, password):
+            return HTMLResponse(
+                render_login_page(
+                    error_html='<p class="err">Wrong password.</p>',
+                    next_path=safe_next,
+                ),
+                status_code=401,
+            )
+        response = RedirectResponse(url=safe_next, status_code=303)
+        mint_operator_session_cookie(response, request, settings)
+        return response
 
     @app.get("/")
     async def dashboard(
         request: Request,
-        identity: AuthIdentity = Depends(verify_human),  # noqa: B008 — FastAPI idiom
-    ) -> FileResponse:
+        identity: AuthIdentity | None = Depends(resolve_human),  # noqa: B008
+    ) -> Response:
+        if identity is None:
+            return RedirectResponse(url="/login?next=/", status_code=302)
         file_response = _dashboard_file(static_dir)
         file_response.headers["Cache-Control"] = "no-store"
         maybe_mint_operator_cookie(file_response, request, settings)
@@ -232,13 +288,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/pair")
     async def pair_page(
         request: Request,
-        identity: AuthIdentity = Depends(verify_human),  # noqa: B008 — FastAPI idiom
-    ) -> FileResponse:
+        identity: AuthIdentity | None = Depends(resolve_human),  # noqa: B008
+    ) -> Response:
         """Mobile-first WhatsApp pairing page.
 
         Serves the same React bundle as ``/`` — ``web/src/main.tsx`` picks
         ``<PairView />`` when ``window.location.pathname === '/pair'``.
         """
+        if identity is None:
+            return RedirectResponse(url="/login?next=/pair", status_code=302)
         file_response = _dashboard_file(static_dir)
         file_response.headers["Cache-Control"] = "no-store"
         maybe_mint_operator_cookie(file_response, request, settings)
@@ -425,7 +483,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "inbound_message_failed",
                 {"message_id": inbound.id, "sender": inbound.sender, "error": str(exc)},
             )
-            raise
+            # Message is already in inbound_messages; do not fail the webhook or
+            # wabot will treat delivery as unsuccessful and the inbox stays empty.
+            return {
+                "accepted": True,
+                "duplicate": False,
+                "message_id": inbound.id,
+                "auto_reply": False,
+                "agent_error": redact(str(exc)),
+            }
         memory.complete_message(inbound.id, result.run_id)
         return {
             "accepted": True,

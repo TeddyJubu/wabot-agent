@@ -12,7 +12,7 @@ Compact handoff for continuing work without full chat history.
 | agent repo | `~/Desktop/Code-hub/wabot-agent/wabot-agent` |
 | Model | `nvidia/nemotron-3-nano-omni-30b-a3b-reasoning:free` via OpenRouter |
 | WhatsApp | Linked (`/ready` → wabot ready) |
-| Send policy | `allow_all` in `data/runtime_overrides.json` (review for production) |
+| Send policy | `allowlist` (run `scripts/apply-production-hygiene.py`) |
 | wabot home | `WABOT_AGENT_WABOT_HOME` → wabot repo (powers **New QR** button) |
 
 **Architecture:** Operator → wabot-agent (FastAPI + Agents SDK) → wabot HTTP API → whatsmeow → WhatsApp.
