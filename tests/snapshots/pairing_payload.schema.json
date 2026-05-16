@@ -1,0 +1,96 @@
+{
+  "description": "Public, redacted projection of `WabotPairingQR`.\n\nThe raw `qr` field is intentionally not exposed here \u2014 clients fetch the\nrendered SVG separately from `GET /api/whatsapp/pairing.svg`. Including it\nin the JSON payload would leak it into the SSE backlog ring and the\nevents.jsonl audit log.",
+  "properties": {
+    "connected": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Connected"
+    },
+    "detail": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Detail"
+    },
+    "event": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Event"
+    },
+    "expires_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Expires At"
+    },
+    "logged_in": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Logged In"
+    },
+    "qr_available": {
+      "default": false,
+      "title": "Qr Available",
+      "type": "boolean"
+    },
+    "reachable": {
+      "title": "Reachable",
+      "type": "boolean"
+    },
+    "supported": {
+      "title": "Supported",
+      "type": "boolean"
+    },
+    "updated_at": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Updated At"
+    }
+  },
+  "required": [
+    "supported",
+    "reachable"
+  ],
+  "title": "PairingPayload",
+  "type": "object"
+}
