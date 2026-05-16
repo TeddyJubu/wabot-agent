@@ -86,23 +86,29 @@ class WabotClient:
             raise WabotError(f"wabot returned HTTP {resp.status_code}: {resp.text[:300]}")
         return resp.json()
 
-    async def _patch_json(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+    async def _request_json(
+        self,
+        method: str,
+        path: str,
+        *,
+        json: dict[str, Any] | None = None,
+        params: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
         async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.patch(
+            resp = await client.request(
+                method,
                 f"{self.endpoint}{path}",
-                json=body,
-                headers=self._headers(),
-            )
-        return self._handle_response(resp)
-
-    async def _delete_json(self, path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.delete(
-                f"{self.endpoint}{path}",
+                json=json,
                 params=params,
                 headers=self._headers(),
             )
         return self._handle_response(resp)
+
+    async def _patch_json(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        return await self._request_json("PATCH", path, json=body)
+
+    async def _delete_json(self, path: str, params: dict[str, str] | None = None) -> dict[str, Any]:
+        return await self._request_json("DELETE", path, params=params)
 
     async def contacts_lookup(self, phones: list[str]) -> dict[str, Any]:
         return await self._post_json("/contacts/lookup", {"phones": phones})
