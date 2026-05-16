@@ -81,6 +81,24 @@ class PresencePayload(BaseModel):
     media: str | None = None
 
 
+class HistorySyncSummaryPayload(BaseModel):
+    type: str = "history_sync"
+    sync_type: str
+    conversation_count: int = 0
+    message_count: int = 0
+    chunk_order: int | None = None
+    progress: int | None = None
+
+
+class HistoryBatchPayload(BaseModel):
+    type: str = "history_batch"
+    sync_type: str
+    messages: list[InboundPayload] = Field(default_factory=list)
+    message_count: int = 0
+    chunk_order: int | None = None
+    progress: int | None = None
+
+
 class SettingsPatch(BaseModel):
     """Partial update to runtime-mutable settings.
 
@@ -448,6 +466,70 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             {"chat": payload.chat, "sender": payload.sender, "state": payload.state},
         )
         return {"accepted": True}
+
+    @app.post("/whatsapp/history-sync")
+    async def whatsapp_history_sync(
+        payload: HistorySyncSummaryPayload,
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        _verify_inbound_auth(settings, authorization)
+        body = payload.model_dump()
+        hub.publish("whatsapp_history_sync", body)
+        event_log.write(
+            "whatsapp_history_sync",
+            {
+                "sync_type": payload.sync_type,
+                "conversation_count": payload.conversation_count,
+                "message_count": payload.message_count,
+                "chunk_order": payload.chunk_order,
+                "progress": payload.progress,
+            },
+        )
+        return {"accepted": True}
+
+    @app.post("/whatsapp/history")
+    async def whatsapp_history(
+        payload: HistoryBatchPayload,
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        """Backfill inbound_messages from wabot history sync (no agent auto-reply)."""
+        _verify_inbound_auth(settings, authorization)
+        inbounds = [
+            InboundMessage(
+                id=msg.id,
+                sender=msg.from_,
+                chat=msg.chat,
+                text=msg.text,
+                timestamp=msg.timestamp,
+                push_name=msg.push_name,
+                is_group=msg.is_group,
+                media_kind=msg.media_kind,
+                media_mime=msg.media_mime,
+                media_filename=msg.media_filename,
+                has_media=msg.has_media,
+            )
+            for msg in payload.messages
+        ]
+        result = memory.bulk_record_inbound(inbounds)
+        hub.publish(
+            "whatsapp_history_batch",
+            {
+                "sync_type": payload.sync_type,
+                "stored": result["stored"],
+                "chunk_order": payload.chunk_order,
+                "progress": payload.progress,
+            },
+        )
+        event_log.write(
+            "whatsapp_history_batch",
+            {
+                "sync_type": payload.sync_type,
+                "stored": result["stored"],
+                "chunk_order": payload.chunk_order,
+                "progress": payload.progress,
+            },
+        )
+        return {"accepted": True, **result}
 
     @app.get("/api/memory/{contact}", dependencies=[human_dependency])
     async def contact_memory(contact: str) -> dict[str, Any]:

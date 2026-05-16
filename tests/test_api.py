@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from wabot_agent.api import _qr_svg, create_app
 from wabot_agent.config import Settings
+from wabot_agent.memory import MemoryStore
 
 
 def make_settings(tmp_path: Path) -> Settings:
@@ -170,6 +171,52 @@ def test_receipt_webhook_accepted(tmp_path: Path) -> None:
     }
     headers = {"Authorization": "Bearer inbound-secret"}
     resp = client.post("/whatsapp/receipt", json=payload, headers=headers)
+    assert resp.status_code == 200
+    assert resp.json()["accepted"] is True
+
+
+def test_history_batch_stores_without_agent_run(tmp_path: Path) -> None:
+    client = TestClient(create_app(make_settings(tmp_path)))
+    payload = {
+        "type": "history_batch",
+        "sync_type": "RECENT",
+        "messages": [
+            {
+                "id": "hist-1",
+                "from": "+15550001111",
+                "chat": "+15550001111",
+                "text": "old message",
+                "timestamp": "2026-01-01T00:00:00Z",
+            }
+        ],
+    }
+    headers = {"Authorization": "Bearer inbound-secret"}
+    resp = client.post("/whatsapp/history", json=payload, headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["accepted"] is True
+    assert body["stored"] == 1
+    # History rows must not be claimed for auto-reply.
+    settings = make_settings(tmp_path)
+    memory = MemoryStore(settings.db_path)
+    assert memory.is_processed("hist-1") is False
+    last = memory.last_inbound()
+    assert last is not None
+    assert last["id"] == "hist-1"
+
+
+def test_history_sync_summary_accepted(tmp_path: Path) -> None:
+    client = TestClient(create_app(make_settings(tmp_path)))
+    payload = {
+        "type": "history_sync",
+        "sync_type": "INITIAL_BOOTSTRAP",
+        "conversation_count": 3,
+        "message_count": 120,
+        "chunk_order": 1,
+        "progress": 40,
+    }
+    headers = {"Authorization": "Bearer inbound-secret"}
+    resp = client.post("/whatsapp/history-sync", json=payload, headers=headers)
     assert resp.status_code == 200
     assert resp.json()["accepted"] is True
 

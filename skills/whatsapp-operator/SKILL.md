@@ -30,6 +30,8 @@ Use this skill before changing WhatsApp state, sending messages, or handling inb
   Avatars: `download_whatsapp_profile_picture` → `data/media/avatars/` (set `preview=true` for thumb).
 - Read/delivery receipts and remote typing may appear on the dashboard SSE stream
   (`whatsapp_receipt`, `whatsapp_presence`) when wabot webhooks are configured.
+- History sync backfill populates `inbound_messages` via `POST /whatsapp/history` (no auto-reply).
+  Use inbox tools after linking; live traffic still arrives on `/whatsapp/inbound`.
 - Never send credentials, one-time codes, tokens, cookies, or session data.
 - Keep outbound messages short, clear, and human-readable.
 - Respect the configured send policy. If a recipient is blocked, explain the operator action needed.
