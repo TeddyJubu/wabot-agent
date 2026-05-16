@@ -25,7 +25,10 @@ from wabot_agent.runtime_overrides import load_overrides, save_overrides  # noqa
 
 def _chmod600(path: Path) -> None:
     if path.exists():
-        os.chmod(path, 0o600)
+        try:
+            os.chmod(path, 0o600)
+        except PermissionError:
+            print(f"warning: could not chmod 600 {path}", file=sys.stderr)
 
 
 def _read_env(path: Path) -> dict[str, str]:
