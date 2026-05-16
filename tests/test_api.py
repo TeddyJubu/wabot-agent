@@ -14,10 +14,13 @@ def make_settings(tmp_path: Path) -> Settings:
         WABOT_AGENT_DATA_DIR=tmp_path,
         WABOT_AGENT_DB_PATH=tmp_path / "agent.db",
         WABOT_AGENT_LOG_PATH=tmp_path / "events.jsonl",
+        WABOT_AGENT_RUNTIME_OVERRIDES_PATH=tmp_path / "runtime_overrides.json",
         WABOT_AGENT_MCP_CONFIG=None,
         WABOT_AGENT_SEND_POLICY="dry_run",
+        OPENROUTER_MODEL="openai/gpt-5.2",
         WABOT_INBOUND_TOKEN="inbound-secret",
         OPENROUTER_API_KEY=None,
+        _env_file=None,
     )
 
 

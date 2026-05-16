@@ -123,6 +123,13 @@ class Settings(BaseSettings):
         ),
     )
 
+    @field_validator("cf_access_team_domain", "cf_access_aud", mode="before")
+    @classmethod
+    def empty_cf_access_to_none(cls, value: object) -> object:
+        if value == "":
+            return None
+        return value
+
     @field_validator("allowed_recipients", mode="before")
     @classmethod
     def parse_allowed_recipients(cls, value: object) -> set[str]:
