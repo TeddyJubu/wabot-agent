@@ -20,6 +20,10 @@ Use this skill before changing WhatsApp state, sending messages, or handling inb
   `download_whatsapp_media(chat, message_id)` to save under `data/media/inbound/`.
 - Send files with `send_whatsapp_document`, `send_whatsapp_audio`, or `send_whatsapp_video`
   (paths must live under `WABOT_AGENT_MEDIA_DIR`). Images still use `send_whatsapp_image`.
+- React with `react_whatsapp_message`; edit own messages with `edit_whatsapp_message`;
+  revoke with `revoke_whatsapp_message` (pass `sender` for others' messages in groups).
+- Create groups with `create_whatsapp_group`; inspect via `get_whatsapp_group`;
+  invite links via `get_whatsapp_group_invite`; join via `join_whatsapp_group`.
 - Never send credentials, one-time codes, tokens, cookies, or session data.
 - Keep outbound messages short, clear, and human-readable.
 - Respect the configured send policy. If a recipient is blocked, explain the operator action needed.

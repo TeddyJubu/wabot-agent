@@ -64,12 +64,12 @@ Legend: **Done** = exposed via wabot + agent tool. **Partial** = limited. **Miss
 | Contact lookup | **Done** | `POST /contacts/lookup` | `lookup_whatsapp_contacts` |
 | User info / avatar | Missing | `GET /users/{jid}` | `get_whatsapp_user_info` |
 | List groups | **Done** | `GET /groups` | `list_whatsapp_groups` |
-| Group admin / invites | Missing | `/groups/*` | group tools |
+| Group admin / invites | **Partial** | `POST /groups`, `GET /groups/{jid}`, invite, join | group lifecycle tools |
 | Mark read | **Done** | `POST /chats/read` | `mark_whatsapp_read` |
 | Typing presence | **Done** | `POST /presence/typing` | `send_whatsapp_typing` |
 | Receipt events | Missing | webhook `WABOT_RECEIPT_URL` | — |
 | Presence events | Missing | webhook | — |
-| Reactions / edit / revoke | Missing | `/messages/*` | — |
+| Reactions / edit / revoke | **Done** | `/messages/react`, `/messages/edit`, `DELETE /messages/{id}` | react/edit/revoke tools |
 | Polls | Missing | `/polls/*` | — |
 | App state (mute/pin/archive) | Missing | `/chats/{jid}/*` | — |
 | History sync | Missing | background job | — |
@@ -95,13 +95,14 @@ Legend: **Done** = exposed via wabot + agent tool. **Partial** = limited. **Miss
 - [x] `send_whatsapp_document`, `send_whatsapp_audio`, `send_whatsapp_video`
 - [x] `./scripts/verify-phase1.sh` (CI + live smoke; rename optional)
 
-### Phase 3 — Message lifecycle + groups
+### Phase 3 — Message lifecycle + groups (done)
 **wabot**
-- `POST /messages/react`, `PATCH /messages/edit`, `DELETE /messages/{id}` (revoke)
-- `POST /groups`, `POST /groups/{jid}/invite`, `POST /groups/join`, `GET /groups/{jid}`
+- [x] `POST /messages/react`, `PATCH /messages/edit`, `DELETE /messages/{id}` (revoke; `?chat=&sender=`)
+- [x] `POST /groups` (create), `GET /groups/{jid}`, `POST /groups/{jid}/invite`, `POST /groups/join`
 
 **wabot-agent**
-- Matching agent tools; update `skills/whatsapp-operator/SKILL.md`
+- [x] `react_whatsapp_message`, `edit_whatsapp_message`, `revoke_whatsapp_message`
+- [x] `create_whatsapp_group`, `get_whatsapp_group`, `get_whatsapp_group_invite`, `join_whatsapp_group`
 
 ### Phase 4 — Events + app state
 **wabot**

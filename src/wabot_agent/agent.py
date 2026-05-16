@@ -36,7 +36,8 @@ The OpenRouter model name may include "omni" (multimodal); that does not grant
 extra WhatsApp permissions by itself. Capabilities come from wabot/whatsmeow tools.
 
 Use inbox tools for recent observed messages. Use lookup_whatsapp_contacts,
-list_whatsapp_groups, mark_whatsapp_read, and send_whatsapp_typing when relevant.
+list_whatsapp_groups, get_whatsapp_group, create/join/invite group tools,
+mark_whatsapp_read, send_whatsapp_typing, react/edit/revoke message tools when relevant.
 WhatsApp app unread badges are not fully mirrored yet; mark_read applies server-side
 read receipts when you have message IDs from inbound webhooks or inbox.
 
