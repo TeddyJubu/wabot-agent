@@ -9,10 +9,11 @@ redacted at the producer; `EventHub.publish()` keeps its own `redact()` as
 defense in depth.
 
 `StreamEventEnvelope` is the wire format for every frame written to
-`/api/stream`. Building one at the publish call site (in `EventHub.publish`
-and `EventLog.write`) makes name typos and wrong-shape payloads raise a
-`ValidationError` at the publisher instead of producing a syntactically valid
-but semantically broken frame on the wire.
+`/api/stream`. Building one at the publish call site (in `EventHub.publish`)
+makes name typos and wrong-shape payloads raise a `ValidationError` at the
+publisher instead of producing a syntactically valid but semantically broken
+frame on the wire. `EventLog.write` persists frames to disk without envelope
+validation — the validation guarantee applies only to the SSE path.
 
 Per-event `data` payloads are intentionally untyped at this stage — typing
 specific events (`agent_run_complete`, `inbound_message`, ...) is a follow-up.

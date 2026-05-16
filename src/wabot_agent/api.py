@@ -488,7 +488,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return JSONResponse(view, headers={"ETag": etag, "Cache-Control": "no-cache"})
 
     @app.patch("/api/settings", dependencies=[human_dependency])
-    async def update_settings(patch: SettingsPatch) -> dict[str, Any]:
+    async def update_settings(patch: SettingsPatch, request: Request) -> dict[str, Any]:
         # Build the override dict from non-None fields only.
         proposed: dict[str, Any] = {}
         raw = patch.model_dump(exclude={"confirm_allow_all"}, exclude_none=True)
@@ -560,8 +560,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # snapshot, so this is reliable (and we'd rather crash here than leave
         # disk and memory desynced — the operator can restart to recover).
         apply_overrides(settings, proposed)
-        wabot.endpoint = settings.wabot_endpoint.rstrip("/")
-        wabot.token = settings.resolved_wabot_token
+        request.app.state.wabot.endpoint = settings.wabot_endpoint.rstrip("/")
+        request.app.state.wabot.token = settings.resolved_wabot_token
 
         event_log.write(
             "settings_updated",
@@ -593,8 +593,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         }
 
     @app.post("/api/settings/test/wabot", dependencies=[human_dependency])
-    async def test_wabot() -> dict[str, Any]:
-        health = await wabot.health()
+    async def test_wabot(request: Request) -> dict[str, Any]:
+        health = await request.app.state.wabot.health()
         return {
             "ok": health.ready,
             "reachable": health.reachable,

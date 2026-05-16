@@ -15,7 +15,6 @@ snapshot, the poller (which uses the same call) cannot drift either.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 
 from fastapi.testclient import TestClient
 
@@ -23,19 +22,6 @@ from wabot_agent.api import create_app
 from wabot_agent.config import Settings
 from wabot_agent.schemas import PairingPayload
 from wabot_agent.wabot import FakeWabotClient, WabotPairingQR
-
-
-def _settings(tmp_path: Path) -> Settings:
-    return Settings(
-        WABOT_AGENT_OFFLINE_MODE=True,
-        WABOT_AGENT_DATA_DIR=tmp_path,
-        WABOT_AGENT_DB_PATH=tmp_path / "agent.db",
-        WABOT_AGENT_LOG_PATH=tmp_path / "events.jsonl",
-        WABOT_AGENT_MCP_CONFIG=None,
-        WABOT_AGENT_SEND_POLICY="dry_run",
-        WABOT_INBOUND_TOKEN="inbound-secret",
-        OPENROUTER_API_KEY=None,
-    )
 
 
 class _ScriptedWabot(FakeWabotClient):
@@ -56,9 +42,9 @@ class _ScriptedWabot(FakeWabotClient):
         )
 
 
-def test_rest_pairing_matches_payload_from_wabot(tmp_path: Path) -> None:
+def test_rest_pairing_matches_payload_from_wabot(settings: Settings) -> None:
     """REST emits exactly what PairingPayload.from_wabot() produces."""
-    app = create_app(_settings(tmp_path))
+    app = create_app(settings)
     app.state.wabot = _ScriptedWabot()
     client = TestClient(app)
 
@@ -82,7 +68,7 @@ def test_rest_pairing_matches_payload_from_wabot(tmp_path: Path) -> None:
     assert "+15551234567" not in json.dumps(rest_body)
 
 
-def test_rest_pairing_matches_model_dump_byte_for_byte(tmp_path: Path) -> None:
+def test_rest_pairing_matches_model_dump_byte_for_byte(settings: Settings) -> None:
     """REST and the initial-snapshot publisher both build via
     ``PairingPayload.from_wabot(...).model_dump()``.
 
@@ -98,7 +84,7 @@ def test_rest_pairing_matches_model_dump_byte_for_byte(tmp_path: Path) -> None:
     the SSE poller and ``_build_initial_snapshot()`` (both of which call the
     same ``.model_dump()`` on the same constructor) cannot drift from REST.
     """
-    app = create_app(_settings(tmp_path))
+    app = create_app(settings)
     app.state.wabot = _ScriptedWabot()
     client = TestClient(app)
 
