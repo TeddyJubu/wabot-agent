@@ -26,6 +26,10 @@ class InboundMessage:
     timestamp: str | None = None
     push_name: str | None = None
     is_group: bool = False
+    media_kind: str | None = None
+    media_mime: str | None = None
+    media_filename: str | None = None
+    has_media: bool = False
 
 
 class MemoryStore:
@@ -110,6 +114,10 @@ class MemoryStore:
             )
             self._ensure_column(conn, "processed_messages", "run_id", "text")
             self._ensure_column(conn, "processed_messages", "error", "text")
+            self._ensure_column(conn, "inbound_messages", "media_kind", "text")
+            self._ensure_column(conn, "inbound_messages", "media_mime", "text")
+            self._ensure_column(conn, "inbound_messages", "media_filename", "text")
+            self._ensure_column(conn, "inbound_messages", "has_media", "integer not null default 0")
 
     def _ensure_column(
         self, conn: sqlite3.Connection, table: str, column: str, definition: str
@@ -258,15 +266,20 @@ class MemoryStore:
             conn.execute(
                 """
                 insert into inbound_messages (
-                    message_id, sender, chat, text, push_name, is_group, received_at
-                ) values (?, ?, ?, ?, ?, ?, ?)
+                    message_id, sender, chat, text, push_name, is_group, received_at,
+                    media_kind, media_mime, media_filename, has_media
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(message_id) do update set
                   sender = excluded.sender,
                   chat = excluded.chat,
                   text = excluded.text,
                   push_name = excluded.push_name,
                   is_group = excluded.is_group,
-                  received_at = excluded.received_at
+                  received_at = excluded.received_at,
+                  media_kind = excluded.media_kind,
+                  media_mime = excluded.media_mime,
+                  media_filename = excluded.media_filename,
+                  has_media = excluded.has_media
                 """,
                 (
                     inbound.id,
@@ -276,6 +289,10 @@ class MemoryStore:
                     inbound.push_name,
                     1 if inbound.is_group else 0,
                     inbound.timestamp or now_iso(),
+                    inbound.media_kind,
+                    inbound.media_mime,
+                    inbound.media_filename,
+                    1 if inbound.has_media else 0,
                 ),
             )
 
@@ -283,18 +300,20 @@ class MemoryStore:
         with self.connect() as conn:
             rows = conn.execute(
                 """
-                select message_id, sender, chat, text, push_name, is_group, received_at
+                select message_id, sender, chat, text, push_name, is_group, received_at,
+                       media_kind, media_mime, media_filename, has_media
                 from inbound_messages
                 order by received_at desc
                 limit ?
                 """,
                 (limit,),
             ).fetchall()
-        return [redact(dict(row)) for row in rows]
+        return [self._inbound_row_dict(row) for row in rows]
 
     def last_inbound(self, contact: str | None = None) -> dict[str, Any] | None:
         query = """
-            select message_id, sender, chat, text, push_name, is_group, received_at
+            select message_id, sender, chat, text, push_name, is_group, received_at,
+                   media_kind, media_mime, media_filename, has_media
             from inbound_messages
         """
         params: tuple[Any, ...]
@@ -306,7 +325,13 @@ class MemoryStore:
         query += " order by received_at desc limit ?"
         with self.connect() as conn:
             row = conn.execute(query, params).fetchone()
-        return redact(dict(row)) if row else None
+        return self._inbound_row_dict(row) if row else None
+
+    def _inbound_row_dict(self, row: sqlite3.Row) -> dict[str, Any]:
+        payload = dict(row)
+        payload["id"] = payload.pop("message_id", None)
+        payload["has_media"] = bool(payload.get("has_media"))
+        return redact(payload)
 
     def record_run(
         self, run_id: str, sender: str | None, user_input: str, final_output: str

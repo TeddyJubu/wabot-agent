@@ -210,6 +210,40 @@ class WabotClient:
             )
         return self._handle_response(resp)
 
+    async def download_media(self, chat: str, message_id: str) -> httpx.Response:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            return await client.get(
+                f"{self.endpoint}/media/download",
+                params={"chat": chat, "id": message_id},
+                headers=self._headers(),
+            )
+
+    async def send_media(
+        self,
+        to: str,
+        kind: str,
+        path: str,
+        caption: str | None = None,
+        filename: str | None = None,
+    ) -> dict[str, Any]:
+        media_path = Path(path)
+        if not media_path.exists():
+            raise WabotError(f"Media file does not exist: {media_path}")
+        data: dict[str, str] = {"to": to, "kind": kind}
+        if caption:
+            data["caption"] = caption
+        if filename:
+            data["filename"] = filename
+        with media_path.open("rb") as f:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(
+                    f"{self.endpoint}/send-media",
+                    data=data,
+                    files={"file": (media_path.name, f, "application/octet-stream")},
+                    headers=self._headers(),
+                )
+        return self._handle_response(resp)
+
     async def send_image(self, to: str, path: str, caption: str | None = None) -> dict[str, Any]:
         image_path = Path(path)
         if not image_path.exists():
@@ -306,6 +340,36 @@ class FakeWabotClient(WabotClient):
     async def send_text(self, to: str, text: str) -> dict[str, Any]:
         payload = {"id": f"fake-{len(self.sent) + 1}", "to": to, "text": text}
         self.sent.append({"type": "text", **payload})
+        return payload
+
+    async def download_media(self, chat: str, message_id: str) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={
+                "Content-Type": "image/png",
+                "X-Media-Kind": "image",
+                "Content-Disposition": 'attachment; filename="fake.png"',
+            },
+            content=b"fake-bytes",
+        )
+
+    async def send_media(
+        self,
+        to: str,
+        kind: str,
+        path: str,
+        caption: str | None = None,
+        filename: str | None = None,
+    ) -> dict[str, Any]:
+        payload = {
+            "id": f"fake-{len(self.sent) + 1}",
+            "to": to,
+            "kind": kind,
+            "path": path,
+            "caption": caption,
+            "filename": filename,
+        }
+        self.sent.append({"type": kind, **payload})
         return payload
 
     async def send_image(self, to: str, path: str, caption: str | None = None) -> dict[str, Any]:

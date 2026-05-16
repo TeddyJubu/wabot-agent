@@ -95,5 +95,5 @@ async def test_image_send_rejects_paths_outside_media_dir(
     )
 
     assert result["sent"] is False
-    assert result["reason"] == "image_path_not_allowed"
+    assert result["reason"] == "media_path_not_allowed"
     assert fake_wabot.sent == []

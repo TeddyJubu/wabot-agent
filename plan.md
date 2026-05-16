@@ -58,9 +58,9 @@ Legend: **Done** = exposed via wabot + agent tool. **Partial** = limited. **Miss
 | Session / connect / QR | **Done** | `/health`, `/pairing/qr` | pairing UI, New QR |
 | Send text | **Done** | `POST /send` | `send_whatsapp_text` |
 | Send image | **Done** | `POST /send-image` | `send_whatsapp_image` |
-| Send video/audio/doc/sticker | Missing | `POST /send-media` | `send_whatsapp_*` |
+| Send video/audio/doc/sticker | **Partial** (doc/audio/video) | `POST /send-media` | `send_whatsapp_document/audio/video` |
 | Receive messages (observe) | **Partial** | `GET /inbox/recent` + webhook | inbox tools |
-| Download media | Missing | `GET /media/download` | `download_whatsapp_media` |
+| Download media | **Done** | `GET /media/download` | `download_whatsapp_media` |
 | Contact lookup | **Done** | `POST /contacts/lookup` | `lookup_whatsapp_contacts` |
 | User info / avatar | Missing | `GET /users/{jid}` | `get_whatsapp_user_info` |
 | List groups | **Done** | `GET /groups` | `list_whatsapp_groups` |
@@ -84,15 +84,16 @@ Legend: **Done** = exposed via wabot + agent tool. **Partial** = limited. **Miss
 
 ## Implementation phases (remaining)
 
-### Phase 2 — Media (high impact)
+### Phase 2 — Media (done)
 **wabot**
-- `GET /media/download?chat=&id=` using `Download` / `DownloadAny`
-- `POST /send-media` for document, audio, video (extend `Upload` beyond `MediaImage`)
-- Enrich inbound webhook payload with media path or base64 stub
+- [x] `GET /media/download?chat=&id=` — recent inbound media cache + `DownloadAny`
+- [x] `POST /send-media` — document, audio, video (`kind` + multipart `file`)
+- [x] Inbound webhook + inbox include `media_kind`, `media_mime`, `media_filename`, `has_media`
 
 **wabot-agent**
-- Tools: `download_whatsapp_media`, `send_whatsapp_document`, `send_whatsapp_audio`, `send_whatsapp_video`
-- Store downloads under `WABOT_AGENT_MEDIA_DIR`
+- [x] `download_whatsapp_media` → `data/media/inbound/{chat}/…`
+- [x] `send_whatsapp_document`, `send_whatsapp_audio`, `send_whatsapp_video`
+- [x] `./scripts/verify-phase1.sh` (CI + live smoke; rename optional)
 
 ### Phase 3 — Message lifecycle + groups
 **wabot**

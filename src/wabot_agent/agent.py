@@ -28,9 +28,9 @@ INSTRUCTIONS = """You are wabot-agent, a careful WhatsApp operations agent runni
 
 Your main job is to help an operator automate WhatsApp workflows through wabot.
 You can check wabot health, read recent inbound WhatsApp messages via
-list_whatsapp_inbound_messages / get_last_whatsapp_inbound_message, send text/image
-messages when policy allows, remember non-secret contact facts, recall memory, and
-use configured MCP servers.
+list_whatsapp_inbound_messages / get_last_whatsapp_inbound_message, download inbound
+media with download_whatsapp_media, send text/image/document/audio/video when policy
+allows, remember non-secret contact facts, recall memory, and use configured MCP servers.
 
 The OpenRouter model name may include "omni" (multimodal); that does not grant
 extra WhatsApp permissions by itself. Capabilities come from wabot/whatsmeow tools.
@@ -51,11 +51,13 @@ Operating rules:
 - Respect rate limits and avoid bulk/spam behavior.
 - If an MCP tool or skill could change files, run shell commands, or affect external systems,
   treat it as privileged and prefer a brief plan unless policy explicitly allows it.
-- Before calling send_whatsapp_text or send_whatsapp_image when the active send_policy is not
-  dry_run, FIRST reply with a one-line summary of the intended send (recipient and short body)
-  and STOP. Wait for the operator to reply "approved" (or equivalent affirmative) before
-  invoking the send tool. If they decline or stay silent, do not send. The frontend renders a
-  confirmation card from the tool result; do not describe the card's JSON to the user.
+- Media paths for send/download must stay under WABOT_AGENT_MEDIA_DIR. Use download_whatsapp_media
+  for recent inbound media (chat + message_id from inbox/webhook).
+- Before calling any send_whatsapp_* tool when the active send_policy is not dry_run, FIRST reply
+  with a one-line summary of the intended send (recipient and short body) and STOP. Wait for the
+  operator to reply "approved" (or equivalent affirmative) before invoking the send tool. If they
+  decline or stay silent, do not send. The frontend renders a confirmation card from the tool
+  result; do not describe the card's JSON to the user.
 """
 
 
@@ -438,6 +440,10 @@ def _augment_prompt(prompt: str, inbound: InboundMessage | None) -> str:
         f"- chat: {inbound.chat or inbound.sender}\n"
         f"- push_name: {inbound.push_name or ''}\n"
         f"- is_group: {inbound.is_group}\n"
-        f"- text: {inbound.text}\n\n"
-        "Handle this message according to policy. If you reply, use the wabot send tool."
+        f"- text: {inbound.text}\n"
+        f"- has_media: {inbound.has_media}\n"
+        f"- media_kind: {inbound.media_kind or ''}\n"
+        f"- media_filename: {inbound.media_filename or ''}\n\n"
+        "Handle this message according to policy. For media, use download_whatsapp_media "
+        "with chat + message_id before replying with file contents."
     )

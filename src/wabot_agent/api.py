@@ -57,6 +57,10 @@ class InboundPayload(BaseModel):
     is_group: bool = False
     push_name: str | None = None
     text: str = ""
+    media_kind: str | None = None
+    media_mime: str | None = None
+    media_filename: str | None = None
+    has_media: bool = False
 
 
 class SettingsPatch(BaseModel):
@@ -357,6 +361,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             timestamp=payload.timestamp,
             push_name=payload.push_name,
             is_group=payload.is_group,
+            media_kind=payload.media_kind,
+            media_mime=payload.media_mime,
+            media_filename=payload.media_filename,
+            has_media=payload.has_media,
         )
         memory.record_inbound(inbound)
         if not memory.claim_message(inbound.id, inbound.sender):

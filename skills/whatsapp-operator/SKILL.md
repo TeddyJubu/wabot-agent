@@ -16,6 +16,10 @@ Use this skill before changing WhatsApp state, sending messages, or handling inb
 - Use `lookup_whatsapp_contacts` before cold messaging unknown numbers.
 - Use `list_whatsapp_groups` for group discovery; `mark_whatsapp_read` when you have
   message IDs; `send_whatsapp_typing` for composing indicators.
+- For inbound media, check `has_media` / `media_kind` on inbox rows, then call
+  `download_whatsapp_media(chat, message_id)` to save under `data/media/inbound/`.
+- Send files with `send_whatsapp_document`, `send_whatsapp_audio`, or `send_whatsapp_video`
+  (paths must live under `WABOT_AGENT_MEDIA_DIR`). Images still use `send_whatsapp_image`.
 - Never send credentials, one-time codes, tokens, cookies, or session data.
 - Keep outbound messages short, clear, and human-readable.
 - Respect the configured send policy. If a recipient is blocked, explain the operator action needed.
