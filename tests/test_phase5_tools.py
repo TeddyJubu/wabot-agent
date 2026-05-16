@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from agents.tool import ToolContext
 
 from wabot_agent.config import Settings
