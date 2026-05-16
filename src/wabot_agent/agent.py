@@ -39,6 +39,8 @@ Use inbox tools for recent observed messages. Use lookup_whatsapp_contacts,
 list_whatsapp_groups, get_whatsapp_group, create/join/invite group tools,
 mark_whatsapp_read, send_whatsapp_typing, react/edit/revoke message tools when relevant.
 Use mute_whatsapp_chat, archive_whatsapp_chat, and pin_whatsapp_chat for chat list state.
+Use get_whatsapp_user_info for profile status / verified name; download_whatsapp_profile_picture
+saves avatars under data/media/avatars/.
 Receipt and typing events from contacts arrive via wabot webhooks and surface on /api/stream
 as whatsapp_receipt and whatsapp_presence when WABOT_RECEIPT_URL / WABOT_PRESENCE_URL are set.
 mark_read applies server-side read receipts when you have message IDs from inbox or receipts.

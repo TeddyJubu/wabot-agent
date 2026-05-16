@@ -580,6 +580,70 @@ async def join_whatsapp_group(
 
 
 @function_tool
+async def get_whatsapp_user_info(
+    ctx: RunContextWrapper[RuntimeContext], jid: str
+) -> dict[str, Any]:
+    """Get WhatsApp profile metadata (status, picture id, verified name) for a JID or phone."""
+    blocked = await _wabot_ready_or_block(ctx, "get_whatsapp_user_info")
+    if blocked is not None:
+        return blocked
+    try:
+        payload = await ctx.context.wabot.get_user_info(jid)
+    except Exception as exc:
+        payload = {"ok": False, "detail": str(exc)}
+    ctx.context.memory.record_tool_event(ctx.context.run_id, "get_whatsapp_user_info", payload)
+    return redact(payload)
+
+
+@function_tool
+async def download_whatsapp_profile_picture(
+    ctx: RunContextWrapper[RuntimeContext],
+    jid: str,
+    preview: bool = False,
+    filename: str | None = None,
+) -> dict[str, Any]:
+    """Download a contact or group profile picture to WABOT_AGENT_MEDIA_DIR/avatars/."""
+    blocked = await _wabot_ready_or_block(ctx, "download_whatsapp_profile_picture")
+    if blocked is not None:
+        return blocked
+    try:
+        resp = await ctx.context.wabot.get_user_picture(jid, preview=preview)
+    except Exception as exc:
+        payload = {"ok": False, "detail": str(exc)}
+        ctx.context.memory.record_tool_event(
+            ctx.context.run_id, "download_whatsapp_profile_picture", payload
+        )
+        return payload
+
+    if resp.status_code == 404:
+        payload = {"ok": False, "detail": "no profile picture"}
+    elif resp.status_code >= 400:
+        payload = {"ok": False, "detail": f"HTTP {resp.status_code}: {resp.text[:200]}"}
+    elif "application/json" in (resp.headers.get("content-type") or ""):
+        payload = {"ok": True, "unchanged": True, "result": resp.json()}
+    else:
+        avatars = ctx.context.settings.media_dir / "avatars"
+        avatars.mkdir(parents=True, exist_ok=True)
+        safe = "".join(c if c.isalnum() or c in "._-" else "_" for c in jid)[:120]
+        ext = ".jpg"
+        if "png" in (resp.headers.get("content-type") or ""):
+            ext = ".png"
+        out_name = filename or f"{safe}{ext}"
+        out_path = avatars / out_name
+        out_path.write_bytes(resp.content)
+        payload = {
+            "ok": True,
+            "path": str(out_path),
+            "picture_id": resp.headers.get("X-Picture-ID"),
+            "preview": preview,
+        }
+    ctx.context.memory.record_tool_event(
+        ctx.context.run_id, "download_whatsapp_profile_picture", payload
+    )
+    return redact(payload)
+
+
+@function_tool
 async def download_whatsapp_media(
     ctx: RunContextWrapper[RuntimeContext],
     chat: str,
@@ -797,6 +861,8 @@ def core_tools() -> list[Any]:
         mute_whatsapp_chat,
         archive_whatsapp_chat,
         pin_whatsapp_chat,
+        get_whatsapp_user_info,
+        download_whatsapp_profile_picture,
         recall_contact_memory,
         remember_contact_fact,
         recall_agent_notes,

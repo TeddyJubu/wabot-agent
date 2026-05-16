@@ -26,6 +26,8 @@ Use this skill before changing WhatsApp state, sending messages, or handling inb
   invite links via `get_whatsapp_group_invite`; join via `join_whatsapp_group`.
 - Mute, archive, or pin chats with `mute_whatsapp_chat`, `archive_whatsapp_chat`,
   `pin_whatsapp_chat` (syncs via WhatsApp app state).
+- Profile metadata: `get_whatsapp_user_info(jid)` (status, picture id, verified business name).
+  Avatars: `download_whatsapp_profile_picture` → `data/media/avatars/` (set `preview=true` for thumb).
 - Read/delivery receipts and remote typing may appear on the dashboard SSE stream
   (`whatsapp_receipt`, `whatsapp_presence`) when wabot webhooks are configured.
 - Never send credentials, one-time codes, tokens, cookies, or session data.

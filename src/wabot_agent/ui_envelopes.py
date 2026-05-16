@@ -156,6 +156,23 @@ def _inbox_message(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _user_profile(result: dict[str, Any]) -> dict[str, Any]:
+    user = result.get("user")
+    if not isinstance(user, dict):
+        user = {}
+    jid = user.get("jid")
+    return {
+        "kind": "user_profile",
+        "data": {
+            "jid": _mask_recipient(jid) if jid else "***",
+            "status": str(user.get("status") or ""),
+            "verified_name": user.get("verified_name"),
+            "picture_id": user.get("picture_id"),
+        },
+        "actions": [],
+    }
+
+
 def _pairing_qr(result: dict[str, Any]) -> dict[str, Any]:
     return {
         "kind": "pairing_qr",
@@ -181,6 +198,7 @@ _BUILDERS: dict[str, _Builder] = {
     "remember_contact_fact": _memory,
     "get_last_whatsapp_inbound_message": _inbox_message,
     "list_whatsapp_inbound_messages": _inbox_message,
+    "get_whatsapp_user_info": _user_profile,
     "__pairing_qr": _pairing_qr,
 }
 
