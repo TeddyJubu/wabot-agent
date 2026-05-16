@@ -364,6 +364,25 @@ async def _dry_run_block(
     return payload
 
 
+async def _invoke_chat_state_action(
+    ctx: RunContextWrapper[RuntimeContext],
+    tool_name: str,
+    chat: str,
+    invoke: Any,
+) -> dict[str, Any]:
+    if blocked := await _dry_run_block(ctx, tool_name):
+        return blocked
+    if blocked := await _wabot_ready_or_block(ctx, tool_name):
+        return blocked
+    try:
+        result = await invoke()
+        payload = {"ok": True, "chat": mask_phone(chat), "result": redact(result)}
+    except Exception as exc:
+        payload = {"ok": False, "detail": str(exc)}
+    ctx.context.memory.record_tool_event(ctx.context.run_id, tool_name, payload)
+    return payload
+
+
 async def _invoke_chat_message_action(
     ctx: RunContextWrapper[RuntimeContext],
     tool_name: str,
@@ -498,6 +517,48 @@ async def get_whatsapp_group_invite(
         payload = {"ok": False, "detail": str(exc)}
     ctx.context.memory.record_tool_event(ctx.context.run_id, "get_whatsapp_group_invite", payload)
     return redact(payload)
+
+
+@function_tool
+async def mute_whatsapp_chat(
+    ctx: RunContextWrapper[RuntimeContext],
+    chat: str,
+    mute: bool,
+    duration_hours: int = 0,
+) -> dict[str, Any]:
+    """Mute or unmute a chat. duration_hours applies when mute is true (0 = forever)."""
+    return await _invoke_chat_state_action(
+        ctx,
+        "mute_whatsapp_chat",
+        chat,
+        lambda: ctx.context.wabot.mute_chat(chat, mute, duration_hours=duration_hours),
+    )
+
+
+@function_tool
+async def archive_whatsapp_chat(
+    ctx: RunContextWrapper[RuntimeContext], chat: str, archive: bool
+) -> dict[str, Any]:
+    """Archive or unarchive a chat in WhatsApp."""
+    return await _invoke_chat_state_action(
+        ctx,
+        "archive_whatsapp_chat",
+        chat,
+        lambda: ctx.context.wabot.archive_chat(chat, archive),
+    )
+
+
+@function_tool
+async def pin_whatsapp_chat(
+    ctx: RunContextWrapper[RuntimeContext], chat: str, pin: bool
+) -> dict[str, Any]:
+    """Pin or unpin a chat in WhatsApp."""
+    return await _invoke_chat_state_action(
+        ctx,
+        "pin_whatsapp_chat",
+        chat,
+        lambda: ctx.context.wabot.pin_chat(chat, pin),
+    )
 
 
 @function_tool
@@ -733,6 +794,9 @@ def core_tools() -> list[Any]:
         get_whatsapp_group,
         get_whatsapp_group_invite,
         join_whatsapp_group,
+        mute_whatsapp_chat,
+        archive_whatsapp_chat,
+        pin_whatsapp_chat,
         recall_contact_memory,
         remember_contact_fact,
         recall_agent_notes,

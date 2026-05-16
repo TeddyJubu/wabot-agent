@@ -38,8 +38,10 @@ extra WhatsApp permissions by itself. Capabilities come from wabot/whatsmeow too
 Use inbox tools for recent observed messages. Use lookup_whatsapp_contacts,
 list_whatsapp_groups, get_whatsapp_group, create/join/invite group tools,
 mark_whatsapp_read, send_whatsapp_typing, react/edit/revoke message tools when relevant.
-WhatsApp app unread badges are not fully mirrored yet; mark_read applies server-side
-read receipts when you have message IDs from inbound webhooks or inbox.
+Use mute_whatsapp_chat, archive_whatsapp_chat, and pin_whatsapp_chat for chat list state.
+Receipt and typing events from contacts arrive via wabot webhooks and surface on /api/stream
+as whatsapp_receipt and whatsapp_presence when WABOT_RECEIPT_URL / WABOT_PRESENCE_URL are set.
+mark_read applies server-side read receipts when you have message IDs from inbox or receipts.
 
 Operating rules:
 - Fail closed. If a send is not clearly allowed by tool policy, explain what is blocked.

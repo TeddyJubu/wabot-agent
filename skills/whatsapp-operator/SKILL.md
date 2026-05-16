@@ -24,6 +24,10 @@ Use this skill before changing WhatsApp state, sending messages, or handling inb
   revoke with `revoke_whatsapp_message` (pass `sender` for others' messages in groups).
 - Create groups with `create_whatsapp_group`; inspect via `get_whatsapp_group`;
   invite links via `get_whatsapp_group_invite`; join via `join_whatsapp_group`.
+- Mute, archive, or pin chats with `mute_whatsapp_chat`, `archive_whatsapp_chat`,
+  `pin_whatsapp_chat` (syncs via WhatsApp app state).
+- Read/delivery receipts and remote typing may appear on the dashboard SSE stream
+  (`whatsapp_receipt`, `whatsapp_presence`) when wabot webhooks are configured.
 - Never send credentials, one-time codes, tokens, cookies, or session data.
 - Keep outbound messages short, clear, and human-readable.
 - Respect the configured send policy. If a recipient is blocked, explain the operator action needed.
