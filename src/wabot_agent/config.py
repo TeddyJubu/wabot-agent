@@ -119,6 +119,16 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Observability. Both restart-required (not in MUTABLE_FIELDS).
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
+        default="INFO",
+        validation_alias=AliasChoices("WABOT_AGENT_LOG_LEVEL", "VIGNESH_LOG_LEVEL"),
+    )
+    log_format: Literal["json", "text"] = Field(
+        default="json",
+        validation_alias=AliasChoices("WABOT_AGENT_LOG_FORMAT", "VIGNESH_LOG_FORMAT"),
+    )
+
     @field_validator("allowed_recipients", mode="before")
     @classmethod
     def parse_allowed_recipients(cls, value: object) -> set[str]:

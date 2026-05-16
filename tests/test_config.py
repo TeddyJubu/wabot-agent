@@ -81,3 +81,35 @@ def test_cf_access_settings_accept_vignesh_aliases(
     assert settings.cf_access_team_domain == "legacy.cloudflareaccess.com"
     assert settings.cf_access_aud == "legacy-aud"
     assert settings.cf_access_required is True
+
+
+@pytest.mark.offline
+def test_log_level_defaults_to_info(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("WABOT_AGENT_LOG_LEVEL", raising=False)
+    monkeypatch.delenv("VIGNESH_LOG_LEVEL", raising=False)
+    monkeypatch.delenv("WABOT_AGENT_LOG_FORMAT", raising=False)
+    monkeypatch.delenv("VIGNESH_LOG_FORMAT", raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.log_level == "INFO"
+    assert settings.log_format == "json"
+
+
+@pytest.mark.offline
+def test_log_level_accepts_vignesh_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("WABOT_AGENT_LOG_LEVEL", raising=False)
+    monkeypatch.setenv("VIGNESH_LOG_LEVEL", "DEBUG")
+    monkeypatch.setenv("VIGNESH_LOG_FORMAT", "text")
+    settings = Settings(_env_file=None)
+    assert settings.log_level == "DEBUG"
+    assert settings.log_format == "text"
+
+
+@pytest.mark.offline
+def test_log_level_rejects_invalid_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Literal field rejects unknown levels at boot — fail fast, don't silently
+    fall back."""
+    from pydantic import ValidationError
+
+    monkeypatch.setenv("WABOT_AGENT_LOG_LEVEL", "SHOUTING")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
