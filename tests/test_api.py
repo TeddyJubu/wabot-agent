@@ -61,7 +61,7 @@ def test_pairing_restart_returns_fresh_qr(tmp_path: Path, monkeypatch) -> None:
     from wabot_agent.wabot import WabotPairingQR
 
     settings = make_settings(tmp_path).model_copy(
-        update={"WABOT_AGENT_WABOT_HOME": str(tmp_path / "wabot")}
+        update={"wabot_home": tmp_path / "wabot"}
     )
     client = TestClient(create_app(settings))
 
@@ -78,9 +78,9 @@ def test_pairing_restart_returns_fresh_qr(tmp_path: Path, monkeypatch) -> None:
             event="code",
         )
 
-    from wabot_agent import wabot_process
+    from wabot_agent import api
 
-    monkeypatch.setattr(wabot_process, "restart_wabot_daemon", fake_restart)
+    monkeypatch.setattr(api, "restart_wabot_daemon", fake_restart)
 
     app = client.app
     wabot = app.state.wabot
