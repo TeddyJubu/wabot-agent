@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import io
 import json
+import logging
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -23,8 +24,10 @@ from .agent import run_agent, run_agent_streamed
 from .auth import AuthIdentity, maybe_mint_operator_cookie, verify_human_factory
 from .config import Settings, get_settings
 from .events import EventHub, EventLog
+from .logging_config import configure_logging
 from .memory import InboundMessage, MemoryStore
-from .redaction import redact
+from .middleware import RequestIdMiddleware
+from .redaction import mask_phone, redact
 from .runtime_overrides import (
     MUTABLE_FIELDS,
     SECRET_FIELDS,
@@ -34,6 +37,8 @@ from .runtime_overrides import (
     save_overrides,
 )
 from .wabot import WabotClient
+
+logger = logging.getLogger("wabot_agent.api")
 
 
 class ChatRequest(BaseModel):
@@ -79,6 +84,10 @@ class SettingsPatch(BaseModel):
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     settings.ensure_dirs()
+    # Wire structured logging early. Idempotent — safe across TestClient reuse
+    # and uvicorn reloads. Must run before the first log record we emit so that
+    # ContextVarsFilter and the JSON formatter are in place.
+    configure_logging(level=settings.log_level, fmt=settings.log_format)
     overrides = load_overrides(settings.runtime_overrides_path)
     if overrides:
         # Validate atomically on a snapshot first — a stale override file with
@@ -158,6 +167,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     pass
 
     app = FastAPI(title="wabot-agent", version="0.1.0", lifespan=lifespan)
+    # Mint/honor X-Request-ID and emit one `request` log record per HTTP call.
+    # Must be registered before any other middleware that might short-circuit
+    # responses, so the access record always reflects the final status.
+    app.add_middleware(RequestIdMiddleware)
     app.state.settings = settings
     app.state.memory = memory
     app.state.event_log = event_log
@@ -345,10 +358,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             is_group=payload.is_group,
         )
         if not memory.claim_message(inbound.id, inbound.sender):
+            logger.info(
+                "inbound_message_received",
+                extra={
+                    "message_id": inbound.id,
+                    "sender": mask_phone(inbound.sender),
+                    "is_group": inbound.is_group,
+                    "duplicate": True,
+                },
+            )
             return {"accepted": True, "duplicate": True, "message_id": inbound.id}
         event_log.write(
             "inbound_message",
             {"message_id": inbound.id, "sender": inbound.sender, "path": str(request.url.path)},
+        )
+        logger.info(
+            "inbound_message_received",
+            extra={
+                "message_id": inbound.id,
+                "sender": mask_phone(inbound.sender),
+                "is_group": inbound.is_group,
+                "duplicate": False,
+            },
         )
         try:
             result = await run_agent(
@@ -563,6 +594,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "settings_updated",
             {"fields": sorted(proposed.keys())},
         )
+        logger.info(
+            "settings_updated",
+            extra={"fields": sorted(proposed.keys())},
+        )
         return _settings_view(settings)
 
     @app.post("/api/settings/test/openrouter", dependencies=[human_dependency])
@@ -702,4 +737,13 @@ def _verify_inbound_auth(settings: Settings, authorization: str | None) -> None:
 
 def main() -> None:
     settings = get_settings()
-    uvicorn.run(create_app(settings), host=settings.host, port=settings.port, reload=False)
+    # `access_log=False`: our RequestIdMiddleware emits the canonical access
+    # record with correlation IDs and latency; uvicorn's default access log
+    # would duplicate it without the IDs and dominate the JSON stream.
+    uvicorn.run(
+        create_app(settings),
+        host=settings.host,
+        port=settings.port,
+        reload=False,
+        access_log=False,
+    )

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,8 @@ from .memory import InboundMessage, MemoryStore
 from .redaction import mask_phone, redact
 from .skills import list_skills, read_skill
 from .wabot import WabotClient
+
+logger = logging.getLogger("wabot_agent.tools")
 
 
 @dataclass
@@ -82,6 +85,15 @@ async def send_whatsapp_text(
             ctx.context.run_id, "send_whatsapp_text.blocked", payload
         )
         ctx.context.event_log.write("send_blocked", payload)
+        logger.info(
+            "send_blocked",
+            extra={
+                "policy": ctx.context.settings.send_policy,
+                "reason": reason,
+                "to": mask_phone(to),
+                "tool": "send_whatsapp_text",
+            },
+        )
         return payload
 
     health = await ctx.context.wabot.health()
@@ -135,6 +147,15 @@ async def send_whatsapp_image(
         }
         ctx.context.memory.record_tool_event(
             ctx.context.run_id, "send_whatsapp_image.blocked", payload
+        )
+        logger.info(
+            "send_blocked",
+            extra={
+                "policy": ctx.context.settings.send_policy,
+                "reason": reason,
+                "to": mask_phone(to),
+                "tool": "send_whatsapp_image",
+            },
         )
         return payload
 

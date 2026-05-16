@@ -43,6 +43,80 @@ def test_health_and_ready(tmp_path: Path) -> None:
     assert ready["send_policy"] == "dry_run"
 
 
+def test_x_request_id_header_minted_on_response(tmp_path: Path) -> None:
+    """RequestIdMiddleware echoes a freshly-minted X-Request-ID on every response."""
+    client = TestClient(create_app(make_settings(tmp_path)))
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    rid = resp.headers.get("x-request-id")
+    assert rid is not None
+    assert len(rid) >= 12
+
+
+def test_x_request_id_header_honored(tmp_path: Path) -> None:
+    """A valid inbound X-Request-ID is honored and echoed back."""
+    client = TestClient(create_app(make_settings(tmp_path)))
+    resp = client.get("/health", headers={"X-Request-ID": "honored-rid-1234"})
+    assert resp.headers["x-request-id"] == "honored-rid-1234"
+
+
+def test_x_request_id_invalid_is_replaced(tmp_path: Path) -> None:
+    """Garbage X-Request-ID gets dropped and a fresh one minted."""
+    client = TestClient(create_app(make_settings(tmp_path)))
+    resp = client.get("/health", headers={"X-Request-ID": "a"})  # too short
+    rid = resp.headers["x-request-id"]
+    assert rid != "a"
+    assert len(rid) >= 12
+
+
+def test_inbound_emits_structured_log(tmp_path: Path) -> None:
+    """The /whatsapp/inbound handler emits an inbound_message_received record
+    with the sender phone-masked."""
+    import json
+    import logging
+    from io import StringIO
+
+    from wabot_agent.logging_config import ContextVarsFilter, JsonFormatter
+
+    buf = StringIO()
+    handler = logging.StreamHandler(buf)
+    handler.setFormatter(JsonFormatter())
+    handler.addFilter(ContextVarsFilter())
+    api_logger = logging.getLogger("wabot_agent.api")
+    saved = list(api_logger.handlers)
+    saved_level = api_logger.level
+    saved_propagate = api_logger.propagate
+    api_logger.handlers.clear()
+    api_logger.addHandler(handler)
+    api_logger.setLevel(logging.DEBUG)
+    api_logger.propagate = False
+    try:
+        client = TestClient(create_app(make_settings(tmp_path)))
+        payload = {"id": "msg-log-1", "from": "+491701234567", "text": "hi"}
+        headers = {"Authorization": "Bearer inbound-secret"}
+        resp = client.post("/whatsapp/inbound", json=payload, headers=headers)
+        assert resp.status_code == 200
+    finally:
+        api_logger.handlers.clear()
+        for h in saved:
+            api_logger.addHandler(h)
+        api_logger.setLevel(saved_level)
+        api_logger.propagate = saved_propagate
+
+    records = [
+        json.loads(line)
+        for line in buf.getvalue().strip().splitlines()
+        if line
+    ]
+    inbound_records = [r for r in records if r["event"] == "inbound_message_received"]
+    assert inbound_records, f"expected an inbound_message_received record; got {records}"
+    rec = inbound_records[0]
+    assert rec["message_id"] == "msg-log-1"
+    assert rec["duplicate"] is False
+    # Phone number must be masked in every field of the record.
+    assert "491701234567" not in json.dumps(rec)
+
+
 def test_pairing_endpoint_reports_missing_token(tmp_path: Path) -> None:
     client = TestClient(create_app(make_settings(tmp_path)))
 

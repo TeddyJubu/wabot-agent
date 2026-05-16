@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import httpx
+
+logger = logging.getLogger("wabot_agent.wabot")
 
 
 class WabotError(RuntimeError):
@@ -114,12 +118,34 @@ class WabotClient:
         return {"X-Token": self.token}
 
     async def send_text(self, to: str, text: str) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.post(
-                f"{self.endpoint}/send",
-                json={"to": to, "text": text},
-                headers=self._headers(),
+        start = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(
+                    f"{self.endpoint}/send",
+                    json={"to": to, "text": text},
+                    headers=self._headers(),
+                )
+        except Exception as exc:
+            logger.warning(
+                "outbound_http",
+                extra={
+                    "endpoint_path": "/send",
+                    "ok": False,
+                    "latency_ms": int((time.perf_counter() - start) * 1000),
+                    "error_class": type(exc).__name__,
+                },
             )
+            raise
+        logger.info(
+            "outbound_http",
+            extra={
+                "endpoint_path": "/send",
+                "status_code": resp.status_code,
+                "ok": resp.is_success,
+                "latency_ms": int((time.perf_counter() - start) * 1000),
+            },
+        )
         return self._handle_response(resp)
 
     async def send_image(self, to: str, path: str, caption: str | None = None) -> dict[str, Any]:
@@ -129,14 +155,36 @@ class WabotClient:
         data = {"to": to}
         if caption:
             data["caption"] = caption
-        with image_path.open("rb") as f:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                resp = await client.post(
-                    f"{self.endpoint}/send-image",
-                    data=data,
-                    files={"file": (image_path.name, f, "application/octet-stream")},
-                    headers=self._headers(),
-                )
+        start = time.perf_counter()
+        try:
+            with image_path.open("rb") as f:
+                async with httpx.AsyncClient(timeout=self.timeout) as client:
+                    resp = await client.post(
+                        f"{self.endpoint}/send-image",
+                        data=data,
+                        files={"file": (image_path.name, f, "application/octet-stream")},
+                        headers=self._headers(),
+                    )
+        except Exception as exc:
+            logger.warning(
+                "outbound_http",
+                extra={
+                    "endpoint_path": "/send-image",
+                    "ok": False,
+                    "latency_ms": int((time.perf_counter() - start) * 1000),
+                    "error_class": type(exc).__name__,
+                },
+            )
+            raise
+        logger.info(
+            "outbound_http",
+            extra={
+                "endpoint_path": "/send-image",
+                "status_code": resp.status_code,
+                "ok": resp.is_success,
+                "latency_ms": int((time.perf_counter() - start) * 1000),
+            },
+        )
         return self._handle_response(resp)
 
     def _handle_response(self, resp: httpx.Response) -> dict[str, Any]:
