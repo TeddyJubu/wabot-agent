@@ -265,3 +265,24 @@ def test_builder_swallows_exceptions() -> None:
     assert env is not None
     assert env["data"]["contact_masked"] == "***"
     assert env["data"]["facts"] == []
+
+
+def test_get_whatsapp_user_info_builds_profile_card() -> None:
+    env = build_ui_envelope(
+        "get_whatsapp_user_info",
+        {
+            "ok": True,
+            "user": {
+                "jid": "15550001111@s.whatsapp.net",
+                "status": "On a call",
+                "picture_id": "pic-1",
+                "verified_name": "Acme Corp",
+            },
+        },
+    )
+    assert env is not None
+    assert env["kind"] == "user_profile"
+    assert env["data"]["status"] == "On a call"
+    assert env["data"]["verified_name"] == "Acme Corp"
+    assert env["data"]["picture_id"] == "pic-1"
+    assert "***" in env["data"]["jid"]

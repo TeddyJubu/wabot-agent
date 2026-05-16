@@ -1,5 +1,6 @@
 import type {
   InboxMessageData,
+  UserProfileData,
   MemoryData,
   PairingQrData,
   SendConfirmData,
@@ -11,6 +12,7 @@ import PairingQrCard from "./PairingQrCard";
 import SendConfirmCard from "./SendConfirmCard";
 import MemoryCard from "./MemoryCard";
 import InboxMessageCard from "./InboxMessageCard";
+import UserProfileCard from "./UserProfileCard";
 
 interface Props {
   envelope: UiEnvelope;
@@ -55,6 +57,13 @@ export default function ToolCard({ envelope, onAction }: Props) {
       return (
         <InboxMessageCard
           data={envelope.data as unknown as InboxMessageData}
+          actions={envelope.actions}
+        />
+      );
+    case "user_profile":
+      return (
+        <UserProfileCard
+          data={envelope.data as unknown as UserProfileData}
           actions={envelope.actions}
         />
       );

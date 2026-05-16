@@ -203,6 +203,24 @@ class WabotClient:
             {"pin": pin},
         )
 
+    async def get_user_info(self, jid: str) -> dict[str, Any]:
+        return await self._get_json(f"/users/{quote(jid, safe='')}")
+
+    async def get_user_picture(
+        self, jid: str, preview: bool = False, picture_id: str | None = None
+    ) -> httpx.Response:
+        params: dict[str, str] = {}
+        if preview:
+            params["preview"] = "true"
+        if picture_id:
+            params["picture_id"] = picture_id
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            return await client.get(
+                f"{self.endpoint}/users/{quote(jid, safe='')}/picture",
+                params=params or None,
+                headers=self._headers(),
+            )
+
     async def inbox_recent(self, limit: int = 20) -> dict[str, Any]:
         if not self.token:
             return {
@@ -437,6 +455,26 @@ class FakeWabotClient(WabotClient):
 
     async def pin_chat(self, chat: str, pin: bool) -> dict[str, Any]:
         return {"ok": True, "chat": chat, "pinned": pin}
+
+    async def get_user_info(self, jid: str) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "user": {
+                "jid": jid,
+                "status": "Available",
+                "picture_id": "fake-pic",
+                "verified_name": "Fake User",
+            },
+        }
+
+    async def get_user_picture(
+        self, jid: str, preview: bool = False, picture_id: str | None = None
+    ) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "image/jpeg", "X-Picture-ID": "fake-pic"},
+            content=b"fake-avatar-bytes",
+        )
 
     async def react_message(
         self,

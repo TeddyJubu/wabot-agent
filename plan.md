@@ -62,7 +62,7 @@ Legend: **Done** = exposed via wabot + agent tool. **Partial** = limited. **Miss
 | Receive messages (observe) | **Partial** | `GET /inbox/recent` + webhook | inbox tools |
 | Download media | **Done** | `GET /media/download` | `download_whatsapp_media` |
 | Contact lookup | **Done** | `POST /contacts/lookup` | `lookup_whatsapp_contacts` |
-| User info / avatar | Missing | `GET /users/{jid}` | `get_whatsapp_user_info` |
+| User info / avatar | **Done** | `GET /users/{jid}`, `GET /users/{jid}/picture` | `get_whatsapp_user_info`, `download_whatsapp_profile_picture` |
 | List groups | **Done** | `GET /groups` | `list_whatsapp_groups` |
 | Group admin / invites | **Partial** | `POST /groups`, `GET /groups/{jid}`, invite, join | group lifecycle tools |
 | Mark read | **Done** | `POST /chats/read` | `mark_whatsapp_read` |
@@ -113,6 +113,19 @@ Legend: **Done** = exposed via wabot + agent tool. **Partial** = limited. **Miss
 **wabot-agent**
 - [x] `POST /whatsapp/receipt`, `/whatsapp/presence` → SSE `whatsapp_receipt`, `whatsapp_presence`
 - [x] `mute_whatsapp_chat`, `archive_whatsapp_chat`, `pin_whatsapp_chat`
+
+### Phase 5A — User info + avatar (done)
+**wabot**
+- [x] `GET /users/{jid}` — `GetUserInfo` (status, picture id, devices, verified name)
+- [x] `GET /users/{jid}/picture` — fetch profile image (`preview`, `picture_id` query)
+
+**wabot-agent**
+- [x] `get_whatsapp_user_info`, `download_whatsapp_profile_picture` → `data/media/avatars/`
+- [x] UI envelope `user_profile` + `UserProfileCard`
+
+### Phase 5B — History-sync backfill (planned)
+**wabot:** parse `events.HistorySync`, optional `WABOT_HISTORY_DB`, batched history webhook.
+**wabot-agent:** `POST /whatsapp/history`, `bulk_record_inbound`, no auto-reply on history rows.
 
 ---
 

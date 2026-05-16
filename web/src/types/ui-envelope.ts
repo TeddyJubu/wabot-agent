@@ -3,7 +3,8 @@ export type ToolKind =
   | "pairing_qr"
   | "send_confirm"
   | "memory"
-  | "inbox_message";
+  | "inbox_message"
+  | "user_profile";
 
 export interface ToolAction {
   id: string;
@@ -61,4 +62,11 @@ export interface InboxMessageData {
   found: boolean;
   messages: InboxPreviewMessage[];
   source?: string;
+}
+
+export interface UserProfileData {
+  jid: string;
+  status: string;
+  verified_name?: string;
+  picture_id?: string;
 }
