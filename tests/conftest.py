@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,28 @@ def settings(tmp_path: Path) -> Settings:
 @pytest.fixture
 def memory(settings: Settings) -> MemoryStore:
     return MemoryStore(settings.db_path)
+
+
+@pytest.fixture
+def memory_path(tmp_path: Path) -> Path:
+    """A DB path shared across fixtures, for multi-store concurrency tests."""
+    return tmp_path / "agent.db"
+
+
+@pytest.fixture
+def memory_factory(memory_path: Path) -> Callable[[], MemoryStore]:
+    """Yields fresh MemoryStore instances against the same path.
+
+    Each instance has its own threading.RLock, which is required to
+    exercise the SQL-level race in claim_message — a single shared store
+    would serialise everything on its per-instance lock and the race
+    would never appear.
+    """
+
+    def _make() -> MemoryStore:
+        return MemoryStore(memory_path)
+
+    return _make
 
 
 @pytest.fixture
