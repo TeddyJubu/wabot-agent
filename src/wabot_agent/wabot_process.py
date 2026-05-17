@@ -71,6 +71,16 @@ async def _kill_port_listeners(port: int) -> None:
     await asyncio.sleep(0.5)
 
 
+async def _wait_for_port_listen(port: int, *, timeout_sec: float = 30.0) -> bool:
+    """Return True once something is listening on tcp:port (e.g. systemd restarted wabot)."""
+    deadline = time.monotonic() + timeout_sec
+    while time.monotonic() < deadline:
+        if await _pids_on_port(port):
+            return True
+        await asyncio.sleep(0.5)
+    return False
+
+
 def _http_addr_from_endpoint(endpoint: str) -> str:
     parsed = urlparse(endpoint)
     host = parsed.hostname or "127.0.0.1"
@@ -136,13 +146,18 @@ async def restart_wabot_daemon(settings: Settings) -> None:
     home = home.expanduser().resolve()
     port = _port_from_endpoint(settings.wabot_endpoint)
     await _kill_port_listeners(port)
+    # Production VPS runs wabot under systemd (User=wabot). Prefer letting the
+    # service manager restart the daemon instead of spawning a sibling process
+    # as the agent user (which cannot read store.db and races systemd).
+    if await _wait_for_port_listen(port, timeout_sec=30.0):
+        return
     await _start_from_home(home, settings)
 
 
 async def wait_for_fresh_pairing(
     pairing_probe,
     *,
-    timeout_sec: float = 20.0,
+    timeout_sec: float = 45.0,
     poll_interval_sec: float = 0.5,
 ):
     deadline = time.monotonic() + timeout_sec

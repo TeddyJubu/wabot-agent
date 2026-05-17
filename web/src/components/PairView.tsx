@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useStore } from "@/store";
 import { usePairingStream } from "@/hooks/usePairingStream";
 import PairingQrCard from "@/components/tool-cards/PairingQrCard";
@@ -33,6 +33,14 @@ export default function PairView() {
   const [refreshing, setRefreshing] = useState(false);
   const [requestingQr, setRequestingQr] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (pairing?.logged_in || pairing?.qr_available) return;
+    const id = window.setInterval(() => {
+      void fetchPairing().then(setPairing).catch(() => undefined);
+    }, 3000);
+    return () => window.clearInterval(id);
+  }, [pairing?.logged_in, pairing?.qr_available, setPairing]);
 
   return (
     <div className="mx-auto flex min-h-full w-full max-w-[480px] flex-col px-4 py-8">
@@ -74,7 +82,14 @@ export default function PairView() {
                 setRequestingQr(true);
                 setError(null);
                 void requestNewPairingQr()
-                  .then(setPairing)
+                  .then((state) => {
+                    setPairing(state);
+                    if (!state.qr_available) {
+                      setError(
+                        "Restarting wabot — the QR should appear within a minute. Keep this page open.",
+                      );
+                    }
+                  })
                   .catch((err) =>
                     setError(err instanceof Error ? err.message : "Could not request a new QR."),
                   )

@@ -161,6 +161,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def _pairing_payload(p: Any) -> dict[str, Any]:
         # Same shape as GET /api/whatsapp/pairing — keep them in sync so the
         # client can paint from either source.
+        detail = p.detail
+        if not p.qr_available and p.event == "timeout" and not detail:
+            detail = (
+                "The last QR expired before it was scanned. Tap New QR, then scan "
+                "within about a minute while this page stays open."
+            )
         return {
             "supported": p.supported,
             "reachable": p.reachable,
@@ -170,7 +176,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "event": p.event,
             "updated_at": p.updated_at,
             "expires_at": p.expires_at,
-            "detail": p.detail,
+            "detail": detail,
         }
 
     async def _pairing_poll_loop() -> None:
