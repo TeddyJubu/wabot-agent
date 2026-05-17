@@ -174,6 +174,12 @@ def main() -> int:
             if url and "127.0.0.1" not in url and "localhost" not in url:
                 print(f"warning: {key} should use loopback, got {url}", file=sys.stderr)
 
+    if wabot_env.exists():
+        wabot_dir = wabot_env.parent.resolve()
+        if (wabot_dir / "wabot").is_file():
+            _write_env_key(env_path, "WABOT_AGENT_WABOT_HOME", str(wabot_dir))
+            print(f"ok: set WABOT_AGENT_WABOT_HOME={wabot_dir} (New QR on /pair)")
+
     print("ok: send_policy=allowlist")
     print(f"ok: allowed_recipients={len(recipients)}")
     print("ok: secret file permissions 0600")

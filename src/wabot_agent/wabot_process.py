@@ -25,7 +25,12 @@ def _port_from_endpoint(endpoint: str) -> int:
 
 def _load_env_file(path: Path) -> dict[str, str]:
     values: dict[str, str] = {}
-    for raw in path.read_text(encoding="utf-8").splitlines():
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"[wabot_process] could not read {path}: {exc}", flush=True)
+        return values
+    for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -66,7 +71,14 @@ async def _kill_port_listeners(port: int) -> None:
     await asyncio.sleep(0.5)
 
 
-async def _start_from_home(home: Path) -> None:
+def _http_addr_from_endpoint(endpoint: str) -> str:
+    parsed = urlparse(endpoint)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    return f"{host}:{port}"
+
+
+async def _start_from_home(home: Path, settings: Settings | None = None) -> None:
     binary = home / "wabot"
     if not binary.is_file():
         raise WabotRestartError(f"wabot binary not found at {binary}")
@@ -75,6 +87,14 @@ async def _start_from_home(home: Path) -> None:
     env_file = home / "wabot.env"
     if env_file.is_file():
         env.update(_load_env_file(env_file))
+    if settings is not None:
+        token = settings.resolved_wabot_token
+        if token:
+            env.setdefault("WABOT_TOKEN", token)
+        env.setdefault("WABOT_HTTP_ADDR", _http_addr_from_endpoint(settings.wabot_endpoint))
+    for key in ("WABOT_TOKEN", "WABOT_HTTP_ADDR", "WABOT_INBOUND_URL"):
+        if key not in env and key in os.environ:
+            env[key] = os.environ[key]
 
     await asyncio.create_subprocess_exec(
         str(binary),
@@ -116,7 +136,7 @@ async def restart_wabot_daemon(settings: Settings) -> None:
     home = home.expanduser().resolve()
     port = _port_from_endpoint(settings.wabot_endpoint)
     await _kill_port_listeners(port)
-    await _start_from_home(home)
+    await _start_from_home(home, settings)
 
 
 async def wait_for_fresh_pairing(
