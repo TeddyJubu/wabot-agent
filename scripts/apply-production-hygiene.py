@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Apply local/VPS production hygiene defaults (idempotent).
 
-- send_policy: owner when WABOT_AGENT_OWNER_NUMBERS is set, else allowlist (never allow_all)
+- send_policy: allow_all by default (override with WABOT_AGENT_SEND_POLICY)
 - allowed_recipients: union of .env + inbound_messages DB
 - operator token: generate if missing in .env
 - secret file modes: 0o600
@@ -107,15 +107,21 @@ def main() -> int:
     owner_raw = env.get("WABOT_AGENT_OWNER_NUMBERS") or env.get("VIGNESH_OWNER_NUMBERS") or ""
     owners |= {p.strip() for p in owner_raw.replace(",", " ").split() if p.strip()}
 
-    send_policy = "owner" if owners else "allowlist"
+    send_policy = (
+        env.get("WABOT_AGENT_SEND_POLICY")
+        or env.get("VIGNESH_SEND_POLICY")
+        or "allow_all"
+    )
     if send_policy == "allowlist" and not recipients:
         print(
-            "warning: no allowed_recipients yet — sends will be blocked until you add "
-            "numbers/JIDs via Settings or WABOT_AGENT_ALLOWED_RECIPIENTS",
+            "warning: allowlist policy but no allowed_recipients — sends blocked until "
+            "you add numbers/JIDs via Settings or WABOT_AGENT_ALLOWED_RECIPIENTS",
             file=sys.stderr,
         )
     if send_policy == "owner" and not owners:
         print("warning: owner policy selected but no owner_numbers configured", file=sys.stderr)
+    if send_policy == "allow_all":
+        print("note: send_policy=allow_all — agent may message any recipient", file=sys.stderr)
 
     # Bootstrap .env for VPS (immutable source of truth).
     _write_env_key(env_path, "WABOT_AGENT_SEND_POLICY", send_policy)

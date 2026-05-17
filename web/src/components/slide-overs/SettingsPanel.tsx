@@ -18,7 +18,7 @@ export default function SettingsPanel() {
   const [view, setView] = useState<SettingsView | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [provider, setProvider] = useState<ModelProvider>("openrouter");
-  const [policy, setPolicy] = useState<Policy>("dry_run");
+  const [policy, setPolicy] = useState<Policy>("allow_all");
   const [recipients, setRecipients] = useState("");
   const [owners, setOwners] = useState("");
   const [status, setStatus] = useState("");

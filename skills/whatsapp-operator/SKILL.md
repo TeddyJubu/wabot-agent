@@ -23,10 +23,10 @@ Use this skill before changing WhatsApp state, sending messages, or handling inb
 - Use `lookup_whatsapp_contacts` before cold messaging unknown numbers.
 - Use `list_whatsapp_groups` for group discovery; `mark_whatsapp_read` when you have
   message IDs; `send_whatsapp_typing` for composing indicators.
-- For inbound media, check `has_media` / `media_kind` on inbox rows, then call
-  `download_whatsapp_media(chat, message_id)` to save under `data/media/inbound/`.
-- Send files with `send_whatsapp_document`, `send_whatsapp_audio`, or `send_whatsapp_video`
-  (paths must live under `WABOT_AGENT_MEDIA_DIR`). Images still use `send_whatsapp_image`.
+- Inbound attachments are auto-downloaded and processed on the VPS (text, PDF, zip, images).
+- Re-process with `process_whatsapp_attachment(chat, message_id)` or `process_vps_file(path)`.
+- Send any file type with `send_whatsapp_file(to, path)` from `WABOT_AGENT_MEDIA_DIR`, or the
+  specific `send_whatsapp_*` tools for images, documents, audio, and video.
 - React with `react_whatsapp_message`; edit own messages with `edit_whatsapp_message`;
   revoke with `revoke_whatsapp_message` (pass `sender` for others' messages in groups).
 - Create groups with `create_whatsapp_group`; inspect via `get_whatsapp_group`;

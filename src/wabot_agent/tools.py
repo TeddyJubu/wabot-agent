@@ -8,6 +8,9 @@ from agents import RunContextWrapper, function_tool
 
 from .config import Settings
 from .events import EventLog
+from .file_processing import process_file_at_path, whatsapp_send_kind_for_path
+from .media_download import download_media_message
+from .media_paths import media_path_allowed, workspace_path_allowed
 from .memory import InboundMessage, MemoryStore
 from .recipients import is_listed_recipient, recipients_match
 from .redaction import mask_phone, redact
@@ -63,33 +66,7 @@ def _is_send_allowed(
 
 
 def _media_path_allowed(settings: Settings, path: str) -> tuple[bool, Path | None, str | None]:
-    try:
-        media_root = settings.media_dir.resolve()
-        candidate = Path(path).expanduser().resolve()
-    except OSError as exc:
-        return False, None, str(exc)
-    if media_root not in candidate.parents and candidate != media_root:
-        return False, None, f"Media files must live under {settings.media_dir}."
-    if not candidate.exists() or not candidate.is_file():
-        return False, None, "Media file does not exist."
-    return True, candidate, None
-
-
-def _safe_media_segment(value: str) -> str:
-    cleaned = "".join(ch if ch.isalnum() or ch in "._@-" else "_" for ch in value)
-    return cleaned[:120] or "unknown"
-
-
-def _filename_from_content_disposition(header: str) -> str | None:
-    if not header:
-        return None
-    marker = 'filename="'
-    if marker in header:
-        start = header.index(marker) + len(marker)
-        end = header.find('"', start)
-        if end > start:
-            return header[start:end]
-    return None
+    return media_path_allowed(settings, path)
 
 
 async def _inbox_payload(ctx: RunContextWrapper[RuntimeContext], limit: int = 20) -> dict[str, Any]:
@@ -690,77 +667,107 @@ async def download_whatsapp_media(
     filename: str | None = None,
 ) -> dict[str, Any]:
     """Download inbound WhatsApp media to WABOT_AGENT_MEDIA_DIR (recent messages only)."""
-    try:
-        resp = await ctx.context.wabot.download_media(chat=chat, message_id=message_id)
-    except Exception as exc:
-        payload = {"ok": False, "detail": str(exc)}
-        ctx.context.memory.record_tool_event(
-            ctx.context.run_id, "download_whatsapp_media", payload
-        )
-        return payload
-
-    if resp.status_code == 404:
-        payload = {
-            "ok": False,
-            "detail": (
-                "Media not in wabot cache. Only recent inbound media can be downloaded; "
-                "ensure the message was received while wabot was running."
-            ),
-        }
-        ctx.context.memory.record_tool_event(
-            ctx.context.run_id, "download_whatsapp_media", payload
-        )
-        return payload
-    if resp.status_code >= 400:
-        payload = {
-            "ok": False,
-            "detail": f"wabot returned HTTP {resp.status_code}: {resp.text[:200]}",
-        }
-        ctx.context.memory.record_tool_event(
-            ctx.context.run_id, "download_whatsapp_media", payload
-        )
-        return payload
-
-    media_kind = resp.headers.get("X-Media-Kind", "media")
-    suggested = filename or _filename_from_content_disposition(
-        resp.headers.get("Content-Disposition", "")
+    downloaded = await download_media_message(
+        ctx.context.wabot,
+        chat,
+        message_id,
+        ctx.context.settings,
+        filename=filename,
     )
-    if not suggested:
-        ext = ".bin"
-        mime = resp.headers.get("Content-Type", "")
-        if "image/png" in mime:
-            ext = ".png"
-        elif "image/" in mime:
-            ext = ".jpg"
-        elif "video/" in mime:
-            ext = ".mp4"
-        elif "audio/" in mime:
-            ext = ".ogg"
-        elif "pdf" in mime:
-            ext = ".pdf"
-        suggested = f"{_safe_media_segment(message_id)}{ext}"
-
-    dest_dir = (
-        ctx.context.settings.media_dir.resolve()
-        / "inbound"
-        / _safe_media_segment(chat)
-    )
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest_path = dest_dir / _safe_media_segment(suggested)
-    dest_path.write_bytes(resp.content)
-
-    payload = {
-        "ok": True,
-        "path": str(dest_path),
-        "bytes": len(resp.content),
-        "media_kind": media_kind,
-        "chat": chat,
-        "message_id": message_id,
-    }
+    if not downloaded.ok or downloaded.path is None:
+        payload = {"ok": False, "detail": downloaded.detail}
+    else:
+        payload = {
+            "ok": True,
+            "path": str(downloaded.path),
+            "bytes": downloaded.bytes,
+            "media_kind": downloaded.media_kind,
+            "mime": downloaded.mime,
+            "chat": chat,
+            "message_id": message_id,
+        }
     ctx.context.memory.record_tool_event(ctx.context.run_id, "download_whatsapp_media", payload)
-    redacted = redact({k: v for k, v in payload.items() if k != "path"})
-    redacted["path"] = payload["path"]
-    return redacted
+    if payload.get("ok"):
+        redacted = redact({k: v for k, v in payload.items() if k != "path"})
+        redacted["path"] = payload["path"]
+        return redacted
+    return redact(payload)
+
+
+@function_tool
+async def process_vps_file(
+    ctx: RunContextWrapper[RuntimeContext], path: str
+) -> dict[str, Any]:
+    """Read and summarize a file on the VPS (under media/ or data/)."""
+    allowed, safe_path, reason = workspace_path_allowed(ctx.context.settings, path)
+    if not allowed or safe_path is None:
+        payload = {"ok": False, "detail": reason}
+    else:
+        payload = process_file_at_path(
+            safe_path,
+            excerpt_limit=ctx.context.settings.file_excerpt_limit,
+            max_bytes=ctx.context.settings.file_max_process_bytes,
+        )
+    ctx.context.memory.record_tool_event(ctx.context.run_id, "process_vps_file", payload)
+    return redact(payload)
+
+
+@function_tool
+async def process_whatsapp_attachment(
+    ctx: RunContextWrapper[RuntimeContext],
+    chat: str,
+    message_id: str,
+    filename: str | None = None,
+) -> dict[str, Any]:
+    """Download a WhatsApp attachment and extract text/metadata on the VPS."""
+    downloaded = await download_media_message(
+        ctx.context.wabot,
+        chat,
+        message_id,
+        ctx.context.settings,
+        filename=filename,
+    )
+    if not downloaded.ok or downloaded.path is None:
+        payload = {"ok": False, "detail": downloaded.detail}
+    else:
+        payload = process_file_at_path(
+            downloaded.path,
+            mime=downloaded.mime,
+            excerpt_limit=ctx.context.settings.file_excerpt_limit,
+            max_bytes=ctx.context.settings.file_max_process_bytes,
+        )
+        payload["download_path"] = str(downloaded.path)
+    ctx.context.memory.record_tool_event(
+        ctx.context.run_id, "process_whatsapp_attachment", payload
+    )
+    return redact(payload)
+
+
+@function_tool
+async def send_whatsapp_file(
+    ctx: RunContextWrapper[RuntimeContext],
+    to: str,
+    path: str,
+    caption: str | None = None,
+    filename: str | None = None,
+) -> dict[str, Any]:
+    """Send any file from the VPS media dir (image, video, audio, or document)."""
+    path_allowed, safe_path, path_reason = _media_path_allowed(ctx.context.settings, path)
+    if not path_allowed or safe_path is None:
+        payload = {"sent": False, "reason": "media_path_not_allowed", "detail": path_reason}
+        ctx.context.memory.record_tool_event(ctx.context.run_id, "send_whatsapp_file.blocked", payload)
+        return payload
+
+    kind = whatsapp_send_kind_for_path(safe_path)
+    if kind == "image":
+        return await send_whatsapp_image(ctx, to=to, path=path, caption=caption)
+    if kind == "video":
+        return await send_whatsapp_video(ctx, to=to, path=path, caption=caption)
+    if kind == "audio":
+        return await send_whatsapp_audio(ctx, to=to, path=path)
+    return await send_whatsapp_document(
+        ctx, to=to, path=path, caption=caption, filename=filename or safe_path.name
+    )
 
 
 @function_tool
@@ -887,6 +894,9 @@ def core_tools() -> list[Any]:
         send_whatsapp_text,
         send_whatsapp_image,
         download_whatsapp_media,
+        process_vps_file,
+        process_whatsapp_attachment,
+        send_whatsapp_file,
         send_whatsapp_document,
         send_whatsapp_audio,
         send_whatsapp_video,
