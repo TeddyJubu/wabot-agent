@@ -62,11 +62,66 @@ def pdftotext_extract(path: Path, *, max_pages: int = 25) -> tuple[str, list[str
         return out_txt.read_text(encoding="utf-8", errors="replace"), warnings
 
 
-def tesseract_ocr(path: Path, *, lang: str = "eng") -> tuple[str, list[str]]:
+def pdf_ocr_extract(
+    path: Path,
+    *,
+    max_pages: int = 10,
+    lang: str = "eng",
+    dpi: int = 200,
+) -> tuple[str, list[str]]:
+    """Rasterize PDF pages and OCR them (for screencapture / scanned PDFs)."""
+    warnings: list[str] = []
+    if not tool_available("pdftoppm"):
+        return "", ["pdftoppm not installed (install poppler-utils)"]
+    if not tool_available("tesseract"):
+        return "", ["tesseract not installed"]
+
+    with tempfile.TemporaryDirectory(prefix="wabot-pdf-ocr-") as tmp:
+        prefix = Path(tmp) / "page"
+        code, _, err = run_command(
+            [
+                "pdftoppm",
+                "-png",
+                "-r",
+                str(dpi),
+                "-f",
+                "1",
+                "-l",
+                str(max(1, max_pages)),
+                str(path),
+                str(prefix),
+            ],
+            timeout=180.0,
+        )
+        if code != 0:
+            return "", [f"pdftoppm failed: {err.strip()[:200]}"]
+
+        pages = sorted(Path(tmp).glob("page-*.png"))
+        if not pages:
+            pages = sorted(Path(tmp).glob("*.png"))
+        if not pages:
+            return "", ["pdftoppm produced no page images"]
+
+        parts: list[str] = []
+        for idx, page_path in enumerate(pages, start=1):
+            text, ocr_warnings = tesseract_ocr(page_path, lang=lang, psm=6)
+            warnings.extend(ocr_warnings)
+            if text.strip():
+                parts.append(f"[page {idx}]\n{text.strip()}")
+
+        if not parts:
+            warnings.append("pdf page OCR produced no text")
+        else:
+            warnings.append(f"pdf OCR: {len(parts)} page(s) at {dpi} dpi")
+        return "\n\n".join(parts), warnings
+
+
+def tesseract_ocr(path: Path, *, lang: str = "eng", psm: int = 6) -> tuple[str, list[str]]:
+    """OCR an image. psm=6 (uniform text block) avoids OSD models required by --psm auto."""
     if not tool_available("tesseract"):
         return "", ["tesseract not installed"]
     code, out, err = run_command(
-        ["tesseract", str(path), "stdout", "-l", lang, "--psm", "auto"],
+        ["tesseract", str(path), "stdout", "-l", lang, "--psm", str(psm)],
         timeout=120.0,
     )
     if code != 0:

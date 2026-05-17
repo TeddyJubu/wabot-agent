@@ -186,6 +186,18 @@ class Settings(BaseSettings):
         default=True,
         validation_alias=AliasChoices("WABOT_AGENT_FILE_OCR_ENABLED", "VIGNESH_FILE_OCR_ENABLED"),
     )
+    file_ocr_language: str = Field(
+        default="eng",
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_FILE_OCR_LANGUAGE", "VIGNESH_FILE_OCR_LANGUAGE"
+        ),
+    )
+    file_pdf_ocr_max_pages: int = Field(
+        default=10,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_FILE_PDF_OCR_MAX_PAGES", "VIGNESH_FILE_PDF_OCR_MAX_PAGES"
+        ),
+    )
     whisper_model: str = Field(
         default="tiny",
         validation_alias=AliasChoices("WABOT_AGENT_WHISPER_MODEL", "VIGNESH_WHISPER_MODEL"),

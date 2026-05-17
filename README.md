@@ -159,7 +159,7 @@ WABOT_AGENT_OWNER_NUMBERS=+6580286424,+8801521207499
 | Type | VPS handling |
 |------|----------------|
 | Images | Vision LLM + optional Tesseract OCR |
-| PDF | `pdftotext` → fallback `pypdf` |
+| PDF | `pdftotext` → `pypdf` → **page OCR** (`pdftoppm` + Tesseract for screencapture/scanned) |
 | Audio / voice notes | ffmpeg → Whisper (`tiny` or `base` by sender) |
 | Video | ffprobe + frame OCR + audio transcript |
 | DOCX | Text extraction (no LibreOffice) |

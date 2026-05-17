@@ -496,8 +496,10 @@ def _augment_prompt(prompt: str, inbound: InboundMessage | None) -> str:
         "3) If you need thread context, call get_last_whatsapp_inbound_message or list_whatsapp_inbound_messages.\n"
         "4) Inbound attachments are downloaded and processed on the VPS automatically; "
         "voice notes include voice_transcript / [transcript] — reply using that text directly "
-        "(do not claim you cannot hear audio when a transcript is present). Photos also attach "
-        "for vision. Use process_whatsapp_attachment only if processing failed or you need a refresh.\n"
+        "(do not claim you cannot hear audio when a transcript is present). PDFs include "
+        "extracted or OCR text in the VPS file processing block — summarize that content; do not "
+        "claim you cannot read a PDF when an excerpt is present. Photos also attach for vision. "
+        "Use process_whatsapp_attachment only if processing failed or you need a refresh.\n"
         "5) If WhatsApp status is unclear, call wabot_health.\n"
         "6) Then write your final reply (plain text only — it is sent automatically).\n\n"
     )

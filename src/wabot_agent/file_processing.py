@@ -109,18 +109,44 @@ def _read_pdf_pypdf(path: Path, limit: int) -> tuple[str, list[str]]:
     return _truncate(body, limit), warnings
 
 
-def _read_pdf(path: Path, limit: int, *, use_system: bool) -> tuple[str, list[str]]:
+def _read_pdf(
+    path: Path,
+    limit: int,
+    *,
+    use_system: bool,
+    settings: Settings | None = None,
+) -> tuple[str, list[str]]:
     warnings: list[str] = []
+    body = ""
     if use_system:
         from .system_tools import pdftotext_extract
 
         body, sys_warnings = pdftotext_extract(path)
         warnings.extend(sys_warnings)
-        if body.strip():
-            return _truncate(body, limit), warnings
-    body, py_warnings = _read_pdf_pypdf(path, limit)
-    warnings.extend(py_warnings)
-    return body, warnings
+    if not body.strip():
+        body, py_warnings = _read_pdf_pypdf(path, limit)
+        warnings.extend(py_warnings)
+
+    cfg = settings
+    if (
+        not body.strip()
+        and use_system
+        and cfg
+        and cfg.file_ocr_enabled
+    ):
+        from .system_tools import pdf_ocr_extract
+
+        ocr_body, ocr_warnings = pdf_ocr_extract(
+            path,
+            max_pages=cfg.file_pdf_ocr_max_pages,
+            lang=cfg.file_ocr_language.strip() or "eng",
+        )
+        warnings.extend(ocr_warnings)
+        if ocr_body.strip():
+            body = ocr_body
+            warnings.append("used page OCR for image/scanned PDF")
+
+    return _truncate(body, limit), warnings
 
 
 def _read_csv(path: Path, limit: int) -> str:
@@ -331,10 +357,14 @@ def process_file_at_path(
             result["excerpt"] = excerpt or None
             result["summary"] = summary
         elif kind == "pdf":
-            excerpt, warnings = _read_pdf(path, excerpt_limit, use_system=use_system)
+            excerpt, warnings = _read_pdf(
+                path, excerpt_limit, use_system=use_system, settings=cfg
+            )
             result["warnings"] = warnings
             result["excerpt"] = excerpt or None
-            result["summary"] = "PDF text extraction on VPS (pdftotext/pypdf)."
+            result["summary"] = (
+                "PDF on VPS (pdftotext/pypdf; page OCR for screencapture/scanned)."
+            )
         elif kind == "archive":
             result["excerpt"] = _read_zip(path, excerpt_limit)
             result["summary"] = "Archive listing."

@@ -19,7 +19,7 @@ apt-get install -y --no-install-recommends \
   unzip
 
 echo "Installed:"
-for cmd in ffmpeg ffprobe pdftotext pdfinfo tesseract file unzip; do
+for cmd in ffmpeg ffprobe pdftotext pdftoppm pdfinfo tesseract file unzip; do
   if command -v "$cmd" >/dev/null 2>&1; then
     echo "  ok  $cmd -> $(command -v "$cmd")"
   else
