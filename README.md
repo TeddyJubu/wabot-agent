@@ -135,8 +135,10 @@ WABOT_AGENT_VISION_ATTACH_IMAGES=true
 
 # Speech-to-text: tiny for everyone; base for owner_numbers + dashboard chat
 WABOT_AGENT_WHISPER_MODEL=tiny
-WABOT_AGENT_WHISPER_MODEL_OWNER=base
+WABOT_AGENT_WHISPER_MODEL_OWNER=small
 WABOT_AGENT_WHISPER_MAX_SECONDS=90
+WABOT_AGENT_WHISPER_BEAM_SIZE_OWNER=5
+# WABOT_AGENT_WHISPER_LANGUAGE=en
 
 # Owner numbers (for send policy + better Whisper on their voice notes)
 WABOT_AGENT_OWNER_NUMBERS=+6580286424,+8801521207499
@@ -147,7 +149,9 @@ WABOT_AGENT_OWNER_NUMBERS=+6580286424,+8801521207499
 | `WABOT_AGENT_FILE_PROCESS_INBOUND` | Download and process attachments on each inbound message |
 | `WABOT_AGENT_VISION_ATTACH_IMAGES` | Pass image pixels to the LLM (not just OCR) |
 | `WABOT_AGENT_WHISPER_MODEL` | Default Whisper model (`tiny` — low CPU/RAM) |
-| `WABOT_AGENT_WHISPER_MODEL_OWNER` | Whisper for `WABOT_AGENT_OWNER_NUMBERS` and dashboard (`base` recommended on 8GB RAM) |
+| `WABOT_AGENT_WHISPER_MODEL_OWNER` | Whisper for owners/dashboard (`small` on 8GB RAM; use `medium` if you have headroom) |
+| `WABOT_AGENT_WHISPER_LANGUAGE` | Force language code (`en`, `bn`, …) when auto-detect is wrong |
+| `WABOT_AGENT_WHISPER_BEAM_SIZE_OWNER` | Decoder beam width for owners (default `5`; was `1` before — very inaccurate) |
 | `WABOT_AGENT_WHISPER_MAX_SECONDS` | Max audio transcribed per file (truncates long voice notes) |
 
 ### 4. What gets processed automatically

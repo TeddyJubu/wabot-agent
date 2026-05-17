@@ -8,7 +8,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
-from .audio_transcribe import resolve_whisper_model, transcribe_audio_file
+from .audio_transcribe import resolve_whisper_options, transcribe_audio_file
 from .config import Settings
 
 TEXT_EXTENSIONS = {
@@ -203,10 +203,10 @@ def _process_audio(
     excerpt = meta_line
     summary = f"Audio file ({path.stat().st_size} bytes)."
     try:
-        whisper_name = resolve_whisper_model(settings, is_owner=is_owner)
+        whisper_opts = resolve_whisper_options(settings, is_owner=is_owner)
         text, whisper_warnings = transcribe_audio_file(
             path,
-            model_name=whisper_name,
+            options=whisper_opts,
             max_duration_sec=settings.whisper_max_seconds,
             excerpt_limit=excerpt_limit,
         )
@@ -252,10 +252,10 @@ def _process_video(
         pass
 
     try:
-        whisper_name = resolve_whisper_model(settings, is_owner=is_owner)
+        whisper_opts = resolve_whisper_options(settings, is_owner=is_owner)
         text, whisper_warnings = transcribe_audio_file(
             path,
-            model_name=whisper_name,
+            options=whisper_opts,
             max_duration_sec=settings.whisper_max_seconds,
             excerpt_limit=excerpt_limit // 2,
         )

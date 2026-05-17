@@ -191,7 +191,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("WABOT_AGENT_WHISPER_MODEL", "VIGNESH_WHISPER_MODEL"),
     )
     whisper_model_owner: str = Field(
-        default="base",
+        default="small",
         validation_alias=AliasChoices(
             "WABOT_AGENT_WHISPER_MODEL_OWNER", "VIGNESH_WHISPER_MODEL_OWNER"
         ),
@@ -200,6 +200,42 @@ class Settings(BaseSettings):
         default=90,
         validation_alias=AliasChoices(
             "WABOT_AGENT_WHISPER_MAX_SECONDS", "VIGNESH_WHISPER_MAX_SECONDS"
+        ),
+    )
+    whisper_compute_type: str = Field(
+        default="int8",
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_WHISPER_COMPUTE_TYPE", "VIGNESH_WHISPER_COMPUTE_TYPE"
+        ),
+    )
+    whisper_beam_size: int = Field(
+        default=3,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_WHISPER_BEAM_SIZE", "VIGNESH_WHISPER_BEAM_SIZE"
+        ),
+    )
+    whisper_beam_size_owner: int = Field(
+        default=5,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_WHISPER_BEAM_SIZE_OWNER", "VIGNESH_WHISPER_BEAM_SIZE_OWNER"
+        ),
+    )
+    whisper_language: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_WHISPER_LANGUAGE", "VIGNESH_WHISPER_LANGUAGE"
+        ),
+    )
+    whisper_initial_prompt: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_WHISPER_INITIAL_PROMPT", "VIGNESH_WHISPER_INITIAL_PROMPT"
+        ),
+    )
+    whisper_vad_filter: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_WHISPER_VAD_FILTER", "VIGNESH_WHISPER_VAD_FILTER"
         ),
     )
     media_download_attempts: int = Field(
@@ -287,6 +323,9 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
+    from .cache_paths import configure_process_caches
+
     settings = Settings()
     settings.ensure_dirs()
+    configure_process_caches(settings)
     return settings

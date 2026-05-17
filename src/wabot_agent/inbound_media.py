@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 from .config import Settings
 from .file_processing import process_file_at_path
 from .media_download import download_inbound_media
@@ -7,6 +9,18 @@ from .memory import InboundMessage
 from .recipients import is_owner_inbound
 from .vision_input import inbound_is_image
 from .wabot import WabotClient
+
+_VOICE_TRANSCRIPT_RE = re.compile(
+    r"^- voice_transcript:\s*(.+)$", re.MULTILINE
+)
+
+
+def voice_transcript_from_context(context: str) -> str | None:
+    match = _VOICE_TRANSCRIPT_RE.search(context)
+    if not match:
+        return None
+    text = match.group(1).strip()
+    return text or None
 
 
 async def build_inbound_file_context(
@@ -55,8 +69,19 @@ async def build_inbound_file_context(
         lines.append(f"- warning: {warning}")
     if processed.get("excerpt"):
         lines.append("- excerpt:\n" + str(processed["excerpt"]))
+    excerpt_text = str(processed.get("excerpt") or "")
+    if "[transcript]:" in excerpt_text:
+        for line in excerpt_text.splitlines():
+            if line.startswith("[transcript]:"):
+                lines.append(f"- voice_transcript: {line.removeprefix('[transcript]:').strip()}")
+                break
     if not processed.get("ok"):
         lines.append(f"- processing_error: {processed.get('detail', 'failed')}")
+    elif inbound.media_kind == "audio" and "[transcript]:" not in excerpt_text:
+        lines.append(
+            "- processing_error: audio downloaded but speech-to-text produced no transcript "
+            "(check whisper warnings above)."
+        )
     if inbound_is_image(inbound):
         lines.append(
             "- note: image pixels are also attached for vision when the model supports it."

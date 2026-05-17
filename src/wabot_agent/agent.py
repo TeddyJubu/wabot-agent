@@ -20,7 +20,7 @@ from .redaction import redact
 from .skills import render_skill_summary
 from .tools import RuntimeContext, core_tools
 from .ui_envelopes import build_ui_envelope
-from .inbound_media import build_inbound_file_context
+from .inbound_media import build_inbound_file_context, voice_transcript_from_context
 from .vision_input import prepare_runner_input
 from .wabot import WabotClient
 
@@ -125,9 +125,18 @@ async def run_agent(
     event_log.write("agent_run_start", {"run_id": run_id, "session_id": session_key})
 
     augmented = _augment_prompt(prompt, inbound)
-    augmented += await build_inbound_file_context(
+    file_context = await build_inbound_file_context(
         inbound, settings=settings, wabot=context.wabot
     )
+    augmented += file_context
+    transcript = voice_transcript_from_context(file_context)
+    if transcript:
+        augmented = (
+            f"[Voice note transcription — reply to this text; ignore earlier "
+            f"failed-transcription replies in the thread if they conflict: "
+            f"\"{transcript}\"]\n\n"
+            + augmented
+        )
     runner_input = await prepare_runner_input(
         augmented,
         settings=settings,
@@ -212,9 +221,18 @@ async def run_agent_streamed(
     event_log.write("agent_run_start", {"run_id": run_id, "session_id": session_key})
 
     augmented = _augment_prompt(prompt, inbound)
-    augmented += await build_inbound_file_context(
+    file_context = await build_inbound_file_context(
         inbound, settings=settings, wabot=context.wabot
     )
+    augmented += file_context
+    transcript = voice_transcript_from_context(file_context)
+    if transcript:
+        augmented = (
+            f"[Voice note transcription — reply to this text; ignore earlier "
+            f"failed-transcription replies in the thread if they conflict: "
+            f"\"{transcript}\"]\n\n"
+            + augmented
+        )
     runner_input = await prepare_runner_input(
         augmented,
         settings=settings,
@@ -477,9 +495,9 @@ def _augment_prompt(prompt: str, inbound: InboundMessage | None) -> str:
         "2) If helpful, call recall_contact_memory for this sender.\n"
         "3) If you need thread context, call get_last_whatsapp_inbound_message or list_whatsapp_inbound_messages.\n"
         "4) Inbound attachments are downloaded and processed on the VPS automatically; "
-        "voice notes include a [transcript] in the VPS file processing block — answer from that "
-        "text when present. Photos also attach for vision. Use process_whatsapp_attachment only "
-        "if processing failed or you need a refresh.\n"
+        "voice notes include voice_transcript / [transcript] — reply using that text directly "
+        "(do not claim you cannot hear audio when a transcript is present). Photos also attach "
+        "for vision. Use process_whatsapp_attachment only if processing failed or you need a refresh.\n"
         "5) If WhatsApp status is unclear, call wabot_health.\n"
         "6) Then write your final reply (plain text only — it is sent automatically).\n\n"
     )

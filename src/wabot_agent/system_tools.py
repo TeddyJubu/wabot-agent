@@ -117,6 +117,8 @@ def ffmpeg_to_wav(
             str(path),
             "-t",
             str(max_duration_sec),
+            "-af",
+            "highpass=f=80,lowpass=f=8000,loudnorm=I=-16:TP=-1.5:LRA=11",
             "-ac",
             "1",
             "-ar",
