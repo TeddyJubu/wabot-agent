@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve wabot-agent.
+Thanks for helping improve **wabot-agent**. This project is open source under the [MIT License](LICENSE); by contributing, you agree your contributions are licensed under the same terms.
 
 ## Workflow
 

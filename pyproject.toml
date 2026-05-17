@@ -3,7 +3,10 @@ name = "wabot-agent"
 version = "0.1.0"
 description = "A VPS-ready OpenRouter-powered WhatsApp automation agent for wabot."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
+authors = [{ name = "Teddy Jubu" }]
 dependencies = [
   "fastapi>=0.124.0",
   "httpx>=0.28.0",

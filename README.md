@@ -1,6 +1,9 @@
 # wabot-agent
 
 [![CI](https://github.com/TeddyJubu/wabot-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/TeddyJubu/wabot-agent/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+Open-source WhatsApp automation agent ([MIT](LICENSE)). Fork, self-host, and contribute — see [CONTRIBUTING.md](CONTRIBUTING.md) and [DISTRIBUTION.md](DISTRIBUTION.md).
 
 Production-oriented WhatsApp automation: **OpenAI Agents SDK** + **OpenRouter**, with [`wabot`](https://github.com/TeddyJubu/wabot) (whatsmeow) as the only send/receive path.
 
@@ -15,6 +18,18 @@ Production-oriented WhatsApp automation: **OpenAI Agents SDK** + **OpenRouter**,
 - SQLite memory: inbound messages, contact facts, runs, idempotency
 - Webhooks from wabot: inbound, receipt, presence, history backfill
 - VPS deploy scripts, production hygiene checks, optional Cloudflare Tunnel
+
+## Distribution
+
+To ship this project to someone else (tarball, no secrets):
+
+```bash
+chmod +x scripts/package-release.sh scripts/install-from-release.sh
+./scripts/package-release.sh
+# → dist/wabot-agent-0.1.0.tar.gz + .sha256
+```
+
+Recipients follow **[DISTRIBUTION.md](DISTRIBUTION.md)** (wabot install, `.env`, VPS bootstrap). Package a specific branch with `REF=my-version ./scripts/package-release.sh`.
 
 ## Quickstart (local)
 
@@ -263,6 +278,10 @@ tests/               # Offline pytest suite
 plan.md              # Roadmap and handoff
 docs/                # Architecture diagrams and design specs
 ```
+
+## License
+
+Released under the [MIT License](LICENSE). Copyright (c) 2026 TeddyJubu and contributors.
 
 ## Contributing
 
