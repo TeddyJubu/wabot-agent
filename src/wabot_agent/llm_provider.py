@@ -10,7 +10,13 @@ ModelProvider = Literal["openrouter", "ollama", "ollama_cloud"]
 def active_model_id(settings: Settings) -> str:
     if settings.model_provider == "openrouter":
         return settings.openrouter_model
-    return settings.ollama_model
+    model = settings.ollama_model
+    # Local daemon uses ":cloud" / "-cloud" tags; Ollama Cloud API uses bare ids (e.g. gemma4:31b).
+    if settings.model_provider == "ollama_cloud":
+        for suffix in (":cloud", "-cloud"):
+            if model.endswith(suffix):
+                return model[: -len(suffix)]
+    return model
 
 
 def resolved_llm_base_url(settings: Settings) -> str:
@@ -36,6 +42,35 @@ def llm_default_headers(settings: Settings) -> dict[str, str]:
         "HTTP-Referer": settings.openrouter_site_url,
         "X-Title": settings.openrouter_app_title,
     }
+
+
+def vision_supported(settings: Settings) -> bool:
+    """Whether the active model is expected to accept image inputs."""
+    if not settings.live_model_enabled:
+        return False
+    model = active_model_id(settings).lower()
+    if settings.model_provider == "openrouter":
+        return any(
+            token in model
+            for token in (
+                "vision",
+                "vl",
+                "gpt-4o",
+                "gpt-4.1",
+                "gpt-4-turbo",
+                "claude-3",
+                "claude-sonnet-4",
+                "gemini",
+                "llava",
+                "pixtral",
+                "qwen-vl",
+                "qwen2-vl",
+            )
+        )
+    return any(
+        token in model
+        for token in ("gemma4", "gemma3", "vl", "llava", "moondream", "bakllava", "vision")
+    )
 
 
 def llm_provider_label(settings: Settings) -> str:

@@ -20,6 +20,8 @@ from .redaction import redact
 from .skills import render_skill_summary
 from .tools import RuntimeContext, core_tools
 from .ui_envelopes import build_ui_envelope
+from .inbound_media import build_inbound_file_context
+from .vision_input import prepare_runner_input
 from .wabot import WabotClient
 
 set_tracing_disabled(True)
@@ -46,8 +48,10 @@ look up. Do not give one-line non-answers when the user needs help.
 - list_whatsapp_inbound_messages / get_last_whatsapp_inbound_message — who messaged, context.
 - recall_contact_memory / remember_contact_fact — per-contact preferences and facts.
 - lookup_whatsapp_contacts — before messaging unknown numbers.
-- download_whatsapp_media — inbound images/docs (chat + message_id from webhook).
-- send_whatsapp_* — when policy allows; do not ask the operator to type "approved".
+- Inbound files are downloaded and processed on the VPS automatically (text/PDF/zip excerpts).
+- process_vps_file / process_whatsapp_attachment — re-read or process attachments on demand.
+- send_whatsapp_file — send any allowed file type from the media dir (routes image/video/audio/doc).
+- send_whatsapp_* — specific send tools; do not ask the operator to type "approved".
 - mark_whatsapp_read, send_whatsapp_typing — when appropriate for the conversation.
 - Groups, reactions, edits, mutes, archives — when the task requires them.
 
@@ -120,11 +124,22 @@ async def run_agent(
     )
     event_log.write("agent_run_start", {"run_id": run_id, "session_id": session_key})
 
+    augmented = _augment_prompt(prompt, inbound)
+    augmented += await build_inbound_file_context(
+        inbound, settings=settings, wabot=context.wabot
+    )
+    runner_input = await prepare_runner_input(
+        augmented,
+        settings=settings,
+        inbound=inbound,
+        wabot=context.wabot,
+    )
+
     async with connected_mcp_servers(settings.mcp_config) as mcp_servers:
         agent = build_agent(settings, mcp_servers=mcp_servers)
         result = await Runner.run(
             agent,
-            _augment_prompt(prompt, inbound),
+            runner_input,
             context=context,
             max_turns=settings.max_agent_turns,
             run_config=RunConfig(tracing_disabled=True, workflow_name="wabot-agent"),
@@ -197,6 +212,15 @@ async def run_agent_streamed(
     event_log.write("agent_run_start", {"run_id": run_id, "session_id": session_key})
 
     augmented = _augment_prompt(prompt, inbound)
+    augmented += await build_inbound_file_context(
+        inbound, settings=settings, wabot=context.wabot
+    )
+    runner_input = await prepare_runner_input(
+        augmented,
+        settings=settings,
+        inbound=inbound,
+        wabot=context.wabot,
+    )
     final_output = ""
     errored: Exception | None = None
 
@@ -215,7 +239,7 @@ async def run_agent_streamed(
             try:
                 stream_result = Runner.run_streamed(
                     agent,
-                    augmented,
+                    runner_input,
                     context=context,
                     max_turns=settings.max_agent_turns,
                     run_config=run_config,
@@ -248,7 +272,7 @@ async def run_agent_streamed(
             try:
                 result = await Runner.run(
                     agent,
-                    augmented,
+                    runner_input,
                     context=context,
                     max_turns=settings.max_agent_turns,
                     run_config=run_config,
@@ -452,7 +476,8 @@ def _augment_prompt(prompt: str, inbound: InboundMessage | None) -> str:
         "1) Decide what they need.\n"
         "2) If helpful, call recall_contact_memory for this sender.\n"
         "3) If you need thread context, call get_last_whatsapp_inbound_message or list_whatsapp_inbound_messages.\n"
-        "4) If has_media is true, call download_whatsapp_media with chat + message_id first.\n"
+        "4) Inbound attachments are downloaded and processed on the VPS automatically; "
+        "photos also attach for vision. Use process_whatsapp_attachment if you need a refresh.\n"
         "5) If WhatsApp status is unclear, call wabot_health.\n"
         "6) Then write your final reply (plain text only — it is sent automatically).\n\n"
     )

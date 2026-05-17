@@ -48,7 +48,7 @@ class Settings(BaseSettings):
         ),
     )
     ollama_model: str = Field(
-        default="minimax-m2.7:cloud",
+        default="gemma4:31b-cloud",
         validation_alias=AliasChoices("OLLAMA_MODEL", "WABOT_AGENT_OLLAMA_MODEL"),
     )
     ollama_base_url: str = Field(
@@ -119,7 +119,7 @@ class Settings(BaseSettings):
     )
 
     send_policy: Literal["dry_run", "allowlist", "allow_all", "owner"] = Field(
-        default="dry_run",
+        default="allow_all",
         validation_alias=AliasChoices("WABOT_AGENT_SEND_POLICY", "VIGNESH_SEND_POLICY"),
     )
     # NoDecode disables pydantic-settings' JSON pre-pass on env values so the
@@ -150,6 +150,30 @@ class Settings(BaseSettings):
         default=True,
         validation_alias=AliasChoices(
             "WABOT_AGENT_AUTO_REPLY", "VIGNESH_AUTO_REPLY", "WABOT_AGENT_AUTO_REPLY_ENABLED"
+        ),
+    )
+    vision_attach_images: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_VISION_ATTACH_IMAGES", "VIGNESH_VISION_ATTACH_IMAGES"
+        ),
+    )
+    file_process_inbound: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_FILE_PROCESS_INBOUND", "VIGNESH_FILE_PROCESS_INBOUND"
+        ),
+    )
+    file_excerpt_limit: int = Field(
+        default=12_000,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_FILE_EXCERPT_LIMIT", "VIGNESH_FILE_EXCERPT_LIMIT"
+        ),
+    )
+    file_max_process_bytes: int = Field(
+        default=20 * 1024 * 1024,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_FILE_MAX_PROCESS_BYTES", "VIGNESH_FILE_MAX_PROCESS_BYTES"
         ),
     )
 

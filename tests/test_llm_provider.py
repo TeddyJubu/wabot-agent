@@ -35,6 +35,28 @@ def test_ollama_local_live_without_key() -> None:
     assert resolved_llm_api_key(settings) == "ollama"
 
 
+def test_ollama_cloud_strips_cloud_suffix_from_model_id() -> None:
+    settings = Settings(
+        model_provider="ollama_cloud",
+        ollama_model="gemma4:31b-cloud",
+        ollama_api_key="ollama-test",
+        offline_mode=False,
+        _env_file=None,
+    )
+    assert active_model_id(settings) == "gemma4:31b"
+
+
+def test_ollama_cloud_strips_colon_cloud_suffix() -> None:
+    settings = Settings(
+        model_provider="ollama_cloud",
+        ollama_model="minimax-m2.7:cloud",
+        ollama_api_key="ollama-test",
+        offline_mode=False,
+        _env_file=None,
+    )
+    assert active_model_id(settings) == "minimax-m2.7"
+
+
 def test_ollama_cloud_live_requires_key() -> None:
     settings = Settings(
         WABOT_AGENT_MODEL_PROVIDER="ollama_cloud",
