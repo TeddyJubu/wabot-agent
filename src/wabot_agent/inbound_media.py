@@ -4,7 +4,7 @@ from .config import Settings
 from .file_processing import process_file_at_path
 from .media_download import download_inbound_media
 from .memory import InboundMessage
-from .recipients import is_owner_sender
+from .recipients import is_owner_inbound
 from .vision_input import inbound_is_image
 from .wabot import WabotClient
 
@@ -28,7 +28,7 @@ async def build_inbound_file_context(
             f"{downloaded.detail or 'unknown error'}]"
         )
 
-    is_owner = is_owner_sender(settings, inbound.sender)
+    is_owner = is_owner_inbound(settings, inbound)
     processed = process_file_at_path(
         downloaded.path,
         mime=downloaded.mime,

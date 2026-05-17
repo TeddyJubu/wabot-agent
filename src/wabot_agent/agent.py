@@ -477,7 +477,9 @@ def _augment_prompt(prompt: str, inbound: InboundMessage | None) -> str:
         "2) If helpful, call recall_contact_memory for this sender.\n"
         "3) If you need thread context, call get_last_whatsapp_inbound_message or list_whatsapp_inbound_messages.\n"
         "4) Inbound attachments are downloaded and processed on the VPS automatically; "
-        "photos also attach for vision. Use process_whatsapp_attachment if you need a refresh.\n"
+        "voice notes include a [transcript] in the VPS file processing block — answer from that "
+        "text when present. Photos also attach for vision. Use process_whatsapp_attachment only "
+        "if processing failed or you need a refresh.\n"
         "5) If WhatsApp status is unclear, call wabot_health.\n"
         "6) Then write your final reply (plain text only — it is sent automatically).\n\n"
     )

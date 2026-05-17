@@ -202,6 +202,19 @@ class Settings(BaseSettings):
             "WABOT_AGENT_WHISPER_MAX_SECONDS", "VIGNESH_WHISPER_MAX_SECONDS"
         ),
     )
+    media_download_attempts: int = Field(
+        default=5,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_MEDIA_DOWNLOAD_ATTEMPTS", "VIGNESH_MEDIA_DOWNLOAD_ATTEMPTS"
+        ),
+    )
+    media_download_retry_seconds: float = Field(
+        default=0.5,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_MEDIA_DOWNLOAD_RETRY_SECONDS",
+            "VIGNESH_MEDIA_DOWNLOAD_RETRY_SECONDS",
+        ),
+    )
 
     cf_access_team_domain: str | None = Field(
         default=None,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -62,6 +63,17 @@ async def download_media_message(
     return await download_inbound_media(wabot, inbound, settings, filename=filename)
 
 
+async def _fetch_media_response(
+    wabot: WabotClient,
+    chat: str,
+    message_id: str,
+) -> httpx.Response | MediaDownloadResult:
+    try:
+        return await wabot.download_media(chat=chat, message_id=message_id)
+    except WabotError as exc:
+        return MediaDownloadResult(ok=False, detail=str(exc))
+
+
 async def download_inbound_media(
     wabot: WabotClient,
     inbound: InboundMessage,
@@ -69,48 +81,61 @@ async def download_inbound_media(
     *,
     filename: str | None = None,
 ) -> MediaDownloadResult:
-    """Download a recent inbound attachment from wabot into media_dir/inbound/."""
+    """Download a recent inbound attachment from wabot into media_dir/inbound/.
+
+    Retries on HTTP 404 because wabot may POST the inbound webhook before the
+    media blob is available in its cache.
+    """
     chat = (inbound.chat or inbound.sender).strip()
     if not chat:
         return MediaDownloadResult(ok=False, detail="missing chat")
-    try:
-        resp = await wabot.download_media(chat=chat, message_id=inbound.id)
-    except WabotError as exc:
-        return MediaDownloadResult(ok=False, detail=str(exc))
 
-    if resp.status_code == 404:
-        return MediaDownloadResult(
-            ok=False,
-            detail=(
-                "Media not in wabot cache. Only recent inbound media can be downloaded; "
+    attempts = max(1, settings.media_download_attempts)
+    delay = max(0.0, settings.media_download_retry_seconds)
+    last_detail: str | None = None
+
+    for attempt in range(attempts):
+        if attempt > 0 and delay > 0:
+            await asyncio.sleep(delay * attempt)
+
+        fetched = await _fetch_media_response(wabot, chat, inbound.id)
+        if isinstance(fetched, MediaDownloadResult):
+            return fetched
+
+        resp = fetched
+        if resp.status_code == 404:
+            last_detail = (
+                "Media not in wabot cache yet. Only recent inbound media can be downloaded; "
                 "ensure the message was received while wabot was running."
-            ),
+            )
+            continue
+        if resp.status_code >= 400:
+            return MediaDownloadResult(
+                ok=False,
+                detail=f"wabot returned HTTP {resp.status_code}: {resp.text[:200]}",
+            )
+
+        media_kind = resp.headers.get("X-Media-Kind", inbound.media_kind or "media")
+        mime = (resp.headers.get("Content-Type") or inbound.media_mime or "").split(";", 1)[
+            0
+        ].strip()
+        suggested = filename or inbound.media_filename or filename_from_content_disposition(
+            resp.headers.get("Content-Disposition", "")
         )
-    if resp.status_code >= 400:
+        if not suggested:
+            suggested = f"{safe_media_segment(inbound.id)}{_extension_for_mime(mime)}"
+
+        dest_dir = settings.media_dir.resolve() / "inbound" / safe_media_segment(chat)
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        dest_path = dest_dir / safe_media_segment(suggested)
+        dest_path.write_bytes(resp.content)
+
         return MediaDownloadResult(
-            ok=False,
-            detail=f"wabot returned HTTP {resp.status_code}: {resp.text[:200]}",
+            ok=True,
+            path=dest_path,
+            bytes=len(resp.content),
+            media_kind=media_kind,
+            mime=mime or None,
         )
 
-    media_kind = resp.headers.get("X-Media-Kind", inbound.media_kind or "media")
-    mime = (resp.headers.get("Content-Type") or inbound.media_mime or "").split(";", 1)[
-        0
-    ].strip()
-    suggested = filename or inbound.media_filename or filename_from_content_disposition(
-        resp.headers.get("Content-Disposition", "")
-    )
-    if not suggested:
-        suggested = f"{safe_media_segment(inbound.id)}{_extension_for_mime(mime)}"
-
-    dest_dir = settings.media_dir.resolve() / "inbound" / safe_media_segment(chat)
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    dest_path = dest_dir / safe_media_segment(suggested)
-    dest_path.write_bytes(resp.content)
-
-    return MediaDownloadResult(
-        ok=True,
-        path=dest_path,
-        bytes=len(resp.content),
-        media_kind=media_kind,
-        mime=mime or None,
-    )
+    return MediaDownloadResult(ok=False, detail=last_detail)

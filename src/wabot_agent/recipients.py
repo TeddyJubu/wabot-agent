@@ -29,3 +29,13 @@ def is_owner_sender(settings: object, sender: str) -> bool:
     """True when sender matches WABOT_AGENT_OWNER_NUMBERS."""
     owners = getattr(settings, "owner_numbers", None) or set()
     return is_listed_recipient(sender, owners)
+
+
+def is_owner_inbound(settings: object, inbound: object) -> bool:
+    """True when sender or chat JID matches owner_numbers (covers @lid device suffixes)."""
+    owners = getattr(settings, "owner_numbers", None) or set()
+    sender = str(getattr(inbound, "sender", "") or "").strip()
+    chat = str(getattr(inbound, "chat", "") or "").strip()
+    if sender and is_listed_recipient(sender, owners):
+        return True
+    return bool(chat and is_listed_recipient(chat, owners))
