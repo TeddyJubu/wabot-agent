@@ -1,5 +1,6 @@
 import { type ReactNode, useState } from "react";
 import { Smartphone, Clock, Settings } from "lucide-react";
+import { ClerkNavAuth } from "./ClerkNavAuth";
 import StatusDot from "./StatusDot";
 import StatusPopover from "./StatusPopover";
 import { useStore } from "@/store";
@@ -24,6 +25,7 @@ export default function TopBar() {
         {popoverOpen && <StatusPopover onClose={() => setPopoverOpen(false)} />}
       </div>
       <nav className="flex items-center gap-1" aria-label="Workspace">
+        <ClerkNavAuth className="mr-1 border-r border-border pr-2" />
         <IconBtn onClick={() => open("qr")} label="WhatsApp pairing">
           <Smartphone className="size-4" />
         </IconBtn>

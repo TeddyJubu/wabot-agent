@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useStore } from "@/store";
 import { usePairingStream } from "@/hooks/usePairingStream";
+import { ClerkNavAuth } from "@/components/ClerkNavAuth";
 import PairingQrCard from "@/components/tool-cards/PairingQrCard";
 import { fetchPairing, requestNewPairingQr, type PairingState } from "@/api/pairing";
 
@@ -44,6 +45,9 @@ export default function PairView() {
 
   return (
     <div className="mx-auto flex min-h-full w-full max-w-[480px] flex-col px-4 py-8">
+      <div className="mb-4 flex justify-end">
+        <ClerkNavAuth />
+      </div>
       <header className="mb-6 space-y-1 text-center">
         <h1 className="text-xl font-semibold tracking-tight">WhatsApp pairing</h1>
         <p className={`text-sm ${statusClass(pairing)}`}>{statusText(pairing)}</p>

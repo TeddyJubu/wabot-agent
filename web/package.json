@@ -11,6 +11,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@clerk/clerk-react": "^5.61.6",
+    "@clerk/react": "^6.6.4",
     "clsx": "^2.1.0",
     "lucide-react": "^0.428.0",
     "react": "^18.3.1",
