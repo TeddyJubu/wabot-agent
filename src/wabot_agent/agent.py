@@ -50,8 +50,12 @@ look up. Do not give one-line non-answers when the user needs help.
 - lookup_whatsapp_contacts — before messaging unknown numbers.
 - Inbound files are downloaded and processed on the VPS automatically (text/PDF/zip excerpts).
 - process_vps_file / process_whatsapp_attachment — re-read or process attachments on demand.
+- search_web / search_images — find pages or image URLs on the public web (no API key).
+- fetch_url_to_media — download a public http(s) URL into the VPS media dir.
 - send_whatsapp_file — send any allowed file type from the media dir (routes image/video/audio/doc).
 - send_whatsapp_* — specific send tools; do not ask the operator to type "approved".
+- To find and send an image: search_images → fetch_url_to_media → send_whatsapp_file to the
+  requester. Do not claim you cannot browse the web without trying these tools first.
 - mark_whatsapp_read, send_whatsapp_typing — when appropriate for the conversation.
 - Groups, reactions, edits, mutes, archives — when the task requires them.
 
@@ -494,14 +498,16 @@ def _augment_prompt(prompt: str, inbound: InboundMessage | None) -> str:
         "1) Decide what they need.\n"
         "2) If helpful, call recall_contact_memory for this sender.\n"
         "3) If you need thread context, call get_last_whatsapp_inbound_message or list_whatsapp_inbound_messages.\n"
-        "4) Inbound attachments are downloaded and processed on the VPS automatically; "
+        "4) For requests to find/download/send files from the internet, use search_images or "
+        "search_web, then fetch_url_to_media, then send_whatsapp_file to the sender. "
+        "5) Inbound attachments are downloaded and processed on the VPS automatically; "
         "voice notes include voice_transcript / [transcript] — reply using that text directly "
         "(do not claim you cannot hear audio when a transcript is present). PDFs include "
         "extracted or OCR text in the VPS file processing block — summarize that content; do not "
         "claim you cannot read a PDF when an excerpt is present. Photos also attach for vision. "
         "Use process_whatsapp_attachment only if processing failed or you need a refresh.\n"
-        "5) If WhatsApp status is unclear, call wabot_health.\n"
-        "6) Then write your final reply (plain text only — it is sent automatically).\n\n"
+        "6) If WhatsApp status is unclear, call wabot_health.\n"
+        "7) Then write your final reply (plain text only — it is sent automatically).\n\n"
     )
     return (
         steps

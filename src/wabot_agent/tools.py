@@ -16,6 +16,8 @@ from .recipients import is_listed_recipient, recipients_match
 from .redaction import mask_phone, redact
 from .skills import list_skills, read_skill
 from .wabot import WabotClient
+from .web_fetch import fetch_url_to_media as download_url_to_media
+from .web_search import search_web as duckduckgo_search
 
 
 @dataclass
@@ -886,6 +888,93 @@ async def read_local_skill(ctx: RunContextWrapper[RuntimeContext], name: str) ->
     return text[:12000]
 
 
+@function_tool
+async def search_web(
+    ctx: RunContextWrapper[RuntimeContext],
+    query: str,
+    max_results: int = 8,
+) -> dict[str, Any]:
+    """Search the public web (DuckDuckGo). Use before fetch_url_to_media when you need a URL."""
+    results, error = await duckduckgo_search(
+        ctx.context.settings,
+        query,
+        max_results=max_results,
+        images=False,
+    )
+    payload: dict[str, Any] = {
+        "ok": error is None,
+        "query": query,
+        "results": [
+            {"title": r.title, "url": r.url, "snippet": r.snippet, "kind": r.kind}
+            for r in results
+        ],
+    }
+    if error:
+        payload["detail"] = error
+    ctx.context.memory.record_tool_event(ctx.context.run_id, "search_web", payload)
+    return redact(payload)
+
+
+@function_tool
+async def search_images(
+    ctx: RunContextWrapper[RuntimeContext],
+    query: str,
+    max_results: int = 6,
+) -> dict[str, Any]:
+    """Search for image URLs on the web. Use for logos/photos, then fetch_url_to_media + send."""
+    results, error = await duckduckgo_search(
+        ctx.context.settings,
+        query,
+        max_results=max_results,
+        images=True,
+    )
+    payload: dict[str, Any] = {
+        "ok": error is None,
+        "query": query,
+        "results": [{"title": r.title, "url": r.url, "kind": "image"} for r in results],
+    }
+    if error:
+        payload["detail"] = error
+    ctx.context.memory.record_tool_event(ctx.context.run_id, "search_images", payload)
+    return redact(payload)
+
+
+@function_tool
+async def fetch_url_to_media(
+    ctx: RunContextWrapper[RuntimeContext],
+    url: str,
+    filename: str | None = None,
+    prefer_page_image: bool = False,
+) -> dict[str, Any]:
+    """Download a public http(s) URL into the VPS media directory; then send_whatsapp_file(path).
+
+    Set prefer_page_image=True for homepages (uses og:image when the URL returns HTML).
+    """
+    fetched = await download_url_to_media(
+        ctx.context.settings,
+        url,
+        filename=filename,
+        prefer_page_image=prefer_page_image,
+    )
+    if not fetched.ok or fetched.path is None:
+        payload = {"ok": False, "detail": fetched.detail, "url": fetched.url}
+    else:
+        payload = {
+            "ok": True,
+            "path": str(fetched.path),
+            "bytes": fetched.bytes,
+            "mime": fetched.mime,
+            "url": fetched.url,
+            "send_hint": "Call send_whatsapp_file or send_whatsapp_image with this path.",
+        }
+    ctx.context.memory.record_tool_event(ctx.context.run_id, "fetch_url_to_media", payload)
+    if payload.get("ok"):
+        redacted = redact({k: v for k, v in payload.items() if k != "path"})
+        redacted["path"] = payload["path"]
+        return redacted
+    return redact(payload)
+
+
 def core_tools() -> list[Any]:
     return [
         wabot_health,
@@ -900,6 +989,9 @@ def core_tools() -> list[Any]:
         download_whatsapp_media,
         process_vps_file,
         process_whatsapp_attachment,
+        search_web,
+        search_images,
+        fetch_url_to_media,
         send_whatsapp_file,
         send_whatsapp_document,
         send_whatsapp_audio,

@@ -263,6 +263,42 @@ class Settings(BaseSettings):
             "VIGNESH_MEDIA_DOWNLOAD_RETRY_SECONDS",
         ),
     )
+    web_fetch_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_WEB_FETCH_ENABLED", "VIGNESH_WEB_FETCH_ENABLED"
+        ),
+    )
+    web_search_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_WEB_SEARCH_ENABLED", "VIGNESH_WEB_SEARCH_ENABLED"
+        ),
+    )
+    web_fetch_max_bytes: int = Field(
+        default=15 * 1024 * 1024,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_WEB_FETCH_MAX_BYTES", "VIGNESH_WEB_FETCH_MAX_BYTES"
+        ),
+    )
+    web_fetch_timeout_sec: int = Field(
+        default=45,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_WEB_FETCH_TIMEOUT_SEC", "VIGNESH_WEB_FETCH_TIMEOUT_SEC"
+        ),
+    )
+    web_search_max_results: int = Field(
+        default=8,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_WEB_SEARCH_MAX_RESULTS", "VIGNESH_WEB_SEARCH_MAX_RESULTS"
+        ),
+    )
+    web_fetch_user_agent: str = Field(
+        default="wabot-agent/1.0 (+https://github.com/TeddyJubu/wabot-agent)",
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_WEB_FETCH_USER_AGENT", "VIGNESH_WEB_FETCH_USER_AGENT"
+        ),
+    )
 
     cf_access_team_domain: str | None = Field(
         default=None,

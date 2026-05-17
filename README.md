@@ -172,6 +172,8 @@ WABOT_AGENT_OWNER_NUMBERS=+6580286424,+8801521207499
 | `process_whatsapp_attachment(chat, message_id)` | Re-download and process a cached attachment |
 | `process_vps_file(path)` | Process any file under `data/media/` or `data/` |
 | `send_whatsapp_file(to, path)` | Send any file type from the media directory |
+| `search_web` / `search_images` | Find pages or image URLs on the web (no API key) |
+| `fetch_url_to_media(url)` | Download a public URL into `data/media/downloads/` |
 | `download_whatsapp_media` | Save attachment to disk only |
 
 See `skills/whatsapp-operator/SKILL.md` for operator guidance.
