@@ -391,6 +391,7 @@ class FakeWabotClient(WabotClient):
     def __init__(self) -> None:
         super().__init__("http://fake-wabot", "fake-token")
         self.sent: list[dict[str, Any]] = []
+        self.typing_calls: list[dict[str, Any]] = []
 
     async def health(self) -> WabotHealth:
         return WabotHealth(reachable=True, logged_in=True, connected=True, detail="fake")
@@ -443,6 +444,7 @@ class FakeWabotClient(WabotClient):
     async def send_typing(
         self, to: str, state: str = "composing", media: str | None = None
     ) -> dict[str, Any]:
+        self.typing_calls.append({"to": to, "state": state, "media": media})
         return {"ok": True, "to": to, "state": state}
 
     async def mute_chat(

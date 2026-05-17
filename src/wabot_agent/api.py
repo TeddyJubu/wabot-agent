@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from qrcode.image.svg import SvgFillImage
 
 from .agent import run_agent, run_agent_streamed
+from .typing_indicator import inbound_typing_indicator
 from .llm_provider import active_model_id, llm_provider_label
 from .auth import (
     AuthIdentity,
@@ -484,15 +485,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             {"message_id": inbound.id, "sender": inbound.sender, "path": str(request.url.path)},
         )
         try:
-            result = await run_agent(
-                inbound.text,
-                settings=settings,
-                memory=memory,
-                event_log=event_log,
-                wabot=wabot,
-                inbound=inbound,
-                session_id=inbound.sender,
-            )
+            async with inbound_typing_indicator(wabot, inbound, settings):
+                result = await run_agent(
+                    inbound.text,
+                    settings=settings,
+                    memory=memory,
+                    event_log=event_log,
+                    wabot=wabot,
+                    inbound=inbound,
+                    session_id=inbound.sender,
+                )
         except Exception as exc:
             memory.fail_message(inbound.id, str(exc))
             event_log.write(

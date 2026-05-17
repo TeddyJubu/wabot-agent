@@ -152,6 +152,21 @@ class Settings(BaseSettings):
             "WABOT_AGENT_AUTO_REPLY", "VIGNESH_AUTO_REPLY", "WABOT_AGENT_AUTO_REPLY_ENABLED"
         ),
     )
+    typing_indicator_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_TYPING_INDICATOR",
+            "VIGNESH_TYPING_INDICATOR",
+            "WABOT_AGENT_TYPING_INDICATOR_ENABLED",
+        ),
+    )
+    typing_refresh_seconds: float = Field(
+        default=5.0,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_TYPING_REFRESH_SECONDS",
+            "VIGNESH_TYPING_REFRESH_SECONDS",
+        ),
+    )
     vision_attach_images: bool = Field(
         default=True,
         validation_alias=AliasChoices(
