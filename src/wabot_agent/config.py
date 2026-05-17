@@ -35,11 +35,36 @@ class Settings(BaseSettings):
     openrouter_base_url: str = Field(
         default="https://openrouter.ai/api/v1", alias="OPENROUTER_BASE_URL"
     )
-    openrouter_model: str = Field(default="openai/gpt-5.2", alias="OPENROUTER_MODEL")
+    openrouter_model: str = Field(default="openai/gpt-4.1-mini", alias="OPENROUTER_MODEL")
     openrouter_site_url: str = Field(
         default="https://github.com/TeddyJubu/wabot-agent", alias="OPENROUTER_SITE_URL"
     )
     openrouter_app_title: str = Field(default="wabot-agent", alias="OPENROUTER_APP_TITLE")
+
+    model_provider: Literal["openrouter", "ollama", "ollama_cloud"] = Field(
+        default="openrouter",
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_MODEL_PROVIDER", "VIGNESH_MODEL_PROVIDER", "LLM_PROVIDER"
+        ),
+    )
+    ollama_model: str = Field(
+        default="minimax-m2.7:cloud",
+        validation_alias=AliasChoices("OLLAMA_MODEL", "WABOT_AGENT_OLLAMA_MODEL"),
+    )
+    ollama_base_url: str = Field(
+        default="http://127.0.0.1:11434/v1",
+        validation_alias=AliasChoices("OLLAMA_BASE_URL", "WABOT_AGENT_OLLAMA_BASE_URL"),
+    )
+    ollama_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("OLLAMA_API_KEY", "WABOT_AGENT_OLLAMA_API_KEY"),
+    )
+    ollama_cloud_base_url: str = Field(
+        default="https://ollama.com/v1",
+        validation_alias=AliasChoices(
+            "OLLAMA_CLOUD_BASE_URL", "WABOT_AGENT_OLLAMA_CLOUD_BASE_URL"
+        ),
+    )
 
     data_dir: Path = Field(
         default=Path("./data"),
@@ -93,7 +118,7 @@ class Settings(BaseSettings):
         ),
     )
 
-    send_policy: Literal["dry_run", "allowlist", "allow_all"] = Field(
+    send_policy: Literal["dry_run", "allowlist", "allow_all", "owner"] = Field(
         default="dry_run",
         validation_alias=AliasChoices("WABOT_AGENT_SEND_POLICY", "VIGNESH_SEND_POLICY"),
     )
@@ -105,9 +130,27 @@ class Settings(BaseSettings):
             "WABOT_AGENT_ALLOWED_RECIPIENTS", "VIGNESH_ALLOWED_RECIPIENTS"
         ),
     )
+    owner_numbers: Annotated[set[str], NoDecode] = Field(
+        default_factory=set,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_OWNER_NUMBERS", "VIGNESH_OWNER_NUMBERS"
+        ),
+    )
     max_agent_turns: int = Field(
-        default=8,
+        default=15,
         validation_alias=AliasChoices("WABOT_AGENT_MAX_AGENT_TURNS", "VIGNESH_MAX_AGENT_TURNS"),
+    )
+    agent_temperature: float = Field(
+        default=0.35,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_TEMPERATURE", "VIGNESH_TEMPERATURE", "WABOT_AGENT_AGENT_TEMPERATURE"
+        ),
+    )
+    auto_reply_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_AUTO_REPLY", "VIGNESH_AUTO_REPLY", "WABOT_AGENT_AUTO_REPLY_ENABLED"
+        ),
     )
 
     cf_access_team_domain: str | None = Field(
@@ -136,9 +179,9 @@ class Settings(BaseSettings):
             return None
         return value
 
-    @field_validator("allowed_recipients", mode="before")
+    @field_validator("allowed_recipients", "owner_numbers", mode="before")
     @classmethod
-    def parse_allowed_recipients(cls, value: object) -> set[str]:
+    def parse_recipient_set(cls, value: object) -> set[str]:
         if value is None or value == "":
             return set()
         if isinstance(value, str):
@@ -151,7 +194,13 @@ class Settings(BaseSettings):
 
     @property
     def live_model_enabled(self) -> bool:
-        return bool(self.openrouter_api_key and not self.offline_mode)
+        if self.offline_mode:
+            return False
+        if self.model_provider == "openrouter":
+            return bool(self.openrouter_api_key)
+        if self.model_provider == "ollama_cloud":
+            return bool(self.ollama_api_key)
+        return True
 
     @property
     def resolved_wabot_token(self) -> str | None:

@@ -64,7 +64,7 @@ def _wabot_status(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-_POLICY_NAMES = {"dry_run", "allowlist", "allow_all"}
+_POLICY_NAMES = {"dry_run", "allowlist", "allow_all", "owner", "reply_to_sender"}
 
 
 def _send_confirm(tool_name: str, result: dict[str, Any]) -> dict[str, Any]:

@@ -18,14 +18,22 @@ from agents.tool import Tool
 from agents.usage import Usage
 from openai import AsyncOpenAI
 
+from .config import Settings
+from .llm_provider import (
+    active_model_id,
+    llm_default_headers,
+    max_tokens_for_model,
+    omit_tool_choice,
+    reasoning_for_model,
+    resolved_llm_api_key,
+    resolved_llm_base_url,
+)
 from .redaction import redact_text
 
 try:
     from agents import OpenAIChatCompletionsModel
 except ImportError:  # pragma: no cover - dependency import guard
     OpenAIChatCompletionsModel = None  # type: ignore[assignment]
-
-from .config import Settings
 
 
 class OfflineModel(Model):
@@ -48,7 +56,7 @@ class OfflineModel(Model):
         prompt_text = redact_text(_input_to_text(input))
         tool_names = ", ".join(tool.name for tool in tools)
         text = (
-            "Offline mode is active, so I did not call OpenRouter or send WhatsApp messages. "
+            "Offline mode is active, so no live LLM or WhatsApp sends ran. "
             f"I received: {prompt_text[:500]}. "
             f"Available tools in live mode: {tool_names}."
         )
@@ -97,37 +105,28 @@ def build_model(settings: Settings) -> Model:
         raise RuntimeError("openai-agents is missing OpenAIChatCompletionsModel.")
 
     client = AsyncOpenAI(
-        api_key=settings.openrouter_api_key,
-        base_url=settings.openrouter_base_url,
-        default_headers={
-            "HTTP-Referer": settings.openrouter_site_url,
-            "X-Title": settings.openrouter_app_title,
-        },
+        api_key=resolved_llm_api_key(settings),
+        base_url=resolved_llm_base_url(settings),
+        default_headers=llm_default_headers(settings),
     )
     return OpenAIChatCompletionsModel(
-        model=settings.openrouter_model,
+        model=active_model_id(settings),
         openai_client=client,
         strict_feature_validation=False,
     )
 
 
-def _omit_tool_choice(model: str) -> bool:
-    """OpenRouter free Nemotron endpoints reject explicit tool_choice values."""
-    lowered = model.lower()
-    return "nemotron" in lowered or ":free" in lowered
-
-
 def model_settings(settings: Settings) -> ModelSettings:
     kwargs: dict[str, Any] = {
-        "temperature": 0.2,
-        "max_tokens": 1800,
+        "temperature": settings.agent_temperature,
+        "max_tokens": max_tokens_for_model(settings),
         "parallel_tool_calls": False,
-        "extra_headers": {
-            "HTTP-Referer": settings.openrouter_site_url,
-            "X-Title": settings.openrouter_app_title,
-        },
+        "extra_headers": llm_default_headers(settings),
     }
-    if not _omit_tool_choice(settings.openrouter_model):
+    reasoning = reasoning_for_model(settings)
+    if reasoning is not None:
+        kwargs["reasoning"] = reasoning
+    if not omit_tool_choice(settings):
         kwargs["tool_choice"] = _tool_choice_auto()
     return ModelSettings(**kwargs)
 

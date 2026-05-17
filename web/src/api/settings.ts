@@ -3,16 +3,33 @@ export interface MaskedField {
   preview: string | null;
 }
 
+export type ModelProvider = "openrouter" | "ollama" | "ollama_cloud";
+
 export interface SettingsView {
   env_source: string;
-  send_policy: "dry_run" | "allowlist" | "allow_all";
+  send_policy: "dry_run" | "allowlist" | "allow_all" | "owner";
   send_policy_choices: string[];
   allowed_recipients: string[];
+  owner_numbers: string[];
   max_agent_turns: number;
+  llm: {
+    provider: ModelProvider;
+    provider_choices: ModelProvider[];
+    model: string;
+    label: string;
+    live: boolean;
+  };
   openrouter: {
     api_key: MaskedField;
     base_url: string;
     model: string;
+    live: boolean;
+  };
+  ollama: {
+    api_key: MaskedField;
+    model: string;
+    base_url: string;
+    cloud_base_url: string;
     live: boolean;
   };
   wabot: {

@@ -7,6 +7,13 @@ description: Operating guidance for safe WhatsApp automation through wabot.
 
 Use this skill before changing WhatsApp state, sending messages, or handling inbound automation.
 
+## Agentic workflow
+
+1. Understand the request.
+2. Call tools to gather facts (do not guess inbox contents or contact history).
+3. Act with the right WhatsApp tool when policy allows.
+4. Reply clearly — complete but WhatsApp-appropriate length.
+
 ## Rules
 
 - Check `wabot_health` before assuming WhatsApp is linked and connected.
@@ -33,7 +40,7 @@ Use this skill before changing WhatsApp state, sending messages, or handling inb
 - History sync backfill populates `inbound_messages` via `POST /whatsapp/history` (no auto-reply).
   Use inbox tools after linking; live traffic still arrives on `/whatsapp/inbound`.
 - Never send credentials, one-time codes, tokens, cookies, or session data.
-- Keep outbound messages short, clear, and human-readable.
+- Keep outbound messages clear and human-readable; be concise but answer the question fully.
 - Respect the configured send policy. If a recipient is blocked, explain the operator action needed.
 - Avoid bulk or cold outreach. Escalate to the operator instead.
 - Store only useful, non-secret memory. Prefer concise facts with a source.

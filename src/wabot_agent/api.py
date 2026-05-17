@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from qrcode.image.svg import SvgFillImage
 
 from .agent import run_agent, run_agent_streamed
+from .llm_provider import active_model_id, llm_provider_label
 from .auth import (
     AuthIdentity,
     maybe_mint_operator_cookie,
@@ -49,6 +50,7 @@ from .runtime_overrides import (
     save_overrides,
 )
 from .wabot import WabotClient
+from .auto_reply import deliver_auto_reply
 from .wabot_process import WabotRestartError, restart_wabot_daemon, wait_for_fresh_pairing
 
 
@@ -121,13 +123,20 @@ class SettingsPatch(BaseModel):
     `confirm_allow_all` must be true to set send_policy='allow_all'.
     """
 
+    model_provider: str | None = None
     openrouter_api_key: str | None = None
     openrouter_base_url: str | None = None
     openrouter_model: str | None = None
+    ollama_model: str | None = None
+    ollama_base_url: str | None = None
+    ollama_api_key: str | None = None
+    ollama_cloud_base_url: str | None = None
     wabot_endpoint: str | None = None
     wabot_token: str | None = None
     send_policy: str | None = None
     allowed_recipients: list[str] | None = None
+    owner_numbers: list[str] | None = None
+    auto_reply_enabled: bool | None = None
     max_agent_turns: int | None = None
     confirm_allow_all: bool = False
 
@@ -325,7 +334,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             {
                 "ok": True,
                 "live_model": settings.live_model_enabled,
-                "model": settings.openrouter_model if settings.live_model_enabled else "offline",
+                "model_provider": settings.model_provider,
+                "model": active_model_id(settings) if settings.live_model_enabled else "offline",
                 "send_policy": settings.send_policy,
                 "memory": memory.stats(),
                 "wabot": {
@@ -499,12 +509,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "agent_error": redact(str(exc)),
             }
         memory.complete_message(inbound.id, result.run_id)
+        auto = await deliver_auto_reply(
+            settings=settings,
+            wabot=wabot,
+            inbound=inbound,
+            result=result,
+        )
+        if auto.get("sent"):
+            event_log.write(
+                "auto_reply_sent",
+                {
+                    "message_id": inbound.id,
+                    "sender": inbound.sender,
+                    "to": auto.get("to"),
+                    "policy": auto.get("policy"),
+                },
+            )
         return {
             "accepted": True,
             "duplicate": False,
             "message_id": inbound.id,
             "run_id": result.run_id,
             "output": result.final_output,
+            "auto_reply": auto,
         }
 
     @app.post("/whatsapp/receipt")
@@ -629,7 +656,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             {
                 "ok": True,
                 "live_model": settings.live_model_enabled,
-                "model": settings.openrouter_model if settings.live_model_enabled else "offline",
+                "model_provider": settings.model_provider,
+                "model": active_model_id(settings) if settings.live_model_enabled else "offline",
                 "send_policy": settings.send_policy,
                 "memory": memory.stats(),
                 "wabot": {
@@ -718,7 +746,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         for key, value in raw.items():
             if key not in MUTABLE_FIELDS:
                 continue
-            if key == "allowed_recipients":
+            if key in {"allowed_recipients", "owner_numbers"}:
                 cleaned = sorted(
                     {str(item).strip() for item in (value or []) if str(item).strip()}
                 )
@@ -761,6 +789,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     ),
                 )
 
+        if "ollama_base_url" in proposed:
+            _require_safe_ollama_local_url("ollama_base_url", proposed["ollama_base_url"])
+
+        if "ollama_cloud_base_url" in proposed:
+            _require_safe_ollama_cloud_url(
+                "ollama_cloud_base_url", proposed["ollama_cloud_base_url"]
+            )
+            if (
+                proposed["ollama_cloud_base_url"] != settings.ollama_cloud_base_url
+                and "ollama_api_key" not in proposed
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Changing ollama_cloud_base_url requires ollama_api_key in the "
+                        "same PATCH so the existing stored key is not sent to a new endpoint."
+                    ),
+                )
+
         # Build the full set we'll persist (existing disk overrides + this patch),
         # then validate the WHOLE thing on a snapshot — not just the delta. This
         # catches the edge case where a stale/manually-edited overrides file
@@ -794,26 +841,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/settings/test/openrouter", dependencies=[human_dependency])
     async def test_openrouter() -> dict[str, Any]:
-        if not settings.openrouter_api_key:
-            return {"ok": False, "detail": "OPENROUTER_API_KEY is not configured."}
-        import httpx
+        return await _test_llm_endpoint(settings)
 
-        url = settings.openrouter_base_url.rstrip("/") + "/models"
-        headers = {"Authorization": f"Bearer {settings.openrouter_api_key}"}
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(url, headers=headers)
-        except httpx.HTTPError as exc:
-            return {"ok": False, "detail": f"Connection failed: {exc}"}
-        if resp.status_code == 200:
-            return {
-                "ok": True,
-                "detail": f"OpenRouter reachable. Active model: {settings.openrouter_model}",
-            }
-        return {
-            "ok": False,
-            "detail": f"OpenRouter returned HTTP {resp.status_code}: {resp.text[:200]}",
-        }
+    @app.post("/api/settings/test/llm", dependencies=[human_dependency])
+    async def test_llm() -> dict[str, Any]:
+        return await _test_llm_endpoint(settings)
 
     @app.post("/api/settings/test/wabot", dependencies=[human_dependency])
     async def test_wabot() -> dict[str, Any]:
@@ -851,6 +883,40 @@ def _require_loopback_url(field: str, url: str) -> None:
         )
 
 
+def _require_safe_ollama_local_url(field: str, url: str) -> None:
+    """Ollama local must be loopback — the daemon holds cloud credentials."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field} must use http or https; got scheme '{parsed.scheme}'.",
+        )
+    host = (parsed.hostname or "").lower().strip("[]")
+    if host not in _LOOPBACK_HOSTS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{field} must point at the local Ollama daemon on loopback; "
+                f"got '{host or url}'."
+            ),
+        )
+
+
+def _require_safe_ollama_cloud_url(field: str, url: str) -> None:
+    parsed = urlparse(url)
+    if parsed.scheme != "https":
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field} must use https; got scheme '{parsed.scheme}'.",
+        )
+    host = (parsed.hostname or "").lower().strip("[]")
+    if host not in ("ollama.com", "www.ollama.com"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field} must target ollama.com; got '{host or url}'.",
+        )
+
+
 def _require_safe_openrouter_url(field: str, url: str) -> None:
     """Allow https://anywhere or http://loopback. Plain HTTP to a remote host
     would leak the API key in cleartext."""
@@ -871,19 +937,67 @@ def _require_safe_openrouter_url(field: str, url: str) -> None:
         )
 
 
+async def _test_llm_endpoint(settings: Settings) -> dict[str, Any]:
+    from .llm_provider import resolved_llm_api_key, resolved_llm_base_url
+
+    import httpx
+
+    label = llm_provider_label(settings)
+    if not settings.live_model_enabled:
+        if settings.model_provider == "openrouter":
+            return {"ok": False, "detail": "OPENROUTER_API_KEY is not configured."}
+        if settings.model_provider == "ollama_cloud":
+            return {"ok": False, "detail": "OLLAMA_API_KEY is not configured."}
+        return {"ok": False, "detail": "Offline mode is enabled."}
+
+    url = resolved_llm_base_url(settings) + "/models"
+    headers: dict[str, str] = {}
+    api_key = resolved_llm_api_key(settings)
+    if settings.model_provider != "ollama" and api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(url, headers=headers)
+    except httpx.HTTPError as exc:
+        return {"ok": False, "detail": f"{label} connection failed: {exc}"}
+    model = active_model_id(settings)
+    if resp.status_code == 200:
+        return {"ok": True, "detail": f"{label} reachable. Active model: {model}"}
+    return {
+        "ok": False,
+        "detail": f"{label} returned HTTP {resp.status_code}: {resp.text[:200]}",
+    }
+
+
 def _settings_view(settings: Settings) -> dict[str, Any]:
     """Build the GET /api/settings response: secrets masked, source-of-truth annotated."""
     return {
         "env_source": ".env (immutable) + data/runtime_overrides.json (operator-mutable)",
         "send_policy": settings.send_policy,
-        "send_policy_choices": ["dry_run", "allowlist", "allow_all"],
+        "send_policy_choices": ["dry_run", "allowlist", "allow_all", "owner"],
         "allowed_recipients": sorted(settings.allowed_recipients),
+        "owner_numbers": sorted(settings.owner_numbers),
+        "auto_reply_enabled": settings.auto_reply_enabled,
         "max_agent_turns": settings.max_agent_turns,
+        "llm": {
+            "provider": settings.model_provider,
+            "provider_choices": ["openrouter", "ollama", "ollama_cloud"],
+            "model": active_model_id(settings),
+            "label": llm_provider_label(settings),
+            "live": settings.live_model_enabled,
+        },
         "openrouter": {
             "api_key": mask_secret(settings.openrouter_api_key),
             "base_url": settings.openrouter_base_url,
             "model": settings.openrouter_model,
-            "live": settings.live_model_enabled,
+            "live": settings.model_provider == "openrouter" and settings.live_model_enabled,
+        },
+        "ollama": {
+            "api_key": mask_secret(settings.ollama_api_key),
+            "model": settings.ollama_model,
+            "base_url": settings.ollama_base_url,
+            "cloud_base_url": settings.ollama_cloud_base_url,
+            "live": settings.model_provider.startswith("ollama") and settings.live_model_enabled,
         },
         "wabot": {
             "endpoint": settings.wabot_endpoint,

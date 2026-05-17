@@ -25,13 +25,20 @@ from .config import Settings
 # is ignored when applying overrides — defends against mass-assignment via the API.
 MUTABLE_FIELDS: frozenset[str] = frozenset(
     {
+        "model_provider",
         "openrouter_api_key",
         "openrouter_base_url",
         "openrouter_model",
+        "ollama_model",
+        "ollama_base_url",
+        "ollama_api_key",
+        "ollama_cloud_base_url",
         "wabot_endpoint",
         "wabot_token",
         "send_policy",
         "allowed_recipients",
+        "owner_numbers",
+        "auto_reply_enabled",
         "max_agent_turns",
     }
 )
@@ -44,7 +51,7 @@ MUTABLE_FIELDS: frozenset[str] = frozenset(
 
 # Fields whose values are secrets and must be masked when read back over the API.
 SECRET_FIELDS: frozenset[str] = frozenset(
-    {"openrouter_api_key", "wabot_token"}
+    {"openrouter_api_key", "ollama_api_key", "wabot_token"}
 )
 
 

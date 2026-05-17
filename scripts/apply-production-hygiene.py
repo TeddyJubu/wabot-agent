@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Apply local/VPS production hygiene defaults (idempotent).
 
-- send_policy: allowlist (never allow_all)
+- send_policy: owner when WABOT_AGENT_OWNER_NUMBERS is set, else allowlist (never allow_all)
 - allowed_recipients: union of .env + inbound_messages DB
 - operator token: generate if missing in .env
 - secret file modes: 0o600
@@ -103,15 +103,24 @@ def main() -> int:
     recipients |= {p.strip() for p in raw.replace(",", " ").split() if p.strip()}
     recipients |= _contacts_from_db(db_path)
 
-    if not recipients:
+    owners: set[str] = set()
+    owner_raw = env.get("WABOT_AGENT_OWNER_NUMBERS") or env.get("VIGNESH_OWNER_NUMBERS") or ""
+    owners |= {p.strip() for p in owner_raw.replace(",", " ").split() if p.strip()}
+
+    send_policy = "owner" if owners else "allowlist"
+    if send_policy == "allowlist" and not recipients:
         print(
             "warning: no allowed_recipients yet — sends will be blocked until you add "
             "numbers/JIDs via Settings or WABOT_AGENT_ALLOWED_RECIPIENTS",
             file=sys.stderr,
         )
+    if send_policy == "owner" and not owners:
+        print("warning: owner policy selected but no owner_numbers configured", file=sys.stderr)
 
     # Bootstrap .env for VPS (immutable source of truth).
-    _write_env_key(env_path, "WABOT_AGENT_SEND_POLICY", "allowlist")
+    _write_env_key(env_path, "WABOT_AGENT_SEND_POLICY", send_policy)
+    if owners:
+        _write_env_key(env_path, "WABOT_AGENT_OWNER_NUMBERS", ",".join(sorted(owners)))
     if recipients:
         _write_env_key(
             env_path,
@@ -134,8 +143,10 @@ def main() -> int:
 
     # Runtime overrides (what the running agent reads after restart).
     overrides = load_overrides(overrides_path)
-    overrides["send_policy"] = "allowlist"
+    overrides["send_policy"] = send_policy
     overrides["allowed_recipients"] = sorted(recipients)
+    if owners:
+        overrides["owner_numbers"] = sorted(owners)
     save_overrides(overrides_path, overrides)
     _chmod600(overrides_path)
 
@@ -180,7 +191,9 @@ def main() -> int:
             _write_env_key(env_path, "WABOT_AGENT_WABOT_HOME", str(wabot_dir))
             print(f"ok: set WABOT_AGENT_WABOT_HOME={wabot_dir} (New QR on /pair)")
 
-    print("ok: send_policy=allowlist")
+    print(f"ok: send_policy={send_policy}")
+    if owners:
+        print(f"ok: owner_numbers={len(owners)}")
     print(f"ok: allowed_recipients={len(recipients)}")
     print("ok: secret file permissions 0600")
     print("next: restart wabot-agent to load overrides; set CF Access before exposing tunnel")

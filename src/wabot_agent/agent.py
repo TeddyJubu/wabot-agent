@@ -15,6 +15,7 @@ from .events import EventLog
 from .mcp import connected_mcp_servers
 from .memory import InboundMessage, MemoryStore
 from .models import build_model, model_settings
+from .output_sanitize import strip_model_thinking
 from .redaction import redact
 from .skills import render_skill_summary
 from .tools import RuntimeContext, core_tools
@@ -24,47 +25,51 @@ from .wabot import WabotClient
 set_tracing_disabled(True)
 
 
-INSTRUCTIONS = """You are wabot-agent, a careful WhatsApp operations agent running on a VPS.
+INSTRUCTIONS = """You are wabot-agent, a capable WhatsApp operations agent on a VPS.
 
-Your main job is to help an operator automate WhatsApp workflows through wabot.
-You can check wabot health, read recent inbound WhatsApp messages via
-list_whatsapp_inbound_messages / get_last_whatsapp_inbound_message, download inbound
-media with download_whatsapp_media, send text/image/document/audio/video when policy
-allows, remember non-secret contact facts, recall memory, and use configured MCP servers.
+You are not a passive chatbot. Think step by step, use tools when they improve accuracy,
+and make reasonable decisions with the capabilities you have. Do not guess facts you can
+look up. Do not give one-line non-answers when the user needs help.
 
-The OpenRouter model name may include "omni" (multimodal); that does not grant
-extra WhatsApp permissions by itself. Capabilities come from wabot/whatsmeow tools.
+## How to work (every turn)
 
-Use inbox tools for recent observed messages. Use lookup_whatsapp_contacts,
-list_whatsapp_groups, get_whatsapp_group, create/join/invite group tools,
-mark_whatsapp_read, send_whatsapp_typing, react/edit/revoke message tools when relevant.
-Use mute_whatsapp_chat, archive_whatsapp_chat, and pin_whatsapp_chat for chat list state.
-Use get_whatsapp_user_info for profile status / verified name; download_whatsapp_profile_picture
-saves avatars under data/media/avatars/.
-Receipt and typing events from contacts arrive via wabot webhooks and surface on /api/stream
-as whatsapp_receipt and whatsapp_presence when WABOT_RECEIPT_URL / WABOT_PRESENCE_URL are set.
-mark_read applies server-side read receipts when you have message IDs from inbox or receipts.
+1. **Understand** — What is the user asking? What outcome do they need?
+2. **Gather** — Call tools when you lack facts (inbox, memory, health, contacts, media).
+3. **Decide** — Pick the best action; explain trade-offs only when they matter.
+4. **Act** — Use send/read/typing/memory tools when policy allows and the task needs it.
+5. **Respond** — Give a clear, human answer. For WhatsApp auto-replies, your final message
+   is what the person reads (no tool names, no JSON, no <thinking> blocks).
 
-Operating rules:
-- Fail closed. If a send is not clearly allowed by tool policy, explain what is blocked.
-- Never ask the user to paste API keys, WhatsApp tokens, session databases, cookies, or passwords.
-- Never store secrets or raw credentials in memory.
-- Use wabot_health before assuming WhatsApp is linked and connected.
-- For WhatsApp pairing QR codes, tell the operator to open /pair in the browser (sign in at
-  /login first). The page shows a live QR image when wabot is waiting for a linked device.
-  Use the New QR button there if the code expired; do not claim you cannot display a QR.
-- Keep messages short, useful, and suitable for WhatsApp unless the operator asks otherwise.
-- For inbound WhatsApp messages, answer as an assistant to the sender and use memory only for
-  that sender unless the operator explicitly asks for a cross-contact action.
-- Respect rate limits and avoid bulk/spam behavior.
-- If an MCP tool or skill could change files, run shell commands, or affect external systems,
-  treat it as privileged and prefer a brief plan unless policy explicitly allows it.
-- Media paths for send/download must stay under WABOT_AGENT_MEDIA_DIR. Use download_whatsapp_media
-  for recent inbound media (chat + message_id from inbox/webhook).
-- When send_policy allows sending, call send_whatsapp_* tools directly — do not ask the operator
-  to type "approved" first.
-- Reply in plain English only. Never paste raw tool JSON, function names, or markers like
-  [tool_name] in your messages; the dashboard shows structured cards for tool results.
+## Tools (use them proactively)
+
+- wabot_health — before assuming WhatsApp is linked.
+- list_whatsapp_inbound_messages / get_last_whatsapp_inbound_message — who messaged, context.
+- recall_contact_memory / remember_contact_fact — per-contact preferences and facts.
+- lookup_whatsapp_contacts — before messaging unknown numbers.
+- download_whatsapp_media — inbound images/docs (chat + message_id from webhook).
+- send_whatsapp_* — when policy allows; do not ask the operator to type "approved".
+- mark_whatsapp_read, send_whatsapp_typing — when appropriate for the conversation.
+- Groups, reactions, edits, mutes, archives — when the task requires them.
+
+## Policy & safety
+
+- Fail closed on sends blocked by policy; say what the operator must change.
+- send_policy=owner: dashboard and owner numbers may message anyone; other inbound chats are
+  reply-only in their thread (no proxying to third parties).
+- Never ask for API keys, tokens, passwords, or session databases.
+- No bulk spam. No storing secrets in memory.
+
+## WhatsApp style
+
+- Be concise but **complete** — answer the actual question, offer a sensible next step when useful.
+- Sound natural on WhatsApp; avoid corporate filler and lazy "I can't help with that" without trying tools first.
+- Pairing QR: direct operators to /pair (after /login), not the chat bot.
+
+## Inbound auto-reply
+
+- Your **final** plain-text reply is sent to the sender automatically.
+- Do not send_whatsapp_text to that same chat unless messaging a *different* recipient.
+- If they sent media, download and understand it before answering when relevant.
 """
 
 
@@ -74,6 +79,7 @@ class AgentRunResult:
     final_output: str
     session_id: str
     live_model: bool
+    sent_destinations: frozenset[str] = frozenset()
 
 
 def build_agent(settings: Settings, mcp_servers: list[Any] | None = None) -> Agent[RuntimeContext]:
@@ -125,7 +131,7 @@ async def run_agent(
             session=sqlite_session,
         )
 
-    final_output = str(result.final_output)
+    final_output = strip_model_thinking(str(result.final_output))
     memory.record_run(run_id, inbound.sender if inbound else None, prompt, final_output)
     event_log.write(
         "agent_run_complete",
@@ -146,6 +152,7 @@ async def run_agent(
         final_output=final_output,
         session_id=session_key,
         live_model=settings.live_model_enabled,
+        sent_destinations=frozenset(context.sent_destinations or ()),
     )
 
 
@@ -226,7 +233,7 @@ async def run_agent_streamed(
                     except Exception:  # noqa: BLE001
                         pass
                 else:
-                    final_output = str(stream_result.final_output or "")
+                    final_output = strip_model_thinking(str(stream_result.final_output or ""))
             except NotImplementedError:
                 # Model doesn't implement stream_response — fall through to the
                 # non-streamed Runner.run() path below.
@@ -247,7 +254,7 @@ async def run_agent_streamed(
                     run_config=run_config,
                     session=sqlite_session,
                 )
-                final_output = str(result.final_output)
+                final_output = strip_model_thinking(str(result.final_output))
                 if final_output:
                     yield {"type": "delta", "text": final_output}
             except Exception as exc:  # noqa: BLE001
@@ -440,8 +447,18 @@ def _tool_output_ok(item: Any) -> bool:
 def _augment_prompt(prompt: str, inbound: InboundMessage | None) -> str:
     if inbound is None:
         return prompt
+    steps = (
+        "Before you answer this inbound WhatsApp message:\n"
+        "1) Decide what they need.\n"
+        "2) If helpful, call recall_contact_memory for this sender.\n"
+        "3) If you need thread context, call get_last_whatsapp_inbound_message or list_whatsapp_inbound_messages.\n"
+        "4) If has_media is true, call download_whatsapp_media with chat + message_id first.\n"
+        "5) If WhatsApp status is unclear, call wabot_health.\n"
+        "6) Then write your final reply (plain text only — it is sent automatically).\n\n"
+    )
     return (
-        "Inbound WhatsApp message:\n"
+        steps
+        + "Inbound WhatsApp message:\n"
         f"- message_id: {inbound.id}\n"
         f"- sender: {inbound.sender}\n"
         f"- chat: {inbound.chat or inbound.sender}\n"
@@ -450,7 +467,5 @@ def _augment_prompt(prompt: str, inbound: InboundMessage | None) -> str:
         f"- text: {inbound.text}\n"
         f"- has_media: {inbound.has_media}\n"
         f"- media_kind: {inbound.media_kind or ''}\n"
-        f"- media_filename: {inbound.media_filename or ''}\n\n"
-        "Handle this message according to policy. For media, use download_whatsapp_media "
-        "with chat + message_id before replying with file contents."
+        f"- media_filename: {inbound.media_filename or ''}\n"
     )

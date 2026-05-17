@@ -9,6 +9,7 @@ from agents import RunContextWrapper, function_tool
 from .config import Settings
 from .events import EventLog
 from .memory import InboundMessage, MemoryStore
+from .recipients import is_listed_recipient, recipients_match
 from .redaction import mask_phone, redact
 from .skills import list_skills, read_skill
 from .wabot import WabotClient
@@ -22,15 +23,42 @@ class RuntimeContext:
     event_log: EventLog
     run_id: str
     inbound: InboundMessage | None = None
+    sent_destinations: set[str] | None = None
+
+    def __post_init__(self) -> None:
+        if self.sent_destinations is None:
+            self.sent_destinations = set()
+
+    def record_sent(self, to: str) -> None:
+        if self.sent_destinations is not None:
+            self.sent_destinations.add(to.strip())
 
 
-def _is_send_allowed(settings: Settings, to: str) -> tuple[bool, str]:
+def _is_owner_session(settings: Settings, inbound: InboundMessage | None) -> bool:
+    """Dashboard operator, or an inbound WhatsApp message from a configured owner."""
+    if inbound is None:
+        return True
+    return is_listed_recipient(inbound.sender, settings.owner_numbers)
+
+
+def _is_send_allowed(
+    settings: Settings,
+    to: str,
+    *,
+    inbound: InboundMessage | None = None,
+) -> tuple[bool, str]:
     if settings.send_policy == "dry_run":
         return False, "dry_run"
     if settings.send_policy == "allow_all":
         return True, "allow_all"
-    if to in settings.allowed_recipients:
+    if is_listed_recipient(to, settings.allowed_recipients):
         return True, "allowlist"
+    if settings.send_policy == "owner":
+        if _is_owner_session(settings, inbound):
+            return True, "owner"
+        if inbound is not None and recipients_match(inbound.sender, to):
+            return True, "reply_to_sender"
+        return False, "recipient_not_allowed_for_non_owner"
     return False, "recipient_not_allowlisted"
 
 
@@ -200,15 +228,17 @@ async def send_whatsapp_text(
     ctx: RunContextWrapper[RuntimeContext], to: str, text: str
 ) -> dict[str, Any]:
     """Send a WhatsApp text message through wabot when the send policy allows it."""
-    allowed, reason = _is_send_allowed(ctx.context.settings, to)
+    allowed, reason = _is_send_allowed(
+        ctx.context.settings, to, inbound=ctx.context.inbound
+    )
     if not allowed:
         payload = {
             "sent": False,
             "reason": reason,
             "to": mask_phone(to),
             "operator_action": (
-                "Set WABOT_AGENT_SEND_POLICY=allowlist and add the number to "
-                "WABOT_AGENT_ALLOWED_RECIPIENTS, or deliberately use allow_all."
+                "Owner policy: only the configured owner (dashboard or owner WhatsApp) "
+                "may message arbitrary numbers; others may only reply to their own chat."
             ),
         }
         ctx.context.memory.record_tool_event(
@@ -235,6 +265,7 @@ async def send_whatsapp_text(
         return payload
 
     result = await ctx.context.wabot.send_text(to=to, text=text)
+    ctx.context.record_sent(to)
     payload = {"sent": True, "policy": reason, "to": mask_phone(to), "result": redact(result)}
     ctx.context.memory.record_tool_event(ctx.context.run_id, "send_whatsapp_text", payload)
     ctx.context.event_log.write("send_text", payload)
@@ -258,7 +289,9 @@ async def send_whatsapp_image(
         )
         return payload
 
-    allowed, reason = _is_send_allowed(ctx.context.settings, to)
+    allowed, reason = _is_send_allowed(
+        ctx.context.settings, to, inbound=ctx.context.inbound
+    )
     if not allowed:
         payload = {
             "sent": False,
@@ -280,6 +313,7 @@ async def send_whatsapp_image(
         return payload
 
     result = await ctx.context.wabot.send_image(to=to, path=str(safe_path), caption=caption)
+    ctx.context.record_sent(to)
     payload = {"sent": True, "policy": reason, "to": mask_phone(to), "result": redact(result)}
     ctx.context.memory.record_tool_event(ctx.context.run_id, "send_whatsapp_image", payload)
     ctx.context.event_log.write("send_image", payload)
@@ -302,7 +336,9 @@ async def _send_whatsapp_media(
         ctx.context.memory.record_tool_event(ctx.context.run_id, f"{tool_name}.blocked", payload)
         return payload
 
-    allowed, reason = _is_send_allowed(ctx.context.settings, to)
+    allowed, reason = _is_send_allowed(
+        ctx.context.settings, to, inbound=ctx.context.inbound
+    )
     if not allowed:
         payload = {
             "sent": False,
@@ -326,6 +362,7 @@ async def _send_whatsapp_media(
         caption=caption,
         filename=filename,
     )
+    ctx.context.record_sent(to)
     payload = {
         "sent": True,
         "policy": reason,
@@ -404,7 +441,9 @@ async def _invoke_chat_message_action(
 async def _chat_send_or_block(
     ctx: RunContextWrapper[RuntimeContext], tool_name: str, chat: str
 ) -> tuple[bool, str, dict[str, Any] | None]:
-    allowed, reason = _is_send_allowed(ctx.context.settings, chat)
+    allowed, reason = _is_send_allowed(
+        ctx.context.settings, chat, inbound=ctx.context.inbound
+    )
     if not allowed:
         payload = {
             "ok": False,

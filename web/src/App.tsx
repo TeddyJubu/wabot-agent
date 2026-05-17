@@ -51,8 +51,8 @@ export default function App() {
       .then((v) => {
         setReadiness({
           model: {
-            label: v.openrouter.api_key.set ? "configured" : "offline",
-            variant: v.openrouter.api_key.set ? "ok" : "warn",
+            label: v.llm.live ? `${v.llm.provider}` : "offline",
+            variant: v.llm.live ? "ok" : "warn",
           },
           wabot: {
             label: v.wabot.endpoint ? "configured" : "missing",
