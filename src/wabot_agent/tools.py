@@ -707,6 +707,7 @@ async def process_vps_file(
             safe_path,
             excerpt_limit=ctx.context.settings.file_excerpt_limit,
             max_bytes=ctx.context.settings.file_max_process_bytes,
+            settings=ctx.context.settings,
         )
     ctx.context.memory.record_tool_event(ctx.context.run_id, "process_vps_file", payload)
     return redact(payload)
@@ -735,6 +736,7 @@ async def process_whatsapp_attachment(
             mime=downloaded.mime,
             excerpt_limit=ctx.context.settings.file_excerpt_limit,
             max_bytes=ctx.context.settings.file_max_process_bytes,
+            settings=ctx.context.settings,
         )
         payload["download_path"] = str(downloaded.path)
     ctx.context.memory.record_tool_event(

@@ -176,6 +176,26 @@ class Settings(BaseSettings):
             "WABOT_AGENT_FILE_MAX_PROCESS_BYTES", "VIGNESH_FILE_MAX_PROCESS_BYTES"
         ),
     )
+    file_use_system_tools: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_FILE_USE_SYSTEM_TOOLS", "VIGNESH_FILE_USE_SYSTEM_TOOLS"
+        ),
+    )
+    file_ocr_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("WABOT_AGENT_FILE_OCR_ENABLED", "VIGNESH_FILE_OCR_ENABLED"),
+    )
+    whisper_model: str = Field(
+        default="tiny",
+        validation_alias=AliasChoices("WABOT_AGENT_WHISPER_MODEL", "VIGNESH_WHISPER_MODEL"),
+    )
+    whisper_max_seconds: int = Field(
+        default=90,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_WHISPER_MAX_SECONDS", "VIGNESH_WHISPER_MAX_SECONDS"
+        ),
+    )
 
     cf_access_team_domain: str | None = Field(
         default=None,

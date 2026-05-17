@@ -32,6 +32,7 @@ async def build_inbound_file_context(
         mime=downloaded.mime,
         excerpt_limit=settings.file_excerpt_limit,
         max_bytes=settings.file_max_process_bytes,
+        settings=settings,
     )
     lines = [
         "\n\n[VPS file processing — inbound attachment]",
