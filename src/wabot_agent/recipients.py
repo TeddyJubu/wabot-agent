@@ -23,3 +23,9 @@ def recipients_match(left: str, right: str) -> bool:
 
 def is_listed_recipient(value: str, allowed: set[str]) -> bool:
     return any(recipients_match(value, item) for item in allowed)
+
+
+def is_owner_sender(settings: object, sender: str) -> bool:
+    """True when sender matches WABOT_AGENT_OWNER_NUMBERS."""
+    owners = getattr(settings, "owner_numbers", None) or set()
+    return is_listed_recipient(sender, owners)

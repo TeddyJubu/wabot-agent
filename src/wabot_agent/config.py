@@ -190,6 +190,12 @@ class Settings(BaseSettings):
         default="tiny",
         validation_alias=AliasChoices("WABOT_AGENT_WHISPER_MODEL", "VIGNESH_WHISPER_MODEL"),
     )
+    whisper_model_owner: str = Field(
+        default="base",
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_WHISPER_MODEL_OWNER", "VIGNESH_WHISPER_MODEL_OWNER"
+        ),
+    )
     whisper_max_seconds: int = Field(
         default=90,
         validation_alias=AliasChoices(

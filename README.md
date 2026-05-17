@@ -96,6 +96,88 @@ uv run python scripts/apply-production-hygiene.py
 
 Restart `wabot-agent` after hygiene changes.
 
+## VPS file processing (attachments)
+
+On a production VPS, install **system tools** once, then configure **Whisper** and **vision** in `.env`. Inbound files are downloaded and processed automatically; owners get higher-quality speech recognition.
+
+### 1. System packages (once per VPS)
+
+```bash
+sudo APP_DIR=/opt/wabot-agent APP_USER=wabotagent \
+  bash /opt/wabot-agent/scripts/install-vps-processing-tools.sh
+```
+
+Installs: `ffmpeg`, `ffprobe`, `pdftotext`, `pdfinfo`, `tesseract-ocr`, `file`, `unzip`.  
+Skipped on purpose (too heavy): LibreOffice, Pandoc.
+
+`scripts/bootstrap-vps.sh` runs this step automatically when the script is present.
+
+### 2. Python dependencies
+
+Deployed via `uv sync` (includes `faster-whisper`, `pypdf`). After deploy, restart:
+
+```bash
+sudo systemctl restart wabot-agent
+```
+
+### 3. Environment variables
+
+```dotenv
+# Auto-download + extract inbound attachments on the VPS
+WABOT_AGENT_FILE_PROCESS_INBOUND=true
+WABOT_AGENT_FILE_USE_SYSTEM_TOOLS=true
+WABOT_AGENT_FILE_OCR_ENABLED=true
+WABOT_AGENT_FILE_EXCERPT_LIMIT=12000
+WABOT_AGENT_FILE_MAX_PROCESS_BYTES=20971520
+
+# Vision (photos) — requires a vision-capable LLM (e.g. gemma4 via Ollama Cloud)
+WABOT_AGENT_VISION_ATTACH_IMAGES=true
+
+# Speech-to-text: tiny for everyone; base for owner_numbers + dashboard chat
+WABOT_AGENT_WHISPER_MODEL=tiny
+WABOT_AGENT_WHISPER_MODEL_OWNER=base
+WABOT_AGENT_WHISPER_MAX_SECONDS=90
+
+# Owner numbers (for send policy + better Whisper on their voice notes)
+WABOT_AGENT_OWNER_NUMBERS=+6580286424,+8801521207499
+```
+
+| Variable | Purpose |
+|----------|---------|
+| `WABOT_AGENT_FILE_PROCESS_INBOUND` | Download and process attachments on each inbound message |
+| `WABOT_AGENT_VISION_ATTACH_IMAGES` | Pass image pixels to the LLM (not just OCR) |
+| `WABOT_AGENT_WHISPER_MODEL` | Default Whisper model (`tiny` — low CPU/RAM) |
+| `WABOT_AGENT_WHISPER_MODEL_OWNER` | Whisper for `WABOT_AGENT_OWNER_NUMBERS` and dashboard (`base` recommended on 8GB RAM) |
+| `WABOT_AGENT_WHISPER_MAX_SECONDS` | Max audio transcribed per file (truncates long voice notes) |
+
+### 4. What gets processed automatically
+
+| Type | VPS handling |
+|------|----------------|
+| Images | Vision LLM + optional Tesseract OCR |
+| PDF | `pdftotext` → fallback `pypdf` |
+| Audio / voice notes | ffmpeg → Whisper (`tiny` or `base` by sender) |
+| Video | ffprobe + frame OCR + audio transcript |
+| DOCX | Text extraction (no LibreOffice) |
+| Text, CSV, JSON, ZIP | Read or list contents |
+
+### 5. Agent tools (manual / follow-up)
+
+| Tool | Use |
+|------|-----|
+| `process_whatsapp_attachment(chat, message_id)` | Re-download and process a cached attachment |
+| `process_vps_file(path)` | Process any file under `data/media/` or `data/` |
+| `send_whatsapp_file(to, path)` | Send any file type from the media directory |
+| `download_whatsapp_media` | Save attachment to disk only |
+
+See `skills/whatsapp-operator/SKILL.md` for operator guidance.
+
+### 6. RAM notes (typical 8GB VPS)
+
+- `tiny` Whisper ≈ low hundreds of MB; `base` ≈ ~1GB when loaded.
+- Both models may be cached after first use; only one runs at a time (locked).
+- Use `small` instead of `base` if RAM is tight.
+
 ## Production VPS
 
 1. Bootstrap once: `sudo APP_DIR=/opt/wabot-agent APP_USER=wabotagent ./scripts/bootstrap-vps.sh`
@@ -149,7 +231,7 @@ Inbound webhook shape:
 
 ## Agent tools
 
-Core WhatsApp tools include inbox reads, send text/image/media, contacts, groups, read/typing, reactions, mute/archive/pin, profile info, and media download. See `src/wabot_agent/tools.py` and `skills/whatsapp-operator/SKILL.md`.
+Core WhatsApp tools include inbox reads, send text/image/media/**any file** (`send_whatsapp_file`), VPS file processing (`process_vps_file`, `process_whatsapp_attachment`), contacts, groups, read/typing, reactions, mute/archive/pin, and profile info. See `src/wabot_agent/tools.py` and `skills/whatsapp-operator/SKILL.md`. For attachment setup on a new VPS, see **VPS file processing** above.
 
 ## Verification
 

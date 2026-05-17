@@ -4,16 +4,24 @@ import threading
 from functools import lru_cache
 from pathlib import Path
 
+from .config import Settings
 from .system_tools import ffmpeg_to_wav
 
 _whisper_lock = threading.Lock()
 
 
-@lru_cache(maxsize=2)
+@lru_cache(maxsize=4)
 def _whisper_model(model_name: str, compute_type: str):
     from faster_whisper import WhisperModel
 
     return WhisperModel(model_name, device="cpu", compute_type=compute_type)
+
+
+def resolve_whisper_model(settings: Settings, *, is_owner: bool) -> str:
+    """Owners get the higher-quality model; everyone else uses the default (tiny)."""
+    if is_owner and settings.whisper_model_owner.strip():
+        return settings.whisper_model_owner.strip()
+    return settings.whisper_model.strip()
 
 
 def transcribe_audio_file(
@@ -26,6 +34,8 @@ def transcribe_audio_file(
 ) -> tuple[str, list[str]]:
     """Transcribe audio using faster-whisper (CPU, int8). Converts to 16kHz mono WAV first."""
     warnings: list[str] = []
+    if model_name != "tiny":
+        warnings.append(f"whisper model: {model_name}")
     work_dir = path.parent / ".transcribe"
     work_dir.mkdir(parents=True, exist_ok=True)
     wav_path = work_dir / f"{path.stem}.16k.wav"

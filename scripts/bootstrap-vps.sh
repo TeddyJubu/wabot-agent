@@ -74,6 +74,12 @@ systemctl enable wabot-agent.service
 # is missing or malformed — fail loudly here rather than at first `start`.
 systemctl cat wabot-agent.service > /dev/null
 
+if [[ -f "$APP_DIR/scripts/install-vps-processing-tools.sh" ]]; then
+  echo "Installing VPS file-processing tools (ffmpeg, tesseract, pdftotext) ..."
+  APP_DIR="$APP_DIR" APP_USER="$APP_USER" bash "$APP_DIR/scripts/install-vps-processing-tools.sh"
+fi
+
 echo "Bootstrap complete. Edit $APP_DIR/.env, then run:"
 echo "  sudo systemctl restart wabot-agent"
 echo "  sudo journalctl -u wabot-agent -f"
+echo "See README.md section 'VPS file processing' for Whisper and attachment setup."

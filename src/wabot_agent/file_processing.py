@@ -8,6 +8,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
+from .audio_transcribe import resolve_whisper_model, transcribe_audio_file
 from .config import Settings
 
 TEXT_EXTENSIONS = {
@@ -186,7 +187,9 @@ def _process_image(
     return excerpt, warnings, summary
 
 
-def _process_audio(path: Path, settings: Settings, excerpt_limit: int) -> tuple[str, list[str], str]:
+def _process_audio(
+    path: Path, settings: Settings, excerpt_limit: int, *, is_owner: bool
+) -> tuple[str, list[str], str]:
     warnings: list[str] = []
     meta_line = ""
     if settings.file_use_system_tools:
@@ -200,11 +203,10 @@ def _process_audio(path: Path, settings: Settings, excerpt_limit: int) -> tuple[
     excerpt = meta_line
     summary = f"Audio file ({path.stat().st_size} bytes)."
     try:
-        from .audio_transcribe import transcribe_audio_file
-
+        whisper_name = resolve_whisper_model(settings, is_owner=is_owner)
         text, whisper_warnings = transcribe_audio_file(
             path,
-            model_name=settings.whisper_model,
+            model_name=whisper_name,
             max_duration_sec=settings.whisper_max_seconds,
             excerpt_limit=excerpt_limit,
         )
@@ -219,7 +221,9 @@ def _process_audio(path: Path, settings: Settings, excerpt_limit: int) -> tuple[
     return excerpt, warnings, summary
 
 
-def _process_video(path: Path, settings: Settings, excerpt_limit: int) -> tuple[str, list[str], str]:
+def _process_video(
+    path: Path, settings: Settings, excerpt_limit: int, *, is_owner: bool
+) -> tuple[str, list[str], str]:
     warnings: list[str] = []
     parts: list[str] = []
     summary = f"Video file ({path.stat().st_size} bytes)."
@@ -248,11 +252,10 @@ def _process_video(path: Path, settings: Settings, excerpt_limit: int) -> tuple[
         pass
 
     try:
-        from .audio_transcribe import transcribe_audio_file
-
+        whisper_name = resolve_whisper_model(settings, is_owner=is_owner)
         text, whisper_warnings = transcribe_audio_file(
             path,
-            model_name=settings.whisper_model,
+            model_name=whisper_name,
             max_duration_sec=settings.whisper_max_seconds,
             excerpt_limit=excerpt_limit // 2,
         )
@@ -273,6 +276,7 @@ def process_file_at_path(
     excerpt_limit: int = 12_000,
     max_bytes: int = 20 * 1024 * 1024,
     settings: Settings | None = None,
+    is_owner: bool = False,
 ) -> dict[str, Any]:
     """Extract a VPS-local summary of a file for the agent."""
     if not path.is_file():
@@ -313,12 +317,16 @@ def process_file_at_path(
             result["excerpt"] = excerpt or None
             result["summary"] = summary
         elif kind == "video":
-            excerpt, warnings, summary = _process_video(path, cfg, excerpt_limit)
+            excerpt, warnings, summary = _process_video(
+                path, cfg, excerpt_limit, is_owner=is_owner
+            )
             result["warnings"] = warnings
             result["excerpt"] = excerpt or None
             result["summary"] = summary
         elif kind == "audio":
-            excerpt, warnings, summary = _process_audio(path, cfg, excerpt_limit)
+            excerpt, warnings, summary = _process_audio(
+                path, cfg, excerpt_limit, is_owner=is_owner
+            )
             result["warnings"] = warnings
             result["excerpt"] = excerpt or None
             result["summary"] = summary

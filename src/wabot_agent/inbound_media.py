@@ -4,6 +4,7 @@ from .config import Settings
 from .file_processing import process_file_at_path
 from .media_download import download_inbound_media
 from .memory import InboundMessage
+from .recipients import is_owner_sender
 from .vision_input import inbound_is_image
 from .wabot import WabotClient
 
@@ -27,12 +28,14 @@ async def build_inbound_file_context(
             f"{downloaded.detail or 'unknown error'}]"
         )
 
+    is_owner = is_owner_sender(settings, inbound.sender)
     processed = process_file_at_path(
         downloaded.path,
         mime=downloaded.mime,
         excerpt_limit=settings.file_excerpt_limit,
         max_bytes=settings.file_max_process_bytes,
         settings=settings,
+        is_owner=is_owner,
     )
     lines = [
         "\n\n[VPS file processing — inbound attachment]",
@@ -41,6 +44,11 @@ async def build_inbound_file_context(
         f"- bytes: {processed.get('bytes', downloaded.bytes)}",
         f"- mime: {processed.get('mime') or downloaded.mime or ''}",
     ]
+    if is_owner:
+        lines.append(
+            f"- whisper: {settings.whisper_model_owner} (owner); "
+            f"others use {settings.whisper_model}"
+        )
     if processed.get("summary"):
         lines.append(f"- summary: {processed['summary']}")
     for warning in processed.get("warnings") or []:
