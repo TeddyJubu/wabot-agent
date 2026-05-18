@@ -12,9 +12,14 @@ from .events import EventLog
 from .file_processing import process_file_at_path, whatsapp_send_kind_for_path
 from .media_download import download_media_message
 from .media_paths import media_path_allowed, workspace_path_allowed
+from .mem0_store import (
+    add_memory_sync,
+    mem0_enabled,
+    search_memories_sync,
+)
 from .memory import InboundMessage, MemoryStore
 from .recipients import is_listed_recipient, recipients_match
-from .redaction import mask_phone, redact
+from .redaction import looks_sensitive, mask_phone, redact
 from .skills import list_skills, read_skill
 from .wabot import WabotClient
 from .web_agent import web_agent_health
@@ -1323,6 +1328,68 @@ async def cancel_web_research(
     return redact(payload)
 
 
+@function_tool
+async def mem0_status(ctx: RunContextWrapper[RuntimeContext]) -> dict[str, Any]:
+    """Report whether Mem0 long-term memory is enabled and configured."""
+    settings = ctx.context.settings
+    payload = {
+        "enabled": mem0_enabled(settings),
+        "configured": settings.mem0_enabled,
+        "use_platform": settings.mem0_use_platform,
+        "path": str(settings.mem0_path),
+        "collection": settings.mem0_collection,
+        "auto_capture": settings.mem0_auto_capture,
+        "inject_on_run": settings.mem0_inject_on_run,
+    }
+    ctx.context.memory.record_tool_event(ctx.context.run_id, "mem0_status", payload)
+    return payload
+
+
+@function_tool
+async def search_mem0_memories(
+    ctx: RunContextWrapper[RuntimeContext],
+    query: str,
+    user_id: str | None = None,
+    top_k: int = 5,
+) -> dict[str, Any]:
+    """Search Mem0 semantic memories for a WhatsApp contact (user_id = sender JID)."""
+    uid = (user_id or _requester_jid(ctx) or "").strip()
+    if not uid:
+        payload = {"ok": False, "reason": "no_user_id", "results": []}
+    else:
+        payload = search_memories_sync(
+            ctx.context.settings,
+            user_id=uid,
+            query=query,
+            top_k=top_k,
+        )
+    ctx.context.memory.record_tool_event(ctx.context.run_id, "search_mem0_memories", payload)
+    return redact(payload)
+
+
+@function_tool
+async def add_mem0_memory(
+    ctx: RunContextWrapper[RuntimeContext],
+    text: str,
+    user_id: str | None = None,
+) -> dict[str, Any]:
+    """Store a durable fact in Mem0 for a contact (non-secret, user-stated preferences)."""
+    uid = (user_id or _requester_jid(ctx) or "").strip()
+    if not uid:
+        payload = {"ok": False, "reason": "no_user_id"}
+    elif looks_sensitive(text):
+        payload = {"ok": False, "reason": "sensitive_content"}
+    else:
+        payload = add_memory_sync(
+            ctx.context.settings,
+            user_id=uid,
+            messages=[{"role": "user", "content": text.strip()}],
+            metadata={"source": ctx.context.run_id},
+        )
+    ctx.context.memory.record_tool_event(ctx.context.run_id, "add_mem0_memory", payload)
+    return redact(payload)
+
+
 def core_tools() -> list[Any]:
     return [
         wabot_health,
@@ -1373,4 +1440,7 @@ def core_tools() -> list[Any]:
         get_web_research_status,
         list_web_research_jobs,
         cancel_web_research,
+        mem0_status,
+        search_mem0_memories,
+        add_mem0_memory,
     ]

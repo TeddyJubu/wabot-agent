@@ -500,6 +500,64 @@ class Settings(BaseSettings):
             "VIGNESH_WEB_AGENT_NOTIFY_ON_COMPLETE",
         ),
     )
+    mem0_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("WABOT_AGENT_MEM0_ENABLED", "VIGNESH_MEM0_ENABLED"),
+    )
+    mem0_use_platform: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_MEM0_USE_PLATFORM", "VIGNESH_MEM0_USE_PLATFORM"
+        ),
+    )
+    mem0_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("MEM0_API_KEY", "WABOT_AGENT_MEM0_API_KEY"),
+    )
+    mem0_path: Path = Field(
+        default=Path("./data/mem0_qdrant"),
+        validation_alias=AliasChoices("WABOT_AGENT_MEM0_PATH", "VIGNESH_MEM0_PATH"),
+    )
+    mem0_collection: str = Field(
+        default="wabot_agent",
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_MEM0_COLLECTION", "VIGNESH_MEM0_COLLECTION"
+        ),
+    )
+    mem0_top_k: int = Field(
+        default=5,
+        validation_alias=AliasChoices("WABOT_AGENT_MEM0_TOP_K", "VIGNESH_MEM0_TOP_K"),
+    )
+    mem0_auto_capture: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_MEM0_AUTO_CAPTURE", "VIGNESH_MEM0_AUTO_CAPTURE"
+        ),
+    )
+    mem0_inject_on_run: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_MEM0_INJECT_ON_RUN", "VIGNESH_MEM0_INJECT_ON_RUN"
+        ),
+    )
+    mem0_prompt_max_chars: int = Field(
+        default=4000,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_MEM0_PROMPT_MAX_CHARS", "VIGNESH_MEM0_PROMPT_MAX_CHARS"
+        ),
+    )
+    mem0_llm_model: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_MEM0_LLM_MODEL", "VIGNESH_MEM0_LLM_MODEL"
+        ),
+    )
+    mem0_embed_model: str = Field(
+        default="text-embedding-3-small",
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_MEM0_EMBED_MODEL", "VIGNESH_MEM0_EMBED_MODEL"
+        ),
+    )
 
     cf_access_team_domain: str | None = Field(
         default=None,
@@ -568,6 +626,7 @@ class Settings(BaseSettings):
         self.media_dir.mkdir(parents=True, exist_ok=True)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
+        self.mem0_path.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache

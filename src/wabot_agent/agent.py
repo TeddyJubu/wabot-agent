@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -20,6 +21,7 @@ from .context_management import (
 from .events import EventLog
 from .inbound_media import build_inbound_file_context, voice_transcript_from_context
 from .mcp import connected_mcp_servers
+from .mem0_store import capture_turn_mem0, inject_mem0_context, mem0_enabled
 from .memory import InboundMessage, MemoryStore
 from .models import build_model, model_settings
 from .output_sanitize import strip_model_thinking
@@ -31,6 +33,7 @@ from .vision_input import prepare_runner_input
 from .wabot import WabotClient
 
 set_tracing_disabled(True)
+logger = logging.getLogger(__name__)
 
 
 INSTRUCTIONS = """You are wabot-agent, a capable WhatsApp operations agent on a VPS.
@@ -52,7 +55,8 @@ look up. Do not give one-line non-answers when the user needs help.
 
 - wabot_health — before assuming WhatsApp is linked.
 - list_whatsapp_inbound_messages / get_last_whatsapp_inbound_message — who messaged, context.
-- recall_contact_memory / remember_contact_fact — per-contact preferences and facts.
+- recall_contact_memory / remember_contact_fact — per-contact key/value facts (SQLite).
+- search_mem0_memories / add_mem0_memory / mem0_status — semantic long-term memory (Mem0).
 - lookup_whatsapp_contacts — before messaging unknown numbers.
 - Inbound files are downloaded and processed on the VPS automatically (text/PDF/zip excerpts).
 - process_vps_file / process_whatsapp_attachment — re-read or process attachments on demand.
@@ -158,6 +162,10 @@ async def run_agent(
             f"\"{transcript}\"]\n\n"
             + augmented
         )
+    if mem0_enabled(settings):
+        augmented = await inject_mem0_context(
+            settings, augmented, user_id=session_key
+        )
     augmented = cap_turn_prompt(augmented, settings.prompt_max_chars)
     runner_input = await prepare_runner_input(
         augmented,
@@ -182,6 +190,17 @@ async def run_agent(
 
     final_output = strip_model_thinking(str(result.final_output))
     memory.record_run(run_id, inbound.sender if inbound else None, prompt, final_output)
+    if mem0_enabled(settings):
+        try:
+            await capture_turn_mem0(
+                settings,
+                user_id=session_key,
+                user_text=prompt,
+                assistant_text=final_output,
+                run_id=run_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("mem0 capture failed: %s", exc)
     event_log.write(
         "agent_run_complete",
         {
@@ -255,6 +274,10 @@ async def run_agent_streamed(
             f"failed-transcription replies in the thread if they conflict: "
             f"\"{transcript}\"]\n\n"
             + augmented
+        )
+    if mem0_enabled(settings):
+        augmented = await inject_mem0_context(
+            settings, augmented, user_id=session_key
         )
     augmented = cap_turn_prompt(augmented, settings.prompt_max_chars)
     runner_input = await prepare_runner_input(
@@ -338,6 +361,17 @@ async def run_agent_streamed(
     maybe_prune_audit_tables(memory, settings)
 
     memory.record_run(run_id, inbound.sender if inbound else None, prompt, final_output)
+    if mem0_enabled(settings):
+        try:
+            await capture_turn_mem0(
+                settings,
+                user_id=session_key,
+                user_text=prompt,
+                assistant_text=final_output,
+                run_id=run_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("mem0 capture failed: %s", exc)
     event_log.write(
         "agent_run_complete",
         {
@@ -518,7 +552,7 @@ def _augment_prompt(prompt: str, inbound: InboundMessage | None) -> str:
     steps = (
         "Before you answer this inbound WhatsApp message:\n"
         "1) Decide what they need.\n"
-        "2) If helpful, call recall_contact_memory for this sender.\n"
+        "2) If helpful, call recall_contact_memory and/or search_mem0_memories for this sender.\n"
         "3) If you need thread context, call get_last_whatsapp_inbound_message or "
         "list_whatsapp_inbound_messages.\n"
         "4) For requests to find/download/send files from the internet, use search_images or "
