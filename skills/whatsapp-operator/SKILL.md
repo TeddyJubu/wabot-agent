@@ -10,9 +10,11 @@ Use this skill before changing WhatsApp state, sending messages, or handling inb
 ## Agentic workflow
 
 1. Understand the request.
-2. Call tools to gather facts (do not guess inbox contents or contact history).
-3. Act with the right WhatsApp tool when policy allows.
-4. Reply clearly — complete but WhatsApp-appropriate length.
+2. **Recall memory** — `search_mem0_memories` + `recall_contact_memory` for this contact.
+3. Call other tools to gather facts (do not guess inbox contents or contact history).
+4. Act with the right WhatsApp tool when policy allows.
+5. **Save memory** — `add_mem0_memory` / `remember_contact_fact` for important facts before replying.
+6. Reply clearly — complete but WhatsApp-appropriate length.
 
 ## Rules
 
@@ -54,7 +56,8 @@ Use this skill before changing WhatsApp state, sending messages, or handling inb
 - Keep outbound messages clear and human-readable; be concise but answer the question fully.
 - Respect the configured send policy. If a recipient is blocked, explain the operator action needed.
 - Avoid bulk or cold outreach. Escalate to the operator instead.
-- Store only useful, non-secret memory. Prefer concise facts with a source.
+- **Memory is mandatory:** recall before answering; persist important facts every turn
+  (read `mem0-memory` skill). Store only useful, non-secret memory. Prefer concise facts.
 
 ## Failure Handling
 

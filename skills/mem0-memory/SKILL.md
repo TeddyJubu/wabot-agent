@@ -5,17 +5,42 @@ description: Semantic long-term memory via Mem0 for WhatsApp contacts.
 
 # Mem0 memory
 
-Use Mem0 for preferences, history, and facts that benefit from semantic search — not for secrets or one-off tool output.
+Memory is **mandatory**, not optional. Use Mem0 plus SQLite contact facts every turn.
 
-## When to use
+## Every inbound turn
 
-- `search_mem0_memories` — before answering questions about past conversations, preferences, or "do you remember…"
-- `add_mem0_memory` — when the user states a durable preference you should remember across sessions
-- `recall_contact_memory` — explicit key/value facts (SQLite); use both when helpful
-- `mem0_status` — if memory seems empty or misconfigured
+1. **Recall** — `search_mem0_memories(query=…, user_id=…)` and `recall_contact_memory(contact=…)`.
+2. **Answer** — use recalled facts naturally; do not claim you forgot without searching first.
+3. **Persist** — before your final reply, `add_mem0_memory` and/or `remember_contact_fact` for
+   anything important in this message or your commitments.
 
-## Rules
+## What to save
 
-- `user_id` is the WhatsApp sender JID (or group `chat` JID for group sessions).
-- Never store API keys, passwords, OTPs, or private medical data.
-- Mem0 auto-captures each turn when enabled; use `add_mem0_memory` only for clear facts worth emphasizing.
+- Preferences, names, roles, timezone, language
+- Deadlines, reminders-in-text, ongoing projects
+- Business context (company, goals, constraints)
+- Corrections ("call me X", "I prefer Y")
+- Standing instructions ("always…", "never…", "remember that…")
+
+## What not to save
+
+- Passwords, OTPs, API keys, payment card numbers
+- Sensitive clinical patient data
+- One-off tool output unless the user asks to keep it
+
+## user_id
+
+- DM: sender JID
+- Group: **chat** JID (`@g.us`), not only the participant
+
+## Tools
+
+| Tool | Use |
+|------|-----|
+| `search_mem0_memories` | Semantic recall before answering |
+| `add_mem0_memory` | Explicit durable facts (preferred for "remember this") |
+| `remember_contact_fact` | Structured key/value (e.g. `timezone`, `company`) |
+| `recall_contact_memory` | Read SQLite facts |
+| `mem0_status` | Debugging |
+
+Auto-capture may run when Mem0 is enabled — still call `add_mem0_memory` for facts you must not lose.

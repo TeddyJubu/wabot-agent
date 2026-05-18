@@ -898,7 +898,7 @@ async def send_whatsapp_video(
 async def recall_contact_memory(
     ctx: RunContextWrapper[RuntimeContext], contact: str
 ) -> dict[str, Any]:
-    """Recall durable non-secret memory for a WhatsApp contact."""
+    """Recall durable non-secret memory for a WhatsApp contact. Call every inbound turn."""
     payload = ctx.context.memory.recall_contact(contact)
     ctx.context.memory.record_tool_event(ctx.context.run_id, "recall_contact_memory", payload)
     return redact(payload)
@@ -908,7 +908,7 @@ async def recall_contact_memory(
 async def remember_contact_fact(
     ctx: RunContextWrapper[RuntimeContext], contact: str, key: str, value: str
 ) -> dict[str, Any]:
-    """Store a durable, non-secret fact about a contact."""
+    """Store a durable, non-secret key/value fact. Call when the message contains important info."""
     payload = ctx.context.memory.remember_contact_fact(
         contact=contact, key=key, value=value, source=ctx.context.run_id
     )
@@ -1352,7 +1352,7 @@ async def search_mem0_memories(
     user_id: str | None = None,
     top_k: int = 5,
 ) -> dict[str, Any]:
-    """Search Mem0 semantic memories for a WhatsApp contact (user_id = sender JID)."""
+    """Search Mem0 semantic memories. Call every inbound turn before answering (user_id = sender or group chat JID)."""
     uid = (user_id or _requester_jid(ctx) or "").strip()
     if not uid:
         payload = {"ok": False, "reason": "no_user_id", "results": []}
@@ -1373,7 +1373,7 @@ async def add_mem0_memory(
     text: str,
     user_id: str | None = None,
 ) -> dict[str, Any]:
-    """Store a durable fact in Mem0 for a contact (non-secret, user-stated preferences)."""
+    """Store a durable fact in Mem0. Call before final reply when anything important was said or promised."""
     uid = (user_id or _requester_jid(ctx) or "").strip()
     if not uid:
         payload = {"ok": False, "reason": "no_user_id"}
