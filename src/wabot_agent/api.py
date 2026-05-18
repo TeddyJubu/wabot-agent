@@ -369,6 +369,48 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except asyncio.CancelledError:
                 return
 
+    async def _run_web_research_job(job: dict[str, Any]) -> None:
+        from .web_research import execute_web_research_job
+
+        try:
+            await execute_web_research_job(
+                job,
+                settings=settings,
+                memory=memory,
+                wabot=wabot,
+                event_log=event_log,
+                hub=hub,
+            )
+        except Exception as exc:  # noqa: BLE001
+            job_id = str(job.get("id") or "")
+            memory.complete_web_research_job(
+                job_id,
+                error=redact(str(exc)),
+                result_path=None,
+                preview=None,
+            )
+            event_log.write(
+                "web_research_failed",
+                {"id": job_id, "error": redact(str(exc))},
+            )
+
+    async def _maybe_start_web_research() -> None:
+        from datetime import UTC, datetime, timedelta
+
+        if not settings.web_agent_enabled:
+            return
+        stale_before = (
+            datetime.now(UTC) - timedelta(seconds=settings.web_agent_timeout_sec + 60)
+        ).isoformat()
+        for job_id in memory.fail_stale_web_research_jobs(stale_before=stale_before):
+            event_log.write("web_research_stale", {"id": job_id})
+        running = memory.count_web_research_jobs(status="running")
+        if running >= max(1, settings.web_agent_max_concurrent):
+            return
+        job = memory.claim_pending_web_research_job()
+        if job is not None:
+            asyncio.create_task(_run_web_research_job(job))
+
     async def _scheduler_loop() -> None:
         from .memory import now_iso
 
@@ -395,6 +437,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         event_log=event_log,
                         hub=hub,
                     )
+                await _maybe_start_web_research()
             except Exception as exc:  # noqa: BLE001
                 event_log.write("scheduler_loop_error", {"error": redact(str(exc))})
             try:

@@ -66,6 +66,10 @@ look up. Do not give one-line non-answers when the user needs help.
 - create_reminder / list_reminders / cancel_reminder — schedule WhatsApp reminders (ISO due_at).
 - track_outbound_conversation / list_outbound_tasks / get_outbound_task_status — owner outreach
   follow-up; successful owner sends auto-track; you are notified when the target replies.
+- web_research_health / start_web_research / get_web_research_status / list_web_research_jobs /
+  cancel_web_research — Firecrawl web-agent deep scraping (owner-only). Queue long research jobs;
+  results are delivered on WhatsApp as text + CSV/document when complete. Read skills/web-research
+  for lead-gen briefs.
 - Groups, reactions, edits, mutes, archives — when the task requires them.
 
 ## Policy & safety

@@ -40,6 +40,9 @@ Use this skill before changing WhatsApp state, sending messages, or handling inb
   (`whatsapp_receipt`, `whatsapp_presence`) when wabot webhooks are configured.
 - History sync backfill populates `inbound_messages` via `POST /whatsapp/history` (no auto-reply).
   Use inbox tools after linking; live traffic still arrives on `/whatsapp/inbound`.
+- Deep scraping / lead lists (500+ rows, Google Maps research): read `web-research` skill, call
+  `web_research_health`, then `start_web_research` with the full brief. Results arrive on WhatsApp
+  when the Firecrawl web-agent job finishes (owner-only by default).
 - **Group chats:** `chat` is the group JID (`@g.us`); `sender` is the participant. Auto-reply and
   session history use `chat` as the session key. Reply with `send_whatsapp_text(to=chat, ...)`.
   Under `send_policy=owner`, the group `chat` JID is an allowed send target (like reply_to_sender).

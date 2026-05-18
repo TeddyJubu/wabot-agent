@@ -450,6 +450,56 @@ class Settings(BaseSettings):
             "WABOT_AGENT_WEB_FETCH_USER_AGENT", "VIGNESH_WEB_FETCH_USER_AGENT"
         ),
     )
+    web_agent_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_WEB_AGENT_ENABLED", "VIGNESH_WEB_AGENT_ENABLED"
+        ),
+    )
+    web_agent_url: str = Field(
+        default="http://127.0.0.1:3000",
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_WEB_AGENT_URL", "VIGNESH_WEB_AGENT_URL"
+        ),
+    )
+    web_agent_timeout_sec: float = Field(
+        default=7200.0,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_WEB_AGENT_TIMEOUT_SEC", "VIGNESH_WEB_AGENT_TIMEOUT_SEC"
+        ),
+    )
+    web_agent_max_concurrent: int = Field(
+        default=1,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_WEB_AGENT_MAX_CONCURRENT", "VIGNESH_WEB_AGENT_MAX_CONCURRENT"
+        ),
+    )
+    web_agent_max_pending_per_contact: int = Field(
+        default=3,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_WEB_AGENT_MAX_PENDING_PER_CONTACT",
+            "VIGNESH_WEB_AGENT_MAX_PENDING_PER_CONTACT",
+        ),
+    )
+    web_agent_max_steps: int | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_WEB_AGENT_MAX_STEPS", "VIGNESH_WEB_AGENT_MAX_STEPS"
+        ),
+    )
+    web_agent_owner_only: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_WEB_AGENT_OWNER_ONLY", "VIGNESH_WEB_AGENT_OWNER_ONLY"
+        ),
+    )
+    web_agent_notify_on_complete: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_WEB_AGENT_NOTIFY_ON_COMPLETE",
+            "VIGNESH_WEB_AGENT_NOTIFY_ON_COMPLETE",
+        ),
+    )
 
     cf_access_team_domain: str | None = Field(
         default=None,
