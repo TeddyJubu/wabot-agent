@@ -16,6 +16,12 @@ def inbound_reply_destination(inbound: InboundMessage) -> str:
     return (inbound.chat or inbound.sender).strip()
 
 
+def inbound_session_id(inbound: InboundMessage) -> str:
+    if inbound.is_group:
+        return (inbound.chat or inbound.sender).strip()
+    return inbound.sender.strip()
+
+
 def agent_already_replied_to(result: AgentRunResult, destination: str) -> bool:
     return any(recipients_match(destination, sent_to) for sent_to in result.sent_destinations)
 
@@ -30,8 +36,8 @@ async def deliver_auto_reply(
     """Send the agent's final output to the inbound chat when enabled."""
     if not settings.auto_reply_enabled:
         return {"sent": False, "reason": "disabled"}
-    if inbound.is_group:
-        return {"sent": False, "reason": "group_chat_skipped"}
+    if inbound.is_group and not settings.group_auto_reply_enabled:
+        return {"sent": False, "reason": "group_auto_reply_disabled"}
 
     destination = inbound_reply_destination(inbound)
     if not destination:
@@ -82,8 +88,10 @@ async def deliver_inbound_error_reply(
     error: str,
 ) -> dict[str, Any]:
     """Send a short fallback when the agent run fails so the user is not left silent."""
-    if not settings.auto_reply_enabled or inbound.is_group:
-        return {"sent": False, "reason": "skipped"}
+    if not settings.auto_reply_enabled:
+        return {"sent": False, "reason": "disabled"}
+    if inbound.is_group and not settings.group_auto_reply_enabled:
+        return {"sent": False, "reason": "group_auto_reply_disabled"}
 
     destination = inbound_reply_destination(inbound)
     if not destination:

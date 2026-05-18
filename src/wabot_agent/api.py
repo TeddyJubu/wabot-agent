@@ -36,7 +36,14 @@ from .auth import (
     resolve_human_factory,
     verify_human_factory,
 )
-from .auto_reply import deliver_auto_reply, deliver_inbound_error_reply
+from .auto_reply import (
+    deliver_auto_reply,
+    deliver_inbound_error_reply,
+    inbound_session_id,
+)
+from .recipients import is_owner_inbound
+from .tools import _is_send_allowed
+from .wabot import WabotError
 from .config import Settings, get_settings
 from .context_management import maybe_prune_audit_tables
 from .events import EventHub, EventLog
@@ -143,6 +150,156 @@ class SettingsPatch(BaseModel):
     confirm_allow_all: bool = False
 
 
+def _reminder_target_jid(reminder: dict[str, Any]) -> str:
+    return str(reminder.get("target_jid") or reminder.get("requester_jid") or "").strip()
+
+
+async def _fire_reminder(
+    reminder: dict[str, Any],
+    *,
+    settings: Settings,
+    memory: MemoryStore,
+    wabot: WabotClient,
+    hub: EventHub,
+    event_log: EventLog,
+) -> None:
+    reminder_id = str(reminder["id"])
+    target = _reminder_target_jid(reminder)
+    requester = str(reminder.get("requester_jid") or "")
+    fake_inbound = (
+        InboundMessage(id="", sender=requester, text="", chat=requester)
+        if requester
+        else None
+    )
+    allowed, policy = _is_send_allowed(settings, target, inbound=fake_inbound)
+    if not allowed:
+        memory.mark_reminder_fired(reminder_id, error=f"send_blocked:{policy}")
+        event_log.write(
+            "reminder_failed",
+            {"id": reminder_id, "reason": policy, "to": target},
+        )
+        hub.publish("reminder_failed", {"id": reminder_id, "reason": policy})
+        return
+
+    health = await wabot.health()
+    if not health.ready:
+        memory.mark_reminder_fired(reminder_id, error="wabot_not_ready")
+        return
+
+    try:
+        result = await wabot.send_text(to=target, text=str(reminder.get("message") or ""))
+    except WabotError as exc:
+        memory.mark_reminder_fired(reminder_id, error=str(exc))
+        hub.publish("reminder_failed", {"id": reminder_id, "error": redact(str(exc))})
+        return
+
+    memory.mark_reminder_fired(reminder_id)
+    payload = {"id": reminder_id, "to": target, "policy": policy, "result": redact(result)}
+    event_log.write("reminder_fired", payload)
+    hub.publish("reminder_fired", payload)
+
+
+async def _notify_outbound_expired(
+    task: dict[str, Any],
+    *,
+    settings: Settings,
+    wabot: WabotClient,
+    event_log: EventLog,
+    hub: EventHub,
+) -> None:
+    if not task.get("notify_owner"):
+        return
+    owner = str(task.get("owner_jid") or "")
+    target = str(task.get("target_jid") or "")
+    if not owner:
+        return
+    allowed, policy = _is_send_allowed(
+        settings,
+        owner,
+        inbound=InboundMessage(id="", sender=owner, text="", chat=owner),
+    )
+    if not allowed:
+        return
+    health = await wabot.health()
+    if not health.ready:
+        return
+    summary = (
+        f"No reply from {target} within the tracking window (task {task.get('id', '')})."
+    )
+    try:
+        await wabot.send_text(to=owner, text=summary)
+    except WabotError:
+        return
+    event_log.write("outbound_task_expired", {"id": task.get("id"), "owner": owner})
+    hub.publish("outbound_task_expired", {"id": task.get("id"), "target_jid": target})
+
+
+async def _handle_outbound_reply(
+    inbound: InboundMessage,
+    *,
+    settings: Settings,
+    memory: MemoryStore,
+    wabot: WabotClient,
+    event_log: EventLog,
+    hub: EventHub,
+) -> dict[str, Any] | None:
+    task = memory.find_pending_outbound_task(
+        sender=inbound.sender,
+        chat=inbound.chat,
+        is_group=inbound.is_group,
+    )
+    if task is None:
+        return None
+
+    task_id = str(task["id"])
+    memory.complete_outbound_task(
+        task_id,
+        reply_text=inbound.text,
+        reply_message_id=inbound.id,
+    )
+    owner = str(task.get("owner_jid") or "")
+    target = str(task.get("target_jid") or "")
+    if not task.get("notify_owner") or not owner:
+        hub.publish(
+            "outbound_task_completed",
+            {"id": task_id, "target_jid": target, "notify_owner": False},
+        )
+        return task
+
+    allowed, policy = _is_send_allowed(
+        settings,
+        owner,
+        inbound=InboundMessage(id="", sender=owner, text="", chat=owner),
+    )
+    if not allowed:
+        return task
+
+    health = await wabot.health()
+    if not health.ready:
+        return task
+
+    excerpt = (inbound.text or "")[:500]
+    summary = f'Update re: {target} — they replied: "{excerpt}" (task {task_id})'
+    try:
+        await wabot.send_text(to=owner, text=summary)
+    except WabotError as exc:
+        event_log.write(
+            "outbound_notify_failed",
+            {"task_id": task_id, "error": redact(str(exc))},
+        )
+        return task
+
+    event_log.write(
+        "outbound_task_completed",
+        {"id": task_id, "owner": owner, "policy": policy},
+    )
+    hub.publish(
+        "outbound_task_completed",
+        {"id": task_id, "target_jid": target, "reply_message_id": inbound.id},
+    )
+    return task
+
+
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     settings.ensure_dirs()
@@ -168,6 +325,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Pairing poller state — last published payload + the asyncio task handle.
     pairing_state: dict[str, Any] = {"last": None, "task": None}
+    scheduler_state: dict[str, Any] = {"task": None}
 
     def _pairing_payload(p: Any) -> dict[str, Any]:
         # Same shape as GET /api/whatsapp/pairing — keep them in sync so the
@@ -211,6 +369,39 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except asyncio.CancelledError:
                 return
 
+    async def _scheduler_loop() -> None:
+        from .memory import now_iso
+
+        interval = max(5.0, float(settings.reminder_poll_interval_sec))
+        while True:
+            try:
+                if settings.reminders_enabled:
+                    due = memory.claim_due_reminders(now=now_iso(), limit=20)
+                    for reminder in due:
+                        await _fire_reminder(
+                            reminder,
+                            settings=settings,
+                            memory=memory,
+                            wabot=wabot,
+                            hub=hub,
+                            event_log=event_log,
+                        )
+                expired = memory.expire_outbound_tasks(now=now_iso())
+                for task in expired:
+                    await _notify_outbound_expired(
+                        task,
+                        settings=settings,
+                        wabot=wabot,
+                        event_log=event_log,
+                        hub=hub,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                event_log.write("scheduler_loop_error", {"error": redact(str(exc))})
+            try:
+                await asyncio.sleep(interval)
+            except asyncio.CancelledError:
+                return
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         # Capture the running uvicorn loop so sync publishers (EventLog.write
@@ -220,14 +411,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         hub.bind_loop(asyncio.get_running_loop())
         maybe_prune_audit_tables(memory, settings, force=True)
         pairing_state["task"] = asyncio.create_task(_pairing_poll_loop())
+        scheduler_state["task"] = asyncio.create_task(_scheduler_loop())
         try:
             yield
         finally:
-            task = pairing_state.get("task")
-            if task is not None:
-                task.cancel()
+            pairing_task = pairing_state.get("task")
+            if pairing_task is not None:
+                pairing_task.cancel()
                 try:
-                    await task
+                    await pairing_task
+                except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                    pass
+            sched_task = scheduler_state.get("task")
+            if sched_task is not None:
+                sched_task.cancel()
+                try:
+                    await sched_task
                 except (asyncio.CancelledError, Exception):  # noqa: BLE001
                     pass
 
@@ -480,6 +679,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             has_media=payload.has_media,
         )
         memory.record_inbound(inbound)
+        if not is_owner_inbound(settings, inbound):
+            await _handle_outbound_reply(
+                inbound,
+                settings=settings,
+                memory=memory,
+                wabot=wabot,
+                event_log=event_log,
+                hub=hub,
+            )
         if not memory.claim_message(inbound.id, inbound.sender):
             return {"accepted": True, "duplicate": True, "message_id": inbound.id}
         event_log.write(
@@ -495,7 +703,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     event_log=event_log,
                     wabot=wabot,
                     inbound=inbound,
-                    session_id=inbound.sender,
+                    session_id=inbound_session_id(inbound),
                 )
         except Exception as exc:
             memory.fail_message(inbound.id, str(exc))

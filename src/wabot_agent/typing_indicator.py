@@ -44,7 +44,10 @@ async def inbound_typing_indicator(
     settings: Settings,
 ) -> AsyncIterator[None]:
     """Show WhatsApp 'typing…' while the agent processes an inbound message."""
-    if not settings.typing_indicator_enabled or inbound.is_group:
+    if not settings.typing_indicator_enabled:
+        yield
+        return
+    if inbound.is_group and not settings.group_typing_enabled:
         yield
         return
 

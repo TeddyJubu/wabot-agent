@@ -64,3 +64,37 @@ def test_owner_policy_owner_inbound_may_message_anyone() -> None:
     )
     assert allowed is True
     assert reason == "owner"
+
+
+def test_owner_policy_allows_group_chat_reply() -> None:
+    settings = Settings(
+        send_policy="owner",
+        owner_numbers={"+6580286424"},
+        allowed_recipients=set(),
+    )
+    inbound = InboundMessage(
+        id="g1",
+        sender="111@s.whatsapp.net",
+        text="hi",
+        chat="120363@g.us",
+        is_group=True,
+    )
+
+    owner_inbound = InboundMessage(
+        id="g2",
+        sender="6580286424@s.whatsapp.net",
+        text="post to group",
+        chat="120363@g.us",
+        is_group=True,
+    )
+    allowed_owner, reason_owner = _is_send_allowed(
+        settings, "120363@g.us", inbound=owner_inbound
+    )
+    assert allowed_owner is True
+    assert reason_owner == "owner"
+
+    allowed_reply, reason_reply = _is_send_allowed(
+        settings, "120363@g.us", inbound=inbound
+    )
+    assert allowed_reply is True
+    assert reason_reply == "reply_to_group_chat"

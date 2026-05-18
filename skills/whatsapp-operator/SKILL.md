@@ -40,6 +40,13 @@ Use this skill before changing WhatsApp state, sending messages, or handling inb
   (`whatsapp_receipt`, `whatsapp_presence`) when wabot webhooks are configured.
 - History sync backfill populates `inbound_messages` via `POST /whatsapp/history` (no auto-reply).
   Use inbox tools after linking; live traffic still arrives on `/whatsapp/inbound`.
+- **Group chats:** `chat` is the group JID (`@g.us`); `sender` is the participant. Auto-reply and
+  session history use `chat` as the session key. Reply with `send_whatsapp_text(to=chat, ...)`.
+  Under `send_policy=owner`, the group `chat` JID is an allowed send target (like reply_to_sender).
+  Add group JIDs to `WABOT_AGENT_ALLOWED_RECIPIENTS` when using `allowlist`.
+- **Outreach follow-up:** after messaging someone for the owner, use `track_outbound_conversation`
+  (or rely on auto-track on `send_whatsapp_text`). The owner gets a WhatsApp update when the
+  target replies. Use `list_outbound_tasks` / `get_outbound_task_status` for status checks.
 - Never send credentials, one-time codes, tokens, cookies, or session data.
 - Keep outbound messages clear and human-readable; be concise but answer the question fully.
 - Respect the configured send policy. If a recipient is blocked, explain the operator action needed.

@@ -63,6 +63,9 @@ look up. Do not give one-line non-answers when the user needs help.
 - To find and send an image: search_images → fetch_url_to_media → send_whatsapp_file to the
   requester. Do not claim you cannot browse the web without trying these tools first.
 - mark_whatsapp_read, send_whatsapp_typing — when appropriate for the conversation.
+- create_reminder / list_reminders / cancel_reminder — schedule WhatsApp reminders (ISO due_at).
+- track_outbound_conversation / list_outbound_tasks / get_outbound_task_status — owner outreach
+  follow-up; successful owner sends auto-track; you are notified when the target replies.
 - Groups, reactions, edits, mutes, archives — when the task requires them.
 
 ## Policy & safety
@@ -82,9 +85,12 @@ look up. Do not give one-line non-answers when the user needs help.
 
 ## Inbound auto-reply
 
-- Your **final** plain-text reply is sent to the sender automatically.
+- Your **final** plain-text reply is sent to the sender automatically (1:1 and groups when enabled).
+- In groups, `chat` is the group JID; `sender` is the participant — reply via send_whatsapp_text(to=chat).
 - Do not send_whatsapp_text to that same chat unless messaging a *different* recipient.
 - If they sent media, download and understand it before answering when relevant.
+- After messaging someone on the owner's behalf, use track_outbound_conversation (or rely on auto-track)
+  so the owner gets a WhatsApp update when they reply.
 """
 
 
@@ -520,8 +526,16 @@ def _augment_prompt(prompt: str, inbound: InboundMessage | None) -> str:
         "6) If WhatsApp status is unclear, call wabot_health.\n"
         "7) Then write your final reply (plain text only — it is sent automatically).\n\n"
     )
+    group_note = ""
+    if inbound.is_group:
+        group_note = (
+            "Group chat: reply to the group using send_whatsapp_text(to=chat, ...) when you need "
+            "an extra message; auto-reply posts to chat. Add the group JID to "
+            "WABOT_AGENT_ALLOWED_RECIPIENTS when send_policy=allowlist.\n"
+        )
     return (
         steps
+        + group_note
         + "Inbound WhatsApp message:\n"
         f"- message_id: {inbound.id}\n"
         f"- sender: {inbound.sender}\n"

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -63,8 +64,68 @@ def _is_send_allowed(
             return True, "owner"
         if inbound is not None and recipients_match(inbound.sender, to):
             return True, "reply_to_sender"
+        if (
+            inbound is not None
+            and inbound.is_group
+            and inbound.chat
+            and recipients_match(inbound.chat, to)
+        ):
+            return True, "reply_to_group_chat"
         return False, "recipient_not_allowed_for_non_owner"
     return False, "recipient_not_allowlisted"
+
+
+def _parse_due_at_iso(due_at: str) -> str | None:
+    text = due_at.strip()
+    if not text:
+        return None
+    try:
+        if text.endswith("Z"):
+            text = f"{text[:-1]}+00:00"
+        parsed = datetime.fromisoformat(text)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=UTC)
+        return parsed.astimezone(UTC).isoformat()
+    except ValueError:
+        return None
+
+
+def _requester_jid(ctx: RunContextWrapper[RuntimeContext]) -> str | None:
+    inbound = ctx.context.inbound
+    if inbound is None:
+        return None
+    sender = inbound.sender.strip()
+    return sender or None
+
+
+def _maybe_auto_track_outbound(
+    ctx: RunContextWrapper[RuntimeContext], *, to: str, send_result: dict[str, Any]
+) -> None:
+    inbound = ctx.context.inbound
+    if inbound is None or not _is_owner_session(ctx.context.settings, inbound):
+        return
+    destination = to.strip()
+    if not destination or recipients_match(inbound.sender, destination):
+        return
+    chat_jid = destination
+    if inbound.is_group and inbound.chat and recipients_match(inbound.chat, destination):
+        chat_jid = inbound.chat.strip()
+    expires_at = ctx.context.memory.outbound_expires_at(
+        days=ctx.context.settings.outbound_task_expiry_days
+    )
+    sent_message_id: str | None = None
+    raw = send_result.get("result") if isinstance(send_result.get("result"), dict) else None
+    if raw:
+        sent_message_id = raw.get("message_id") or raw.get("id")
+    ctx.context.memory.create_outbound_task(
+        owner_jid=inbound.sender,
+        target_jid=destination,
+        chat_jid=chat_jid,
+        prompt_summary=None,
+        sent_message_id=str(sent_message_id) if sent_message_id else None,
+        notify_owner=True,
+        expires_at=expires_at,
+    )
 
 
 def _media_path_allowed(settings: Settings, path: str) -> tuple[bool, Path | None, str | None]:
@@ -246,6 +307,7 @@ async def send_whatsapp_text(
     result = await ctx.context.wabot.send_text(to=to, text=text)
     ctx.context.record_sent(to)
     payload = {"sent": True, "policy": reason, "to": mask_phone(to), "result": redact(result)}
+    _maybe_auto_track_outbound(ctx, to=to, send_result={"result": result})
     ctx.context.memory.record_tool_event(ctx.context.run_id, "send_whatsapp_text", payload)
     ctx.context.event_log.write("send_text", payload)
     return payload
@@ -977,6 +1039,158 @@ async def fetch_url_to_media(
     return redact(payload)
 
 
+@function_tool
+async def create_reminder(
+    ctx: RunContextWrapper[RuntimeContext],
+    message: str,
+    due_at: str,
+    target_jid: str | None = None,
+    idempotency_key: str | None = None,
+) -> dict[str, Any]:
+    """Schedule a WhatsApp reminder at due_at (ISO-8601 UTC, e.g. 2026-05-19T14:00:00+00:00)."""
+    requester = _requester_jid(ctx)
+    if requester is None:
+        payload = {"created": False, "reason": "no_inbound_requester"}
+        ctx.context.memory.record_tool_event(ctx.context.run_id, "create_reminder", payload)
+        return payload
+
+    if not ctx.context.settings.reminders_enabled:
+        payload = {"created": False, "reason": "reminders_disabled"}
+        ctx.context.memory.record_tool_event(ctx.context.run_id, "create_reminder", payload)
+        return payload
+
+    due_iso = _parse_due_at_iso(due_at)
+    if due_iso is None:
+        payload = {"created": False, "reason": "invalid_due_at", "due_at": due_at}
+        ctx.context.memory.record_tool_event(ctx.context.run_id, "create_reminder", payload)
+        return payload
+
+    pending = ctx.context.memory.count_pending_reminders(requester)
+    cap = ctx.context.settings.reminder_max_pending_per_contact
+    if pending >= cap:
+        payload = {
+            "created": False,
+            "reason": "pending_limit",
+            "pending": pending,
+            "limit": cap,
+        }
+        ctx.context.memory.record_tool_event(ctx.context.run_id, "create_reminder", payload)
+        return payload
+
+    payload = ctx.context.memory.create_reminder(
+        requester_jid=requester,
+        message=message,
+        due_at=due_iso,
+        target_jid=target_jid,
+        idempotency_key=idempotency_key,
+    )
+    ctx.context.memory.record_tool_event(ctx.context.run_id, "create_reminder", payload)
+    ctx.context.event_log.write("reminder_created", redact(payload))
+    return redact(payload)
+
+
+@function_tool
+async def list_reminders(
+    ctx: RunContextWrapper[RuntimeContext],
+    status: str | None = None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """List scheduled reminders for the current requester (or all when no inbound)."""
+    requester = _requester_jid(ctx)
+    rows = ctx.context.memory.list_reminders(
+        requester_jid=requester,
+        status=status,
+        limit=limit,
+    )
+    payload = {"count": len(rows), "reminders": rows}
+    ctx.context.memory.record_tool_event(ctx.context.run_id, "list_reminders", payload)
+    return redact(payload)
+
+
+@function_tool
+async def cancel_reminder(
+    ctx: RunContextWrapper[RuntimeContext],
+    reminder_id: str,
+) -> dict[str, Any]:
+    """Cancel a pending reminder by id."""
+    requester = _requester_jid(ctx)
+    payload = ctx.context.memory.cancel_reminder(
+        reminder_id, requester_jid=requester
+    )
+    ctx.context.memory.record_tool_event(ctx.context.run_id, "cancel_reminder", payload)
+    return redact(payload)
+
+
+@function_tool
+async def track_outbound_conversation(
+    ctx: RunContextWrapper[RuntimeContext],
+    target_jid: str,
+    chat_jid: str | None = None,
+    prompt_summary: str | None = None,
+    notify_owner: bool = True,
+) -> dict[str, Any]:
+    """Track an outbound message and notify the owner when the target replies."""
+    inbound = ctx.context.inbound
+    if inbound is None or not _is_owner_session(ctx.context.settings, inbound):
+        payload = {"created": False, "reason": "owner_session_required"}
+        ctx.context.memory.record_tool_event(
+            ctx.context.run_id, "track_outbound_conversation", payload
+        )
+        return payload
+
+    chat = (chat_jid or target_jid).strip()
+    expires_at = ctx.context.memory.outbound_expires_at(
+        days=ctx.context.settings.outbound_task_expiry_days
+    )
+    payload = ctx.context.memory.create_outbound_task(
+        owner_jid=inbound.sender,
+        target_jid=target_jid.strip(),
+        chat_jid=chat,
+        prompt_summary=prompt_summary,
+        notify_owner=notify_owner,
+        expires_at=expires_at,
+    )
+    ctx.context.memory.record_tool_event(
+        ctx.context.run_id, "track_outbound_conversation", payload
+    )
+    return redact(payload)
+
+
+@function_tool
+async def get_outbound_task_status(
+    ctx: RunContextWrapper[RuntimeContext],
+    task_id: str,
+) -> dict[str, Any]:
+    """Return status and reply details for a tracked outbound conversation."""
+    task = ctx.context.memory.get_outbound_task(task_id)
+    if task is None:
+        payload = {"found": False, "id": task_id}
+    else:
+        payload = {"found": True, **task}
+    ctx.context.memory.record_tool_event(
+        ctx.context.run_id, "get_outbound_task_status", {"id": task_id, "found": task is not None}
+    )
+    return redact(payload)
+
+
+@function_tool
+async def list_outbound_tasks(
+    ctx: RunContextWrapper[RuntimeContext],
+    status: str | None = None,
+    limit: int = 20,
+) -> dict[str, Any]:
+    """List outbound conversation tasks for the owner (awaiting_reply, completed, expired)."""
+    owner = _requester_jid(ctx)
+    rows = ctx.context.memory.list_outbound_tasks(
+        owner_jid=owner,
+        status=status,
+        limit=limit,
+    )
+    payload = {"count": len(rows), "tasks": rows}
+    ctx.context.memory.record_tool_event(ctx.context.run_id, "list_outbound_tasks", payload)
+    return redact(payload)
+
+
 def core_tools() -> list[Any]:
     return [
         wabot_health,
@@ -1016,4 +1230,10 @@ def core_tools() -> list[Any]:
         remember_agent_note,
         list_local_skills,
         read_local_skill,
+        create_reminder,
+        list_reminders,
+        cancel_reminder,
+        track_outbound_conversation,
+        get_outbound_task_status,
+        list_outbound_tasks,
     ]

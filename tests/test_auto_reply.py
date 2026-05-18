@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from wabot_agent.agent import AgentRunResult
 from wabot_agent.api import create_app
-from wabot_agent.auto_reply import deliver_auto_reply
+from wabot_agent.auto_reply import deliver_auto_reply, inbound_session_id
 from wabot_agent.config import Settings
 from wabot_agent.memory import InboundMessage
 from wabot_agent.wabot import FakeWabotClient
@@ -105,3 +105,80 @@ def test_inbound_webhook_wires_auto_reply(tmp_path: Path, monkeypatch: pytest.Mo
     assert resp.json()["auto_reply"]["sent"] is True
     assert len(calls) == 1
     assert calls[0]["inbound"].sender == "+15550001111"  # type: ignore[index]
+
+
+@pytest.mark.asyncio
+async def test_deliver_auto_reply_sends_to_group_when_enabled(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    settings = settings.model_copy(
+        update={
+            "group_auto_reply_enabled": True,
+            "allowed_recipients": {"+15550001111", "120363@g.us"},
+        }
+    )
+    wabot = FakeWabotClient()
+    inbound = InboundMessage(
+        id="g1",
+        sender="111@s.whatsapp.net",
+        text="hello group",
+        chat="120363@g.us",
+        is_group=True,
+    )
+    result = AgentRunResult(
+        run_id="run-g1",
+        final_output="Hi everyone!",
+        session_id="120363@g.us",
+        live_model=False,
+    )
+
+    auto = await deliver_auto_reply(
+        settings=settings, wabot=wabot, inbound=inbound, result=result
+    )
+
+    assert auto["sent"] is True
+    assert wabot.sent[0]["to"] == "120363@g.us"
+
+
+@pytest.mark.asyncio
+async def test_deliver_auto_reply_skips_group_when_disabled(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    settings = settings.model_copy(update={"group_auto_reply_enabled": False})
+    wabot = FakeWabotClient()
+    inbound = InboundMessage(
+        id="g2",
+        sender="111@s.whatsapp.net",
+        text="hello",
+        chat="120363@g.us",
+        is_group=True,
+    )
+    result = AgentRunResult(
+        run_id="run-g2",
+        final_output="nope",
+        session_id="120363@g.us",
+        live_model=False,
+    )
+
+    auto = await deliver_auto_reply(
+        settings=settings, wabot=wabot, inbound=inbound, result=result
+    )
+
+    assert auto["sent"] is False
+    assert auto["reason"] == "group_auto_reply_disabled"
+
+
+def test_inbound_session_id_uses_chat_for_groups() -> None:
+    dm = InboundMessage(
+        id="d1",
+        sender="+15550001111",
+        text="hi",
+        chat="+15550001111",
+    )
+    group = InboundMessage(
+        id="g1",
+        sender="111@s.whatsapp.net",
+        text="hi",
+        chat="120363@g.us",
+        is_group=True,
+    )
+    assert inbound_session_id(dm) == "+15550001111"
+    assert inbound_session_id(group) == "120363@g.us"

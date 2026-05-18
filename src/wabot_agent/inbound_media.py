@@ -32,7 +32,7 @@ async def build_inbound_file_context(
     """Download and process inbound attachments on the VPS; return prompt context."""
     if inbound is None or not inbound.has_media or not settings.file_process_inbound:
         return ""
-    if inbound.is_group:
+    if inbound.is_group and not settings.group_process_media:
         return ""
 
     downloaded = await download_inbound_media(wabot, inbound, settings)

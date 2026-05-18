@@ -45,9 +45,9 @@ async def test_typing_indicator_sends_composing_and_paused(tmp_path: Path) -> No
 
 
 @pytest.mark.asyncio
-async def test_typing_indicator_skips_groups(tmp_path: Path) -> None:
+async def test_typing_indicator_skips_groups_when_disabled(tmp_path: Path) -> None:
     wabot = FakeWabotClient()
-    settings = _settings(tmp_path)
+    settings = _settings(tmp_path, WABOT_AGENT_GROUP_TYPING=False)
     inbound = InboundMessage(
         id="m2",
         sender="+15550001111",
@@ -60,6 +60,24 @@ async def test_typing_indicator_skips_groups(tmp_path: Path) -> None:
         pass
 
     assert wabot.typing_calls == []
+
+
+@pytest.mark.asyncio
+async def test_typing_indicator_works_in_groups_when_enabled(tmp_path: Path) -> None:
+    wabot = FakeWabotClient()
+    settings = _settings(tmp_path, WABOT_AGENT_GROUP_TYPING=True)
+    inbound = InboundMessage(
+        id="m2b",
+        sender="+15550001111",
+        text="hello",
+        chat="120363@g.us",
+        is_group=True,
+    )
+
+    async with inbound_typing_indicator(wabot, inbound, settings):
+        assert any(c["state"] == "composing" for c in wabot.typing_calls)
+
+    assert wabot.typing_calls[-1]["to"] == "120363@g.us"
 
 
 @pytest.mark.asyncio

@@ -243,6 +243,51 @@ class Settings(BaseSettings):
             "WABOT_AGENT_AUTO_REPLY", "VIGNESH_AUTO_REPLY", "WABOT_AGENT_AUTO_REPLY_ENABLED"
         ),
     )
+    group_auto_reply_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_GROUP_AUTO_REPLY", "VIGNESH_GROUP_AUTO_REPLY"
+        ),
+    )
+    group_typing_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_GROUP_TYPING", "VIGNESH_GROUP_TYPING"
+        ),
+    )
+    group_process_media: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_GROUP_PROCESS_MEDIA", "VIGNESH_GROUP_PROCESS_MEDIA"
+        ),
+    )
+    reminders_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_REMINDERS_ENABLED", "VIGNESH_REMINDERS_ENABLED"
+        ),
+    )
+    reminder_poll_interval_sec: float = Field(
+        default=30.0,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_REMINDER_POLL_INTERVAL_SEC",
+            "VIGNESH_REMINDER_POLL_INTERVAL_SEC",
+        ),
+    )
+    reminder_max_pending_per_contact: int = Field(
+        default=50,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_REMINDER_MAX_PENDING_PER_CONTACT",
+            "VIGNESH_REMINDER_MAX_PENDING_PER_CONTACT",
+        ),
+    )
+    outbound_task_expiry_days: int = Field(
+        default=7,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_OUTBOUND_TASK_EXPIRY_DAYS",
+            "VIGNESH_OUTBOUND_TASK_EXPIRY_DAYS",
+        ),
+    )
     typing_indicator_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices(
