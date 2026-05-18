@@ -15,6 +15,9 @@ from .config import Settings
 
 _CHARS_PER_TOKEN = 4
 _IMAGE_OMITTED = "[image omitted from context to save tokens]"
+_IMAGE_PART_TYPES = frozenset(
+    {"input_image", "image_url", "image", "image_file", "input_image_url"}
+)
 _TRUNCATED = "\n\n[… truncated for context limits …]"
 
 
@@ -75,6 +78,43 @@ def _shrink_content_part(part: Any, remaining_chars: int) -> Any:
         if key in part and isinstance(part[key], str) and len(part[key]) > remaining_chars:
             part[key] = part[key][:remaining_chars] + _TRUNCATED
     return part
+
+
+def strip_images_from_session_item(item: Any) -> Any:
+    """Convert stored multimodal turns to plain text (avoids invalid image errors on replay)."""
+    if not isinstance(item, dict):
+        return item
+
+    content = item.get("content")
+    if isinstance(content, str):
+        return item
+    if not isinstance(content, list):
+        if item.get("type") in _IMAGE_PART_TYPES:
+            return {"role": item.get("role", "user"), "content": _IMAGE_OMITTED}
+        return item
+
+    text_parts: list[str] = []
+    had_image = False
+    for part in content:
+        if isinstance(part, str):
+            text_parts.append(part)
+            continue
+        if not isinstance(part, dict):
+            continue
+        part_type = str(part.get("type", ""))
+        if part_type in _IMAGE_PART_TYPES or "image_url" in part:
+            had_image = True
+            continue
+        for key in ("text", "input_text", "output_text", "content"):
+            value = part.get(key)
+            if isinstance(value, str) and value.strip():
+                text_parts.append(value.strip())
+
+    role = item.get("role", "user")
+    body = "\n".join(text_parts).strip()
+    if had_image:
+        body = f"{body}\n{_IMAGE_OMITTED}" if body else _IMAGE_OMITTED
+    return {"role": role, "content": body or _IMAGE_OMITTED}
 
 
 def shrink_item_for_context(item: Any, max_chars: int) -> Any:
@@ -258,6 +298,10 @@ def make_session_input_callback(
             )
             if updated:
                 prefix = [summary_message_item(updated)]
+
+        # History must be text-only: replayed data: URLs break Ollama/OpenRouter vision.
+        prefix = [strip_images_from_session_item(item) for item in prefix]
+        kept = [strip_images_from_session_item(item) for item in kept]
 
         return prefix + kept + new_items
 

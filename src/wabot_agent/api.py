@@ -36,7 +36,7 @@ from .auth import (
     resolve_human_factory,
     verify_human_factory,
 )
-from .auto_reply import deliver_auto_reply
+from .auto_reply import deliver_auto_reply, deliver_inbound_error_reply
 from .config import Settings, get_settings
 from .context_management import maybe_prune_audit_tables
 from .events import EventHub, EventLog
@@ -503,13 +503,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "inbound_message_failed",
                 {"message_id": inbound.id, "sender": inbound.sender, "error": str(exc)},
             )
+            error_reply = await deliver_inbound_error_reply(
+                settings=settings,
+                wabot=wabot,
+                inbound=inbound,
+                error=str(exc),
+            )
+            if error_reply.get("sent"):
+                event_log.write(
+                    "auto_reply_sent",
+                    {
+                        "message_id": inbound.id,
+                        "sender": inbound.sender,
+                        "to": error_reply.get("to"),
+                        "policy": error_reply.get("policy"),
+                        "reason": "agent_error_fallback",
+                    },
+                )
             # Message is already in inbound_messages; do not fail the webhook or
             # wabot will treat delivery as unsuccessful and the inbox stays empty.
             return {
                 "accepted": True,
                 "duplicate": False,
                 "message_id": inbound.id,
-                "auto_reply": False,
+                "auto_reply": error_reply,
                 "agent_error": redact(str(exc)),
             }
         memory.complete_message(inbound.id, result.run_id)

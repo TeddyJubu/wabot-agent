@@ -15,6 +15,7 @@ from wabot_agent.context_management import (
     make_session_input_callback,
     prune_agent_session_messages,
     split_history_by_token_budget,
+    strip_images_from_session_item,
     trim_history_for_tokens,
 )
 from wabot_agent.memory import MemoryStore
@@ -61,6 +62,21 @@ def _init_agent_messages(db_path: Path, session_id: str, count: int) -> None:
         )
     conn.commit()
     conn.close()
+
+
+def test_strip_images_from_session_item_removes_image_parts() -> None:
+    item = {
+        "role": "user",
+        "content": [
+            {"type": "input_text", "text": "find google logo"},
+            {"type": "input_image", "image_url": "data:image/png;base64,abc"},
+        ],
+    }
+    stripped = strip_images_from_session_item(item)
+    assert stripped["role"] == "user"
+    assert isinstance(stripped["content"], str)
+    assert "google logo" in stripped["content"]
+    assert "image omitted" in stripped["content"]
 
 
 def test_cap_turn_prompt_truncates_long_text() -> None:
