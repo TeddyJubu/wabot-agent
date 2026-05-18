@@ -22,7 +22,7 @@ from .events import EventLog
 from .inbound_media import build_inbound_file_context, voice_transcript_from_context
 from .mcp import connected_mcp_servers
 from .mem0_store import capture_turn_mem0, inject_mem0_context, mem0_enabled
-from .memory import InboundMessage, MemoryStore
+from .memory import InboundMessage, MemoryStore, inbound_memory_contact_id
 from .models import build_model, model_settings
 from .output_sanitize import strip_model_thinking
 from .redaction import redact
@@ -52,15 +52,29 @@ look up. Do not give one-line non-answers when the user needs help.
 6. **Persist** — After acting, save anything important they said or you committed to (Memory).
 7. **Respond** — Give a clear, human answer. For WhatsApp auto-replies, your final message
    is what the person reads (no tool names, no JSON, no <thinking> blocks).
+"""
 
-## Memory (mandatory — do not skip)
+INSTRUCTIONS_MEMORY_SQLITE = """## Memory (structured facts)
+
+Before answering, call `recall_contact_memory` when prior context may matter.
+Before your final reply, call `remember_contact_fact` for crisp key/value items
+(e.g. `timezone`, `preferred_name`) and `remember_agent_note` only for global operator rules.
+
+**What counts as important:** names and roles, preferences, recurring requests, open tasks,
+relationships ("message John when…"), business details, and corrections to prior mistakes.
+**Do not store:** passwords, OTPs, API keys, full card numbers, or clinical patient records.
+In group chats, use `contact` = the group `chat` JID (same scope as the conversation).
+"""
+
+INSTRUCTIONS_MEMORY_MEM0 = """## Memory (mandatory — do not skip)
 
 You must **actively** maintain long-term memory. Do not rely on the current thread alone.
 
 **Before you answer (every inbound turn):**
 - Call `search_mem0_memories` with a short query about the topic and `user_id` = sender
   (or group `chat` JID in groups).
-- Call `recall_contact_memory` for the same contact when you need structured facts.
+- Call `recall_contact_memory` with the same id (`contact` = sender in DMs,
+  group `chat` JID in groups).
 - Use what you find; if memory is empty, say so only when they explicitly ask "do you remember…"
 
 **After you understand the message — save important facts before your final reply:**
@@ -69,19 +83,15 @@ You must **actively** maintain long-term memory. Do not rely on the current thre
 - Call `remember_contact_fact` for crisp key/value items (e.g. `timezone`, `preferred_name`).
 - Call `remember_agent_note` only for global operator-wide rules (not per-contact secrets).
 
-**What counts as important:** names and roles, preferences, recurring requests, open tasks,
-relationships ("message John when…"), business details, and corrections to prior mistakes.
-**Do not store:** passwords, OTPs, API keys, full card numbers, or clinical patient records.
-
 Mem0 may auto-capture the conversation when enabled — still call `add_mem0_memory` or
 `remember_contact_fact` for facts you must not lose, so they are explicit and searchable.
+"""
 
-## Tools (use them proactively)
+INSTRUCTIONS_TOOLS = """## Tools (use them proactively)
 
 - wabot_health — before assuming WhatsApp is linked.
 - list_whatsapp_inbound_messages / get_last_whatsapp_inbound_message — who messaged, context.
 - recall_contact_memory / remember_contact_fact — per-contact key/value facts (SQLite).
-- search_mem0_memories / add_mem0_memory / mem0_status — semantic long-term memory (Mem0).
 - lookup_whatsapp_contacts — before messaging unknown numbers.
 - Inbound files are downloaded and processed on the VPS automatically (text/PDF/zip excerpts).
 - process_vps_file / process_whatsapp_attachment — re-read or process attachments on demand.
@@ -115,8 +125,13 @@ Mem0 may auto-capture the conversation when enabled — still call `add_mem0_mem
 - Sound natural on WhatsApp; avoid corporate filler and lazy "I can't help with that"
   without trying tools first.
 - Pairing QR: direct operators to /pair (after /login), not the chat bot.
+"""
 
-## Inbound auto-reply
+INSTRUCTIONS_TOOLS_MEM0 = (
+    "- search_mem0_memories / add_mem0_memory / mem0_status — semantic long-term memory (Mem0).\n"
+)
+
+INSTRUCTIONS_INBOUND = """## Inbound auto-reply
 
 - Your **final** plain-text reply is sent to the sender automatically
   (1:1 and groups when enabled).
@@ -138,9 +153,28 @@ class AgentRunResult:
     sent_destinations: frozenset[str] = frozenset()
 
 
+def build_agent_instructions(settings: Settings, skill_summary: str) -> str:
+    memory_block = (
+        INSTRUCTIONS_MEMORY_MEM0
+        if mem0_enabled(settings)
+        else INSTRUCTIONS_MEMORY_SQLITE
+    )
+    tools_block = INSTRUCTIONS_TOOLS
+    if mem0_enabled(settings):
+        tools_block = tools_block.replace(
+            "- lookup_whatsapp_contacts",
+            f"{INSTRUCTIONS_TOOLS_MEM0}- lookup_whatsapp_contacts",
+            1,
+        )
+    return (
+        f"{INSTRUCTIONS}{memory_block}{tools_block}{INSTRUCTIONS_INBOUND}\n\n"
+        f"Installed local skills:\n{skill_summary}\n"
+    )
+
+
 def build_agent(settings: Settings, mcp_servers: list[Any] | None = None) -> Agent[RuntimeContext]:
     skill_summary = render_skill_summary(settings.skills_dir)
-    instructions = f"{INSTRUCTIONS}\n\nInstalled local skills:\n{skill_summary}\n"
+    instructions = build_agent_instructions(settings, skill_summary)
     return Agent[RuntimeContext](
         name="wabot-agent-whatsapp-operator",
         instructions=instructions,
@@ -174,7 +208,7 @@ async def run_agent(
     )
     event_log.write("agent_run_start", {"run_id": run_id, "session_id": session_key})
 
-    augmented = _augment_prompt(prompt, inbound)
+    augmented = _augment_prompt(prompt, inbound, settings)
     file_context = await build_inbound_file_context(
         inbound, settings=settings, wabot=context.wabot
     )
@@ -287,7 +321,7 @@ async def run_agent_streamed(
     )
     event_log.write("agent_run_start", {"run_id": run_id, "session_id": session_key})
 
-    augmented = _augment_prompt(prompt, inbound)
+    augmented = _augment_prompt(prompt, inbound, settings)
     file_context = await build_inbound_file_context(
         inbound, settings=settings, wabot=context.wabot
     )
@@ -571,16 +605,39 @@ def _tool_output_ok(item: Any) -> bool:
     return True
 
 
-def _augment_prompt(prompt: str, inbound: InboundMessage | None) -> str:
+def _augment_prompt(
+    prompt: str, inbound: InboundMessage | None, settings: Settings
+) -> str:
     if inbound is None:
         return prompt
-    memory_user = (inbound.chat or inbound.sender).strip() if inbound.is_group else inbound.sender
+    memory_user = inbound_memory_contact_id(inbound)
+    mem0_on = mem0_enabled(settings)
+    if mem0_on:
+        recall_step = (
+            f"2) Recall memory for contact={memory_user}: call search_mem0_memories "
+            f"(user_id={memory_user}, query the topic) and recall_contact_memory "
+            f"(contact={memory_user}).\n"
+        )
+        persist_step = (
+            f"7) If they shared anything important (preferences, names, deadlines, standing "
+            f"requests, or said remember/don't forget), call add_mem0_memory (user_id="
+            f"{memory_user}) and/or remember_contact_fact (contact={memory_user}) BEFORE "
+            "your final reply.\n"
+        )
+    else:
+        recall_step = (
+            f"2) Recall memory: call recall_contact_memory (contact={memory_user}) when "
+            "prior context may matter.\n"
+        )
+        persist_step = (
+            f"7) If they shared anything important, call remember_contact_fact "
+            f"(contact={memory_user}) BEFORE your final reply.\n"
+        )
     steps = (
         "Before you answer this inbound WhatsApp message:\n"
         "1) Decide what they need.\n"
-        f"2) Recall memory for user_id={memory_user}: call search_mem0_memories (query the "
-        "topic) and recall_contact_memory (contact=sender).\n"
-        "3) If you need thread context, call get_last_whatsapp_inbound_message or "
+        + recall_step
+        + "3) If you need thread context, call get_last_whatsapp_inbound_message or "
         "list_whatsapp_inbound_messages.\n"
         "4) For requests to find/download/send files from the internet, use search_images or "
         "search_web, then fetch_url_to_media, then send_whatsapp_file to the sender. "
@@ -591,10 +648,8 @@ def _augment_prompt(prompt: str, inbound: InboundMessage | None) -> str:
         "claim you cannot read a PDF when an excerpt is present. Photos also attach for vision. "
         "Use process_whatsapp_attachment only if processing failed or you need a refresh.\n"
         "6) If WhatsApp status is unclear, call wabot_health.\n"
-        "7) If they shared anything important (preferences, names, deadlines, standing requests, "
-        "or said remember/don't forget), call add_mem0_memory and/or remember_contact_fact "
-        f"for user_id={memory_user} BEFORE your final reply.\n"
-        "8) Then write your final reply (plain text only — it is sent automatically).\n\n"
+        + persist_step
+        + "8) Then write your final reply (plain text only — it is sent automatically).\n\n"
     )
     group_note = ""
     if inbound.is_group:

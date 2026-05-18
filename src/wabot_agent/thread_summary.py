@@ -3,8 +3,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-logger = logging.getLogger(__name__)
-
 from openai import AsyncOpenAI
 
 from .config import Settings
@@ -15,6 +13,8 @@ from .llm_provider import (
     resolved_llm_api_key,
     resolved_llm_base_url,
 )
+
+logger = logging.getLogger(__name__)
 
 _SUMMARY_SYSTEM = """You compress WhatsApp agent conversation history for long-running threads.
 Produce a concise factual summary the agent can use on the next turn.

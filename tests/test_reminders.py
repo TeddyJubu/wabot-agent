@@ -49,7 +49,7 @@ def test_cancel_reminder(memory: MemoryStore) -> None:
 
 def test_release_reminder_claim(memory: MemoryStore) -> None:
     past = (datetime.now(UTC) - timedelta(minutes=5)).isoformat()
-    created = memory.create_reminder(
+    memory.create_reminder(
         requester_jid="owner@s.whatsapp.net",
         message="retry me",
         due_at=past,
