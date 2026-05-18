@@ -89,12 +89,14 @@ look up. Do not give one-line non-answers when the user needs help.
 
 ## Inbound auto-reply
 
-- Your **final** plain-text reply is sent to the sender automatically (1:1 and groups when enabled).
-- In groups, `chat` is the group JID; `sender` is the participant — reply via send_whatsapp_text(to=chat).
+- Your **final** plain-text reply is sent to the sender automatically
+  (1:1 and groups when enabled).
+- In groups, `chat` is the group JID; `sender` is the participant —
+  reply via send_whatsapp_text(to=chat).
 - Do not send_whatsapp_text to that same chat unless messaging a *different* recipient.
 - If they sent media, download and understand it before answering when relevant.
-- After messaging someone on the owner's behalf, use track_outbound_conversation (or rely on auto-track)
-  so the owner gets a WhatsApp update when they reply.
+- After messaging someone on the owner's behalf, use track_outbound_conversation
+  (or rely on auto-track) so the owner gets a WhatsApp update when they reply.
 """
 
 

@@ -69,7 +69,7 @@ async def test_execute_web_research_job_saves_and_completes(tmp_path) -> None:
     )
     settings.ensure_dirs()
     memory = MemoryStore(settings.db_path)
-    job = memory.create_web_research_job(
+    memory.create_web_research_job(
         requester_jid="owner@s.whatsapp.net",
         prompt="test",
         output_format="csv",

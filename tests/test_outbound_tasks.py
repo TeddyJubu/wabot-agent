@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from wabot_agent.memory import InboundMessage, MemoryStore, now_iso
+from wabot_agent.memory import MemoryStore, now_iso
 
 
 @pytest.fixture

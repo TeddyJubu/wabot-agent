@@ -41,14 +41,12 @@ from .auto_reply import (
     deliver_inbound_error_reply,
     inbound_session_id,
 )
-from .recipients import is_owner_inbound
-from .tools import _is_send_allowed
-from .wabot import WabotError
 from .config import Settings, get_settings
 from .context_management import maybe_prune_audit_tables
 from .events import EventHub, EventLog
 from .llm_provider import active_model_id, llm_provider_label
 from .memory import InboundMessage, MemoryStore
+from .recipients import is_owner_inbound
 from .redaction import redact
 from .runtime_overrides import (
     MUTABLE_FIELDS,
@@ -58,8 +56,9 @@ from .runtime_overrides import (
     mask_secret,
     save_overrides,
 )
+from .tools import _is_send_allowed
 from .typing_indicator import inbound_typing_indicator
-from .wabot import WabotClient
+from .wabot import WabotClient, WabotError
 from .wabot_process import WabotRestartError, restart_wabot_daemon, wait_for_fresh_pairing
 
 

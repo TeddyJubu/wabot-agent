@@ -634,7 +634,9 @@ class MemoryStore:
             rows = conn.execute(query, params).fetchall()
         return [redact(dict(row)) for row in rows]
 
-    def cancel_reminder(self, reminder_id: str, *, requester_jid: str | None = None) -> dict[str, Any]:
+    def cancel_reminder(
+        self, reminder_id: str, *, requester_jid: str | None = None
+    ) -> dict[str, Any]:
         with self.connect() as conn:
             if requester_jid:
                 cur = conn.execute(
@@ -737,7 +739,12 @@ class MemoryStore:
                     expires_at,
                 ),
             )
-        return {"created": True, "id": task_id, "status": "awaiting_reply", "expires_at": expires_at}
+        return {
+            "created": True,
+            "id": task_id,
+            "status": "awaiting_reply",
+            "expires_at": expires_at,
+        }
 
     def get_outbound_task(self, task_id: str) -> dict[str, Any] | None:
         with self.connect() as conn:
