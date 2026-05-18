@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 from openai import AsyncOpenAI
 
@@ -99,7 +102,8 @@ async def summarize_thread(
             max_tokens=settings.session_summary_max_output_tokens,
             temperature=0.2,
         )
-    except Exception:
+    except Exception as exc:
+        logger.warning("session_summary_llm_failed: %s", exc)
         return _fallback_summary(
             dropped_items, prior_summary=prior_summary, max_chars=max_chars
         )

@@ -213,6 +213,10 @@ async def _notify_web_research_done(
 
     health = await wabot.health()
     if not health.ready:
+        event_log.write(
+            "web_research_notify_skipped",
+            {"id": job_id, "reason": "wabot_not_ready"},
+        )
         return
 
     try:

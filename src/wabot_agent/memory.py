@@ -34,6 +34,13 @@ class InboundMessage:
     has_media: bool = False
 
 
+def inbound_memory_contact_id(inbound: InboundMessage) -> str:
+    """Scope for Mem0, SQLite contact facts, and agent session id (group chat JID or DM sender)."""
+    if inbound.is_group:
+        return (inbound.chat or inbound.sender).strip()
+    return inbound.sender.strip()
+
+
 class MemoryStore:
     def __init__(self, path: Path | str):
         self.path = Path(path)
@@ -692,6 +699,19 @@ class MemoryStore:
                 if full is not None:
                     claimed.append(dict(full))
         return claimed
+
+    def release_reminder_claim(self, reminder_id: str) -> bool:
+        """Return a processing reminder to pending so the scheduler can retry."""
+        with self.connect() as conn:
+            cur = conn.execute(
+                """
+                update scheduled_reminders
+                set status = 'pending', error = null
+                where id = ? and status = 'processing'
+                """,
+                (reminder_id,),
+            )
+        return cur.rowcount == 1
 
     def mark_reminder_fired(self, reminder_id: str, *, error: str | None = None) -> None:
         status = "failed" if error else "fired"

@@ -47,6 +47,21 @@ def test_cancel_reminder(memory: MemoryStore) -> None:
     assert rows == []
 
 
+def test_release_reminder_claim(memory: MemoryStore) -> None:
+    past = (datetime.now(UTC) - timedelta(minutes=5)).isoformat()
+    created = memory.create_reminder(
+        requester_jid="owner@s.whatsapp.net",
+        message="retry me",
+        due_at=past,
+    )
+    claimed = memory.claim_due_reminders(now=now_iso(), limit=5)
+    reminder_id = str(claimed[0]["id"])
+    assert memory.release_reminder_claim(reminder_id) is True
+    rows = memory.list_reminders(requester_jid="owner@s.whatsapp.net", status="pending")
+    assert len(rows) == 1
+    assert rows[0]["status"] == "pending"
+
+
 def test_claim_due_reminders_atomic(memory: MemoryStore) -> None:
     past = (datetime.now(UTC) - timedelta(minutes=5)).isoformat()
     memory.create_reminder(

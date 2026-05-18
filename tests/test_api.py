@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from wabot_agent.api import _qr_svg, create_app
@@ -150,6 +151,24 @@ def test_inbound_requires_token(tmp_path: Path) -> None:
     payload = {"id": "msg-1", "from": "+15550001111", "text": "hello"}
 
     assert client.post("/whatsapp/inbound", json=payload).status_code == 401
+
+
+def test_requires_inbound_token_production_env(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path).model_copy(
+        update={"env": "production", "wabot_inbound_token": None}
+    )
+    with pytest.raises(RuntimeError, match="WABOT_INBOUND_TOKEN"):
+        create_app(settings)
+
+
+def test_inbound_open_on_local_loopback_without_token(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path).model_copy(
+        update={"wabot_inbound_token": None, "env": "local", "host": "127.0.0.1"}
+    )
+    client = TestClient(create_app(settings))
+    payload = {"id": "msg-open-1", "from": "+15550001111", "text": "hello"}
+
+    assert client.post("/whatsapp/inbound", json=payload).status_code == 200
 
 
 def test_receipt_webhook_requires_token(tmp_path: Path) -> None:

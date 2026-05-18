@@ -20,6 +20,14 @@ if [[ -f .env ]] && grep -q '^WABOT_AGENT_SEND_POLICY=allow_all' .env 2>/dev/nul
   die '.env has WABOT_AGENT_SEND_POLICY=allow_all'
 fi
 
+# --- inbound webhook auth (wabot → agent on loopback) ---
+if [[ -f .env ]]; then
+  inbound_tok="$(grep -E '^WABOT_INBOUND_TOKEN=' .env | cut -d= -f2- || true)"
+  if [[ -z "$inbound_tok" ]]; then
+    die 'WABOT_INBOUND_TOKEN must be set in .env (inbound webhooks fail closed without it)'
+  fi
+fi
+
 # --- operator auth before public tunnel ---
 if [[ -f .env ]]; then
   cf_req="$(grep -E '^WABOT_AGENT_CF_ACCESS_REQUIRED=' .env | cut -d= -f2- | tr '[:upper:]' '[:lower:]' || true)"

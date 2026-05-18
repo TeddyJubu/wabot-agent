@@ -103,6 +103,13 @@ class Settings(BaseSettings):
         default=Path("~/.config/wabot/token"), alias="WABOT_TOKEN_FILE"
     )
     wabot_inbound_token: str | None = Field(default=None, alias="WABOT_INBOUND_TOKEN")
+    wabot_inbound_token_required: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "WABOT_INBOUND_TOKEN_REQUIRED",
+            "WABOT_AGENT_INBOUND_TOKEN_REQUIRED",
+        ),
+    )
     wabot_home: Path | None = Field(default=None, alias="WABOT_AGENT_WABOT_HOME")
     wabot_restart_command: str | None = Field(
         default=None, alias="WABOT_AGENT_WABOT_RESTART_COMMAND"
@@ -597,6 +604,19 @@ class Settings(BaseSettings):
         if isinstance(value, list | tuple):
             return {str(part).strip() for part in value if str(part).strip()}
         return set()
+
+    _LOCAL_ENVS = frozenset({"local", "dev", "test"})
+    _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+    def requires_inbound_token(self) -> bool:
+        """True when inbound webhooks must authenticate (fail closed)."""
+        if self.wabot_inbound_token_required:
+            return True
+        if self.env.strip().lower() not in self._LOCAL_ENVS:
+            return True
+        if self.host.strip().lower() not in self._LOOPBACK_HOSTS:
+            return True
+        return False
 
     @property
     def live_model_enabled(self) -> bool:

@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import io
 import json
+import logging
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -60,6 +61,8 @@ from .tools import _is_send_allowed
 from .typing_indicator import inbound_typing_indicator
 from .wabot import WabotClient, WabotError
 from .wabot_process import WabotRestartError, restart_wabot_daemon, wait_for_fresh_pairing
+
+logger = logging.getLogger(__name__)
 
 
 class ChatRequest(BaseModel):
@@ -182,7 +185,10 @@ async def _fire_reminder(
 
     health = await wabot.health()
     if not health.ready:
-        memory.mark_reminder_fired(reminder_id, error="wabot_not_ready")
+        memory.release_reminder_claim(reminder_id)
+        payload = {"id": reminder_id, "reason": "wabot_not_ready", "to": target}
+        event_log.write("reminder_deferred", payload)
+        hub.publish("reminder_deferred", payload)
         return
 
     try:
@@ -218,16 +224,28 @@ async def _notify_outbound_expired(
         inbound=InboundMessage(id="", sender=owner, text="", chat=owner),
     )
     if not allowed:
+        event_log.write(
+            "outbound_expire_notify_skipped",
+            {"id": task.get("id"), "reason": policy},
+        )
         return
     health = await wabot.health()
     if not health.ready:
+        event_log.write(
+            "outbound_expire_notify_skipped",
+            {"id": task.get("id"), "reason": "wabot_not_ready"},
+        )
         return
     summary = (
         f"No reply from {target} within the tracking window (task {task.get('id', '')})."
     )
     try:
         await wabot.send_text(to=owner, text=summary)
-    except WabotError:
+    except WabotError as exc:
+        event_log.write(
+            "outbound_expire_notify_failed",
+            {"id": task.get("id"), "error": redact(str(exc))},
+        )
         return
     event_log.write("outbound_task_expired", {"id": task.get("id"), "owner": owner})
     hub.publish("outbound_task_expired", {"id": task.get("id"), "target_jid": target})
@@ -271,10 +289,18 @@ async def _handle_outbound_reply(
         inbound=InboundMessage(id="", sender=owner, text="", chat=owner),
     )
     if not allowed:
+        event_log.write(
+            "outbound_notify_skipped",
+            {"task_id": task_id, "reason": policy},
+        )
         return task
 
     health = await wabot.health()
     if not health.ready:
+        event_log.write(
+            "outbound_notify_skipped",
+            {"task_id": task_id, "reason": "wabot_not_ready"},
+        )
         return task
 
     excerpt = (inbound.text or "")[:500]
@@ -301,6 +327,12 @@ async def _handle_outbound_reply(
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
+    if settings.requires_inbound_token() and not (settings.wabot_inbound_token or "").strip():
+        raise RuntimeError(
+            "WABOT_INBOUND_TOKEN must be set: inbound webhooks require auth "
+            "(non-loopback WABOT_AGENT_HOST, non-local WABOT_AGENT_ENV, or "
+            "WABOT_INBOUND_TOKEN_REQUIRED=true)"
+        )
     settings.ensure_dirs()
     overrides = load_overrides(settings.runtime_overrides_path)
     if overrides:
@@ -311,9 +343,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             apply_overrides(snapshot, overrides)
         except Exception as exc:
-            print(
-                f"[runtime_overrides] overrides file failed validation, ignoring: {exc}",
-                flush=True,
+            logger.error(
+                "runtime overrides file failed validation, ignoring: %s", exc
             )
         else:
             apply_overrides(settings, overrides)
@@ -347,6 +378,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "detail": detail,
         }
 
+    def _pairing_unreachable_payload(
+        last: dict[str, Any] | None, *, detail: str
+    ) -> dict[str, Any]:
+        payload = dict(last) if last else {
+            "supported": True,
+            "reachable": False,
+            "logged_in": None,
+            "connected": None,
+            "qr_available": False,
+            "event": None,
+            "updated_at": None,
+            "expires_at": None,
+            "detail": detail,
+        }
+        payload["reachable"] = False
+        payload["detail"] = detail
+        return payload
+
     async def _pairing_poll_loop() -> None:
         """Probe wabot pairing state and publish pairing_changed on diff.
 
@@ -358,9 +407,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             try:
                 pairing = await wabot.pairing_qr()
                 payload = _pairing_payload(pairing)
-            except Exception:  # noqa: BLE001 — never let a transient HTTP error kill the loop
-                payload = None
-            if payload is not None and payload != pairing_state["last"]:
+            except Exception as exc:  # noqa: BLE001 — never kill the loop
+                logger.warning("pairing poll failed: %s", redact(str(exc)))
+                payload = _pairing_unreachable_payload(
+                    pairing_state["last"],
+                    detail="Could not reach wabot for pairing status.",
+                )
+            if payload != pairing_state["last"]:
                 pairing_state["last"] = payload
                 hub.publish("pairing_changed", payload)
             try:
@@ -770,6 +823,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         "reason": "agent_error_fallback",
                     },
                 )
+            hub.publish(
+                "inbound_agent_failed",
+                {
+                    "message_id": inbound.id,
+                    "sender": inbound.sender,
+                    "error": redact(str(exc)),
+                },
+            )
             # Message is already in inbound_messages; do not fail the webhook or
             # wabot will treat delivery as unsuccessful and the inbox stays empty.
             return {
@@ -1311,9 +1372,12 @@ def _qr_svg(payload: str) -> bytes:
 
 
 def _verify_inbound_auth(settings: Settings, authorization: str | None) -> None:
-    if not settings.wabot_inbound_token:
+    token = (settings.wabot_inbound_token or "").strip()
+    if not token:
+        if settings.requires_inbound_token():
+            raise HTTPException(status_code=401, detail="unauthorized")
         return
-    expected = f"Bearer {settings.wabot_inbound_token}"
+    expected = f"Bearer {token}"
     if not authorization or not secrets.compare_digest(authorization, expected):
         raise HTTPException(status_code=401, detail="unauthorized")
 
