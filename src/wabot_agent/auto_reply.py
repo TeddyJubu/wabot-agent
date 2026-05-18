@@ -5,8 +5,8 @@ from typing import Any
 from .agent import AgentRunResult
 from .config import Settings
 from .memory import InboundMessage
-from .recipients import recipients_match
 from .output_sanitize import strip_model_thinking
+from .recipients import recipients_match
 from .redaction import mask_phone, redact
 from .tools import _is_send_allowed
 from .wabot import WabotClient, WabotError

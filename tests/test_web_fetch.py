@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 
-from wabot_agent.config import Settings
 from wabot_agent.web_fetch import validate_public_http_url
 
 

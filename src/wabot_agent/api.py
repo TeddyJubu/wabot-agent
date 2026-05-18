@@ -27,8 +27,6 @@ from pydantic import BaseModel, Field
 from qrcode.image.svg import SvgFillImage
 
 from .agent import run_agent, run_agent_streamed
-from .typing_indicator import inbound_typing_indicator
-from .llm_provider import active_model_id, llm_provider_label
 from .auth import (
     AuthIdentity,
     maybe_mint_operator_cookie,
@@ -38,9 +36,11 @@ from .auth import (
     resolve_human_factory,
     verify_human_factory,
 )
+from .auto_reply import deliver_auto_reply
 from .config import Settings, get_settings
 from .context_management import maybe_prune_audit_tables
 from .events import EventHub, EventLog
+from .llm_provider import active_model_id, llm_provider_label
 from .memory import InboundMessage, MemoryStore
 from .redaction import redact
 from .runtime_overrides import (
@@ -51,8 +51,8 @@ from .runtime_overrides import (
     mask_secret,
     save_overrides,
 )
+from .typing_indicator import inbound_typing_indicator
 from .wabot import WabotClient
-from .auto_reply import deliver_auto_reply
 from .wabot_process import WabotRestartError, restart_wabot_daemon, wait_for_fresh_pairing
 
 
@@ -942,9 +942,9 @@ def _require_safe_openrouter_url(field: str, url: str) -> None:
 
 
 async def _test_llm_endpoint(settings: Settings) -> dict[str, Any]:
-    from .llm_provider import resolved_llm_api_key, resolved_llm_base_url
-
     import httpx
+
+    from .llm_provider import resolved_llm_api_key, resolved_llm_base_url
 
     label = llm_provider_label(settings)
     if not settings.live_model_enabled:

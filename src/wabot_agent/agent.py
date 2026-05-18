@@ -18,6 +18,7 @@ from .context_management import (
     prune_session_storage,
 )
 from .events import EventLog
+from .inbound_media import build_inbound_file_context, voice_transcript_from_context
 from .mcp import connected_mcp_servers
 from .memory import InboundMessage, MemoryStore
 from .models import build_model, model_settings
@@ -26,7 +27,6 @@ from .redaction import redact
 from .skills import render_skill_summary
 from .tools import RuntimeContext, core_tools
 from .ui_envelopes import build_ui_envelope
-from .inbound_media import build_inbound_file_context, voice_transcript_from_context
 from .vision_input import prepare_runner_input
 from .wabot import WabotClient
 
@@ -76,7 +76,8 @@ look up. Do not give one-line non-answers when the user needs help.
 ## WhatsApp style
 
 - Be concise but **complete** — answer the actual question, offer a sensible next step when useful.
-- Sound natural on WhatsApp; avoid corporate filler and lazy "I can't help with that" without trying tools first.
+- Sound natural on WhatsApp; avoid corporate filler and lazy "I can't help with that"
+  without trying tools first.
 - Pairing QR: direct operators to /pair (after /login), not the chat bot.
 
 ## Inbound auto-reply
@@ -506,7 +507,8 @@ def _augment_prompt(prompt: str, inbound: InboundMessage | None) -> str:
         "Before you answer this inbound WhatsApp message:\n"
         "1) Decide what they need.\n"
         "2) If helpful, call recall_contact_memory for this sender.\n"
-        "3) If you need thread context, call get_last_whatsapp_inbound_message or list_whatsapp_inbound_messages.\n"
+        "3) If you need thread context, call get_last_whatsapp_inbound_message or "
+        "list_whatsapp_inbound_messages.\n"
         "4) For requests to find/download/send files from the internet, use search_images or "
         "search_web, then fetch_url_to_media, then send_whatsapp_file to the sender. "
         "5) Inbound attachments are downloaded and processed on the VPS automatically; "

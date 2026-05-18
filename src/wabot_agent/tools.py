@@ -761,7 +761,9 @@ async def send_whatsapp_file(
     path_allowed, safe_path, path_reason = _media_path_allowed(ctx.context.settings, path)
     if not path_allowed or safe_path is None:
         payload = {"sent": False, "reason": "media_path_not_allowed", "detail": path_reason}
-        ctx.context.memory.record_tool_event(ctx.context.run_id, "send_whatsapp_file.blocked", payload)
+        ctx.context.memory.record_tool_event(
+            ctx.context.run_id, "send_whatsapp_file.blocked", payload
+        )
         return payload
 
     kind = whatsapp_send_kind_for_path(safe_path)

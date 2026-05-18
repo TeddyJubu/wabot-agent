@@ -3,10 +3,10 @@ from __future__ import annotations
 import ipaddress
 import re
 import socket
-from html import unescape
 from dataclasses import dataclass
+from html import unescape
 from pathlib import Path
-from urllib.parse import urljoin, unquote, urlparse
+from urllib.parse import unquote, urljoin, urlparse
 
 import httpx
 
@@ -113,7 +113,10 @@ async def fetch_url_to_media(
 ) -> FetchUrlResult:
     """Download a public http(s) URL into media_dir/subdir/."""
     if not settings.web_fetch_enabled:
-        return FetchUrlResult(ok=False, detail="web fetch is disabled (WABOT_AGENT_WEB_FETCH_ENABLED)")
+        return FetchUrlResult(
+            ok=False,
+            detail="web fetch is disabled (WABOT_AGENT_WEB_FETCH_ENABLED)",
+        )
 
     try:
         normalized, _host = validate_public_http_url(url)

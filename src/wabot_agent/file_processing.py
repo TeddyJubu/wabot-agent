@@ -3,8 +3,8 @@ from __future__ import annotations
 import csv
 import json
 import mimetypes
-import zipfile
 import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -256,7 +256,7 @@ def _process_video(
     if not settings.file_use_system_tools:
         return "", warnings, summary + " Install ffmpeg on VPS for analysis."
 
-    from .system_tools import ffprobe_metadata, ffmpeg_extract_frame, tesseract_ocr
+    from .system_tools import ffmpeg_extract_frame, ffprobe_metadata, tesseract_ocr
 
     meta = ffprobe_metadata(path)
     if meta:
