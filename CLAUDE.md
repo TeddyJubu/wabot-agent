@@ -55,7 +55,7 @@ Key modules in [src/wabot_agent/](src/wabot_agent/):
 - [models.py](src/wabot_agent/models.py) — OpenRouter wiring through the OpenAI Python client; falls back to an offline echo model when `OPENROUTER_API_KEY` is empty or `WABOT_AGENT_OFFLINE_MODE=true`. Offline mode is intentional — the app must boot, render, and test without network creds.
 - [wabot.py](src/wabot_agent/wabot.py) — thin HTTP client for the wabot daemon (`/health`, `/send`, `/send-image`, `/pairing/qr`). Includes a `FakeWabotClient` for tests/evals. The real client must hit loopback only.
 - [redaction.py](src/wabot_agent/redaction.py) — applied before persisting tool results and logs. Use `redact()` / `mask_phone()` consistently.
-- [mcp.py](src/wabot_agent/mcp.py), [skills.py](src/wabot_agent/skills.py) — optional MCP server connectors (configured by `WABOT_AGENT_MCP_CONFIG`) and local skill loading from `skills/<name>/SKILL.md`. Every example MCP server in [configs/mcp.example.json](configs/mcp.example.json) is disabled by default.
+- [mcp.py](src/wabot_agent/mcp.py), [skills.py](src/wabot_agent/skills.py) — optional MCP server connectors (configured by `WABOT_AGENT_MCP_CONFIG`) and local skill loading from `skills/<name>/SKILL.md`. Every example MCP server in [configs/mcp.example.json](configs/mcp.example.json) is disabled by default. [Composio Connect](docs/composio-mcp-setup.md) uses [configs/mcp.composio.json](configs/mcp.composio.json) + `COMPOSIO_API_KEY`.
 
 The Agents SDK `SQLiteSession` reuses `WABOT_AGENT_DB_PATH`, keyed by `session_id` (defaults to the sender's phone for inbound, or `"operator"` for the dashboard). Cross-contact memory leaks are prevented by this keying — preserve it.
 

@@ -1,0 +1,14 @@
+{
+  "servers": [
+    {
+      "name": "composio",
+      "enabled": true,
+      "transport": "streamable_http",
+      "url": "https://connect.composio.dev/mcp",
+      "headers": {
+        "x-consumer-api-key": "${COMPOSIO_API_KEY}"
+      },
+      "require_approval": "always"
+    }
+  ]
+}

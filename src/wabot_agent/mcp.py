@@ -1,12 +1,36 @@
 from __future__ import annotations
 
 import json
+import os
+import re
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
 from agents.mcp import MCPServerManager, MCPServerStdio, MCPServerStreamableHttp
+
+_ENV_REF = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+
+
+def _resolve_env_value(value: str) -> str:
+    """Expand ${VAR} placeholders from the process environment."""
+
+    def repl(match: re.Match[str]) -> str:
+        return os.environ.get(match.group(1), "")
+
+    return _ENV_REF.sub(repl, value)
+
+
+def _resolve_env_mapping(mapping: dict[str, Any] | None) -> dict[str, str] | None:
+    if not mapping:
+        return None
+    resolved: dict[str, str] = {}
+    for key, raw in mapping.items():
+        if not isinstance(raw, str):
+            raise ValueError(f"MCP header/env values must be strings, got {type(raw).__name__} for {key!r}")
+        resolved[key] = _resolve_env_value(raw)
+    return resolved
 
 
 def load_mcp_servers(config_path: Path | None) -> list[Any]:
@@ -27,7 +51,7 @@ def load_mcp_servers(config_path: Path | None) -> list[Any]:
             if entry.get("cwd"):
                 params["cwd"] = entry["cwd"]
             if entry.get("env"):
-                params["env"] = entry["env"]
+                params["env"] = _resolve_env_mapping(entry["env"])
             servers.append(
                 MCPServerStdio(
                     params=params,
@@ -39,7 +63,7 @@ def load_mcp_servers(config_path: Path | None) -> list[Any]:
         elif transport == "streamable_http":
             params = {"url": entry["url"]}
             if entry.get("headers"):
-                params["headers"] = entry["headers"]
+                params["headers"] = _resolve_env_mapping(entry["headers"])
             servers.append(
                 MCPServerStreamableHttp(
                     params=params,
