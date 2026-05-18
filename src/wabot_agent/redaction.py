@@ -5,6 +5,10 @@ from collections.abc import Mapping
 from typing import Any
 
 SECRET_KEYS = ("key", "token", "secret", "password", "authorization", "cookie")
+UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 PHONE_RE = re.compile(r"(?<!\d)(\+?\d[\d\s().-]{6,}\d)(?!\d)")
 BEARER_RE = re.compile(r"Bearer\s+[A-Za-z0-9._~+/=-]+", re.IGNORECASE)
 OPENROUTER_KEY_RE = re.compile(r"sk-or-[A-Za-z0-9._-]+")
@@ -18,6 +22,9 @@ def mask_phone(value: str) -> str:
 
 
 def redact_text(value: str) -> str:
+    # Task/message IDs are UUIDs; phone heuristics must not mangle them.
+    if UUID_RE.fullmatch(value.strip()):
+        return value
     value = BEARER_RE.sub("Bearer [REDACTED]", value)
     value = OPENROUTER_KEY_RE.sub("sk-or-[REDACTED]", value)
     return PHONE_RE.sub(lambda m: mask_phone(m.group(1)), value)
