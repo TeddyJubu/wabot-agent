@@ -250,6 +250,18 @@ Inbound webhook shape:
 }
 ```
 
+## Context management
+
+Long chats stay fast by default:
+
+- **Session window** — only the latest `WABOT_AGENT_SESSION_HISTORY_LIMIT` turns are loaded (default 48).
+- **Token budget** — older history is dropped or shrunk to fit `WABOT_AGENT_SESSION_MAX_HISTORY_TOKENS` (default 20k); images in history become placeholders.
+- **Per-turn cap** — inbound file excerpts and attachments are truncated to `WABOT_AGENT_PROMPT_MAX_CHARS`.
+- **SQLite retention** — `agent_messages` rows per contact are pruned to `WABOT_AGENT_SESSION_DB_KEEP_ITEMS`; audit tables (`inbound_messages`, `runs`, `tool_events`) are capped on a schedule.
+- **LLM summaries** — when history is trimmed or pruned, dropped turns are summarized into `session_summaries` and injected as `[Earlier conversation summary]` on the next run (`thread_summary.py`).
+
+Tune in `.env` or see `src/wabot_agent/context_management.py`.
+
 ## Agent tools
 
 Core WhatsApp tools include inbox reads, send text/image/media/**any file** (`send_whatsapp_file`), VPS file processing (`process_vps_file`, `process_whatsapp_attachment`), contacts, groups, read/typing, reactions, mute/archive/pin, and profile info. See `src/wabot_agent/tools.py` and `skills/whatsapp-operator/SKILL.md`. For attachment setup on a new VPS, see **VPS file processing** above.

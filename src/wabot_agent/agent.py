@@ -4,13 +4,19 @@ import json
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
-from agents import Agent, RunConfig, Runner, SQLiteSession
+from agents import Agent, Runner
 from agents.tracing import set_tracing_disabled
 
 from .config import Settings
+from .context_management import (
+    build_agent_run_config,
+    build_agent_session,
+    cap_turn_prompt,
+    maybe_prune_audit_tables,
+    prune_session_storage,
+)
 from .events import EventLog
 from .mcp import connected_mcp_servers
 from .memory import InboundMessage, MemoryStore
@@ -114,10 +120,8 @@ async def run_agent(
 ) -> AgentRunResult:
     run_id = str(uuid.uuid4())
     session_key = session_id or (inbound.sender if inbound else "operator")
-    sqlite_session = SQLiteSession(
-        session_id=session_key,
-        db_path=Path(settings.db_path),
-    )
+    sqlite_session = build_agent_session(settings, session_key)
+    run_config = build_agent_run_config(settings, session_key, memory)
     context = RuntimeContext(
         settings=settings,
         memory=memory,
@@ -141,6 +145,7 @@ async def run_agent(
             f"\"{transcript}\"]\n\n"
             + augmented
         )
+    augmented = cap_turn_prompt(augmented, settings.prompt_max_chars)
     runner_input = await prepare_runner_input(
         augmented,
         settings=settings,
@@ -155,9 +160,12 @@ async def run_agent(
             runner_input,
             context=context,
             max_turns=settings.max_agent_turns,
-            run_config=RunConfig(tracing_disabled=True, workflow_name="wabot-agent"),
+            run_config=run_config,
             session=sqlite_session,
         )
+
+    await prune_session_storage(settings, session_key, memory)
+    maybe_prune_audit_tables(memory, settings)
 
     final_output = strip_model_thinking(str(result.final_output))
     memory.record_run(run_id, inbound.sender if inbound else None, prompt, final_output)
@@ -210,10 +218,8 @@ async def run_agent_streamed(
     """
     run_id = str(uuid.uuid4())
     session_key = session_id or (inbound.sender if inbound else "operator")
-    sqlite_session = SQLiteSession(
-        session_id=session_key,
-        db_path=Path(settings.db_path),
-    )
+    sqlite_session = build_agent_session(settings, session_key)
+    run_config = build_agent_run_config(settings, session_key, memory)
     context = RuntimeContext(
         settings=settings,
         memory=memory,
@@ -237,6 +243,7 @@ async def run_agent_streamed(
             f"\"{transcript}\"]\n\n"
             + augmented
         )
+    augmented = cap_turn_prompt(augmented, settings.prompt_max_chars)
     runner_input = await prepare_runner_input(
         augmented,
         settings=settings,
@@ -248,7 +255,6 @@ async def run_agent_streamed(
 
     async with connected_mcp_servers(settings.mcp_config) as mcp_servers:
         agent = build_agent(settings, mcp_servers=mcp_servers)
-        run_config = RunConfig(tracing_disabled=True, workflow_name="wabot-agent")
 
         # Try the real streaming path. OfflineModel raises NotImplementedError
         # from stream_response — when that happens, or the SDK lacks streaming,
@@ -314,6 +320,9 @@ async def run_agent_streamed(
         )
         yield {"type": "error", "message": message}
         return
+
+    await prune_session_storage(settings, session_key, memory)
+    maybe_prune_audit_tables(memory, settings)
 
     memory.record_run(run_id, inbound.sender if inbound else None, prompt, final_output)
     event_log.write(

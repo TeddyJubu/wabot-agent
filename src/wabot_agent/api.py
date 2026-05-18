@@ -39,6 +39,7 @@ from .auth import (
     verify_human_factory,
 )
 from .config import Settings, get_settings
+from .context_management import maybe_prune_audit_tables
 from .events import EventHub, EventLog
 from .memory import InboundMessage, MemoryStore
 from .redaction import redact
@@ -217,6 +218,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # call_soon_threadsafe. Then drive pairing state through the hub so
         # the dashboard can rely on `pairing_changed` for live updates.
         hub.bind_loop(asyncio.get_running_loop())
+        maybe_prune_audit_tables(memory, settings, force=True)
         pairing_state["task"] = asyncio.create_task(_pairing_poll_loop())
         try:
             yield

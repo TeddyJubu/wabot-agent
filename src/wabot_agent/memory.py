@@ -107,6 +107,11 @@ class MemoryStore:
                     is_group integer not null default 0,
                     received_at text not null
                 );
+                create table if not exists session_summaries (
+                    session_id text primary key,
+                    summary text not null,
+                    updated_at text not null
+                );
                 """
             )
             self._ensure_column(
@@ -355,6 +360,33 @@ class MemoryStore:
                 (run_id, sender, safe_input, safe_output, now_iso()),
             )
 
+    def get_session_summary(self, session_id: str) -> str | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "select summary from session_summaries where session_id = ?",
+                (session_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        summary = str(row["summary"]).strip()
+        return summary or None
+
+    def save_session_summary(self, session_id: str, summary: str) -> None:
+        text = summary.strip()
+        if not text:
+            return
+        with self.connect() as conn:
+            conn.execute(
+                """
+                insert into session_summaries (session_id, summary, updated_at)
+                values (?, ?, ?)
+                on conflict(session_id) do update set
+                    summary = excluded.summary,
+                    updated_at = excluded.updated_at
+                """,
+                (session_id, text, now_iso()),
+            )
+
     def record_tool_event(self, run_id: str, name: str, payload: dict[str, Any]) -> None:
         with self.connect() as conn:
             conn.execute(
@@ -384,9 +416,76 @@ class MemoryStore:
             notes = conn.execute("select count(*) from agent_notes").fetchone()[0]
             runs = conn.execute("select count(*) from runs").fetchone()[0]
             processed = conn.execute("select count(*) from processed_messages").fetchone()[0]
+            inbound = conn.execute("select count(*) from inbound_messages").fetchone()[0]
+            tool_events = conn.execute("select count(*) from tool_events").fetchone()[0]
         return {
             "contact_facts": facts,
             "agent_notes": notes,
             "runs": runs,
             "processed_messages": processed,
+            "inbound_messages": inbound,
+            "tool_events": tool_events,
         }
+
+    def prune_audit_tables(
+        self,
+        *,
+        max_inbound: int,
+        max_runs: int,
+        max_tool_events: int,
+    ) -> dict[str, int]:
+        """Delete oldest audit rows beyond configured caps (contact facts untouched)."""
+        deleted: dict[str, int] = {
+            "inbound_messages": 0,
+            "runs": 0,
+            "tool_events": 0,
+        }
+        with self.connect() as conn:
+            inbound_count = conn.execute("select count(*) from inbound_messages").fetchone()[0]
+            if max_inbound > 0 and inbound_count > max_inbound:
+                excess = inbound_count - max_inbound
+                cur = conn.execute(
+                    """
+                    delete from inbound_messages
+                    where message_id in (
+                        select message_id from inbound_messages
+                        order by received_at asc
+                        limit ?
+                    )
+                    """,
+                    (excess,),
+                )
+                deleted["inbound_messages"] = cur.rowcount
+
+            runs_count = conn.execute("select count(*) from runs").fetchone()[0]
+            if max_runs > 0 and runs_count > max_runs:
+                excess = runs_count - max_runs
+                cur = conn.execute(
+                    """
+                    delete from runs
+                    where run_id in (
+                        select run_id from runs
+                        order by created_at asc
+                        limit ?
+                    )
+                    """,
+                    (excess,),
+                )
+                deleted["runs"] = cur.rowcount
+
+            events_count = conn.execute("select count(*) from tool_events").fetchone()[0]
+            if max_tool_events > 0 and events_count > max_tool_events:
+                excess = events_count - max_tool_events
+                cur = conn.execute(
+                    """
+                    delete from tool_events
+                    where id in (
+                        select id from tool_events
+                        order by id asc
+                        limit ?
+                    )
+                    """,
+                    (excess,),
+                )
+                deleted["tool_events"] = cur.rowcount
+        return deleted

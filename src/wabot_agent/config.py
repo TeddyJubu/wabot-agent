@@ -140,6 +140,97 @@ class Settings(BaseSettings):
         default=15,
         validation_alias=AliasChoices("WABOT_AGENT_MAX_AGENT_TURNS", "VIGNESH_MAX_AGENT_TURNS"),
     )
+    session_history_item_limit: int = Field(
+        default=48,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_SESSION_HISTORY_LIMIT",
+            "VIGNESH_SESSION_HISTORY_LIMIT",
+        ),
+    )
+    session_max_history_tokens: int = Field(
+        default=20_000,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_SESSION_MAX_HISTORY_TOKENS",
+            "VIGNESH_SESSION_MAX_HISTORY_TOKENS",
+        ),
+    )
+    session_db_keep_items: int = Field(
+        default=80,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_SESSION_DB_KEEP_ITEMS",
+            "VIGNESH_SESSION_DB_KEEP_ITEMS",
+        ),
+    )
+    prompt_max_chars: int = Field(
+        default=32_000,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_PROMPT_MAX_CHARS",
+            "VIGNESH_PROMPT_MAX_CHARS",
+        ),
+    )
+    context_max_inbound_rows: int = Field(
+        default=10_000,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_CONTEXT_MAX_INBOUND_ROWS",
+            "VIGNESH_CONTEXT_MAX_INBOUND_ROWS",
+        ),
+    )
+    context_max_runs: int = Field(
+        default=5_000,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_CONTEXT_MAX_RUNS",
+            "VIGNESH_CONTEXT_MAX_RUNS",
+        ),
+    )
+    context_max_tool_events: int = Field(
+        default=20_000,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_CONTEXT_MAX_TOOL_EVENTS",
+            "VIGNESH_CONTEXT_MAX_TOOL_EVENTS",
+        ),
+    )
+    context_prune_every_runs: int = Field(
+        default=25,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_CONTEXT_PRUNE_EVERY_RUNS",
+            "VIGNESH_CONTEXT_PRUNE_EVERY_RUNS",
+        ),
+    )
+    session_summary_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_SESSION_SUMMARY_ENABLED",
+            "VIGNESH_SESSION_SUMMARY_ENABLED",
+        ),
+    )
+    session_summary_min_dropped_tokens: int = Field(
+        default=800,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_SESSION_SUMMARY_MIN_DROPPED_TOKENS",
+            "VIGNESH_SESSION_SUMMARY_MIN_DROPPED_TOKENS",
+        ),
+    )
+    session_summary_max_chars: int = Field(
+        default=2500,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_SESSION_SUMMARY_MAX_CHARS",
+            "VIGNESH_SESSION_SUMMARY_MAX_CHARS",
+        ),
+    )
+    session_summary_max_output_tokens: int = Field(
+        default=512,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_SESSION_SUMMARY_MAX_OUTPUT_TOKENS",
+            "VIGNESH_SESSION_SUMMARY_MAX_OUTPUT_TOKENS",
+        ),
+    )
+    session_summary_model: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_SESSION_SUMMARY_MODEL",
+            "VIGNESH_SESSION_SUMMARY_MODEL",
+        ),
+    )
     agent_temperature: float = Field(
         default=0.35,
         validation_alias=AliasChoices(
