@@ -9,7 +9,7 @@ from wabot_agent.agent import AgentRunResult
 from wabot_agent.api import create_app
 from wabot_agent.auto_reply import deliver_auto_reply, inbound_session_id
 from wabot_agent.config import Settings
-from wabot_agent.memory import InboundMessage
+from wabot_agent.memory import InboundMessage, inbound_memory_contact_id
 from wabot_agent.wabot import FakeWabotClient
 
 
@@ -182,3 +182,5 @@ def test_inbound_session_id_uses_chat_for_groups() -> None:
     )
     assert inbound_session_id(dm) == "+15550001111"
     assert inbound_session_id(group) == "120363@g.us"
+    assert inbound_memory_contact_id(dm) == inbound_session_id(dm)
+    assert inbound_memory_contact_id(group) == inbound_session_id(group)

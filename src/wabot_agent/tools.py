@@ -17,7 +17,7 @@ from .mem0_store import (
     mem0_enabled,
     search_memories_sync,
 )
-from .memory import InboundMessage, MemoryStore
+from .memory import InboundMessage, MemoryStore, inbound_memory_contact_id
 from .recipients import is_listed_recipient, recipients_match
 from .redaction import looks_sensitive, mask_phone, redact
 from .skills import list_skills, read_skill
@@ -102,6 +102,14 @@ def _requester_jid(ctx: RunContextWrapper[RuntimeContext]) -> str | None:
         return None
     sender = inbound.sender.strip()
     return sender or None
+
+
+def _mem0_user_id(ctx: RunContextWrapper[RuntimeContext]) -> str | None:
+    inbound = ctx.context.inbound
+    if inbound is None:
+        return None
+    uid = inbound_memory_contact_id(inbound).strip()
+    return uid or None
 
 
 def _maybe_auto_track_outbound(
@@ -1352,17 +1360,20 @@ async def search_mem0_memories(
     user_id: str | None = None,
     top_k: int = 5,
 ) -> dict[str, Any]:
-    """Search Mem0 semantic memories. Call every inbound turn before answering (user_id = sender or group chat JID)."""
-    uid = (user_id or _requester_jid(ctx) or "").strip()
-    if not uid:
-        payload = {"ok": False, "reason": "no_user_id", "results": []}
+    """Search Mem0 memories. Call before answering (user_id = sender or group chat JID)."""
+    if not mem0_enabled(ctx.context.settings):
+        payload = {"ok": False, "reason": "mem0_disabled", "results": []}
     else:
-        payload = search_memories_sync(
-            ctx.context.settings,
-            user_id=uid,
-            query=query,
-            top_k=top_k,
-        )
+        uid = (user_id or _mem0_user_id(ctx) or "").strip()
+        if not uid:
+            payload = {"ok": False, "reason": "no_user_id", "results": []}
+        else:
+            payload = search_memories_sync(
+                ctx.context.settings,
+                user_id=uid,
+                query=query,
+                top_k=top_k,
+            )
     ctx.context.memory.record_tool_event(ctx.context.run_id, "search_mem0_memories", payload)
     return redact(payload)
 
@@ -1373,19 +1384,22 @@ async def add_mem0_memory(
     text: str,
     user_id: str | None = None,
 ) -> dict[str, Any]:
-    """Store a durable fact in Mem0. Call before final reply when anything important was said or promised."""
-    uid = (user_id or _requester_jid(ctx) or "").strip()
-    if not uid:
-        payload = {"ok": False, "reason": "no_user_id"}
-    elif looks_sensitive(text):
-        payload = {"ok": False, "reason": "sensitive_content"}
+    """Store a durable fact in Mem0 before final reply when something important was said."""
+    if not mem0_enabled(ctx.context.settings):
+        payload = {"ok": False, "reason": "mem0_disabled"}
     else:
-        payload = add_memory_sync(
-            ctx.context.settings,
-            user_id=uid,
-            messages=[{"role": "user", "content": text.strip()}],
-            metadata={"source": ctx.context.run_id},
-        )
+        uid = (user_id or _mem0_user_id(ctx) or "").strip()
+        if not uid:
+            payload = {"ok": False, "reason": "no_user_id"}
+        elif looks_sensitive(text):
+            payload = {"ok": False, "reason": "sensitive_content"}
+        else:
+            payload = add_memory_sync(
+                ctx.context.settings,
+                user_id=uid,
+                messages=[{"role": "user", "content": text.strip()}],
+                metadata={"source": ctx.context.run_id},
+            )
     ctx.context.memory.record_tool_event(ctx.context.run_id, "add_mem0_memory", payload)
     return redact(payload)
 
