@@ -28,7 +28,9 @@ def _resolve_env_mapping(mapping: dict[str, Any] | None) -> dict[str, str] | Non
     resolved: dict[str, str] = {}
     for key, raw in mapping.items():
         if not isinstance(raw, str):
-            raise ValueError(f"MCP header/env values must be strings, got {type(raw).__name__} for {key!r}")
+            raise ValueError(
+                f"MCP header/env values must be strings, got {type(raw).__name__} for {key!r}"
+            )
         resolved[key] = _resolve_env_value(raw)
     return resolved
 
