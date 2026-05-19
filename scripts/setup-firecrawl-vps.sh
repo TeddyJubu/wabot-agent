@@ -49,11 +49,13 @@ if [[ -f "$APP_DIR/.env" ]]; then
   OLLAMA_API_KEY="$(grep -E '^OLLAMA_API_KEY=' "$APP_DIR/.env" | cut -d= -f2- || true)"
 fi
 
+# LangChain initChatModel (agent run path) does not support custom-openai; use the
+# OpenAI-compatible Ollama Cloud endpoint with a model id that has no extra colons.
 sudo -u "$SERVICE_USER" tee "$EXPRESS_DIR/.env" >/dev/null <<ENV
 FIRECRAWL_API_KEY=${FIRECRAWL_API_KEY}
-MODEL=custom-openai:gemma4:31b
-CUSTOM_OPENAI_API_KEY=${OLLAMA_API_KEY:-ollama}
-CUSTOM_OPENAI_BASE_URL=https://ollama.com/v1
+MODEL=openai:minimax-m2.5
+OPENAI_API_KEY=${OLLAMA_API_KEY:-ollama}
+OPENAI_BASE_URL=https://ollama.com/v1
 PORT=3000
 ENV
 chmod 600 "$EXPRESS_DIR/.env"
