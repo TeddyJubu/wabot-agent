@@ -35,16 +35,23 @@ def _resolve_env_mapping(mapping: dict[str, Any] | None) -> dict[str, str] | Non
     return resolved
 
 
-def load_mcp_servers(config_path: Path | None) -> list[Any]:
+def load_mcp_servers(
+    config_path: Path | None,
+    *,
+    skip_names: frozenset[str] | None = None,
+) -> list[Any]:
     if not config_path or not config_path.exists():
         return []
     raw = json.loads(config_path.read_text(encoding="utf-8"))
     servers: list[Any] = []
+    skipped = skip_names or frozenset()
     for entry in raw.get("servers", []):
         if not entry.get("enabled", False):
             continue
         transport = entry.get("transport", "stdio")
         name = entry.get("name")
+        if name in skipped:
+            continue
         if transport == "stdio":
             params: dict[str, Any] = {
                 "command": entry["command"],
@@ -80,8 +87,12 @@ def load_mcp_servers(config_path: Path | None) -> list[Any]:
 
 
 @asynccontextmanager
-async def connected_mcp_servers(config_path: Path | None) -> AsyncIterator[list[Any]]:
-    servers = load_mcp_servers(config_path)
+async def connected_mcp_servers(
+    config_path: Path | None,
+    *,
+    skip_names: frozenset[str] | None = None,
+) -> AsyncIterator[list[Any]]:
+    servers = load_mcp_servers(config_path, skip_names=skip_names)
     if not servers:
         yield []
         return

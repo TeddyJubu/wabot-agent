@@ -23,6 +23,8 @@ dependencies = [
   "uvicorn[standard]>=0.38.0",
   "mem0ai>=2.0.2",
   "fastembed>=0.6.0",
+  "composio>=0.13.1",
+  "composio-openai-agents>=0.13.1",
 ]
 
 [project.optional-dependencies]

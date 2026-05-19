@@ -1,0 +1,66 @@
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
+from wabot_agent.agent import build_agent_instructions
+from wabot_agent.composio_tools import (
+    composio_enabled,
+    load_composio_tools,
+    reset_composio_client_for_tests,
+)
+from wabot_agent.config import Settings
+from wabot_agent.memory import MemoryStore
+
+
+def test_composio_enabled_requires_flag_and_key() -> None:
+    off = Settings(
+        composio_enabled=False,
+        composio_api_key="ak_test",
+        offline_mode=False,
+        _env_file=None,
+    )
+    assert composio_enabled(off) is False
+    on = Settings(
+        composio_enabled=True,
+        composio_api_key="ak_test",
+        offline_mode=False,
+        _env_file=None,
+    )
+    assert composio_enabled(on) is True
+
+
+def test_load_composio_tools_creates_session_and_persists_id(tmp_path) -> None:
+    reset_composio_client_for_tests()
+    memory = MemoryStore(tmp_path / "db.sqlite3")
+    settings = Settings(
+        composio_enabled=True,
+        composio_api_key="ak_test",
+        offline_mode=False,
+        _env_file=None,
+    )
+    mock_tool = MagicMock()
+    mock_tool.name = "COMPOSIO_SEARCH_TOOLS"
+    mock_session = MagicMock()
+    mock_session.session_id = "trs_test123"
+    mock_session.tools.return_value = [mock_tool]
+    mock_composio = MagicMock()
+    mock_composio.create.return_value = mock_session
+
+    with patch("wabot_agent.composio_tools._get_composio_client", return_value=mock_composio):
+        tools = load_composio_tools(settings, user_id="user_abc", memory=memory)
+
+    assert len(tools) == 1
+    mock_composio.create.assert_called_once_with(user_id="user_abc")
+    facts = memory.recall_contact("user_abc")["facts"]
+    assert any(f["key"] == "composio_session_id" and f["value"] == "trs_test123" for f in facts)
+
+
+def test_build_agent_instructions_mention_composio_when_enabled() -> None:
+    settings = Settings(
+        composio_enabled=True,
+        composio_api_key="ak_test",
+        offline_mode=False,
+        _env_file=None,
+    )
+    text = build_agent_instructions(settings, "")
+    assert "COMPOSIO_MANAGE_CONNECTIONS" in text

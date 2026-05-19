@@ -86,6 +86,16 @@ class Settings(BaseSettings):
         default=Path("./configs/mcp.example.json"),
         validation_alias=AliasChoices("WABOT_AGENT_MCP_CONFIG", "VIGNESH_MCP_CONFIG"),
     )
+    composio_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_COMPOSIO_ENABLED", "VIGNESH_COMPOSIO_ENABLED"
+        ),
+    )
+    composio_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("COMPOSIO_API_KEY", "WABOT_AGENT_COMPOSIO_API_KEY"),
+    )
     skills_dir: Path = Field(
         default=Path("./skills"),
         validation_alias=AliasChoices("WABOT_AGENT_SKILLS_DIR", "VIGNESH_SKILLS_DIR"),

@@ -10,6 +10,7 @@ from typing import Any
 from agents import Agent, Runner
 from agents.tracing import set_tracing_disabled
 
+from .composio_tools import composio_enabled, load_composio_tools
 from .config import Settings
 from .context_management import (
     build_agent_run_config,
@@ -131,6 +132,13 @@ INSTRUCTIONS_TOOLS_MEM0 = (
     "- search_mem0_memories / add_mem0_memory / mem0_status — semantic long-term memory (Mem0).\n"
 )
 
+INSTRUCTIONS_TOOLS_COMPOSIO = (
+    "- Composio (Gmail, GitHub, Slack, Notion, etc.) — use COMPOSIO_* tools for external apps.\n"
+    "- Call COMPOSIO_MANAGE_CONNECTIONS when auth is required; send the OAuth link in your "
+    "reply so the user can approve in a browser.\n"
+    "- Then use COMPOSIO_SEARCH_TOOLS / COMPOSIO_MULTI_EXECUTE_TOOL as needed.\n"
+)
+
 INSTRUCTIONS_INBOUND = """## Inbound auto-reply
 
 - Your **final** plain-text reply is sent to the sender automatically
@@ -166,23 +174,41 @@ def build_agent_instructions(settings: Settings, skill_summary: str) -> str:
             f"{INSTRUCTIONS_TOOLS_MEM0}- lookup_whatsapp_contacts",
             1,
         )
+    if composio_enabled(settings):
+        tools_block = tools_block.replace(
+            "- lookup_whatsapp_contacts",
+            f"{INSTRUCTIONS_TOOLS_COMPOSIO}- lookup_whatsapp_contacts",
+            1,
+        )
     return (
         f"{INSTRUCTIONS}{memory_block}{tools_block}{INSTRUCTIONS_INBOUND}\n\n"
         f"Installed local skills:\n{skill_summary}\n"
     )
 
 
-def build_agent(settings: Settings, mcp_servers: list[Any] | None = None) -> Agent[RuntimeContext]:
+def build_agent(
+    settings: Settings,
+    mcp_servers: list[Any] | None = None,
+    *,
+    extra_tools: list[Any] | None = None,
+) -> Agent[RuntimeContext]:
     skill_summary = render_skill_summary(settings.skills_dir)
     instructions = build_agent_instructions(settings, skill_summary)
+    tools = [*core_tools(), *(extra_tools or [])]
     return Agent[RuntimeContext](
         name="wabot-agent-whatsapp-operator",
         instructions=instructions,
         model=build_model(settings),
         model_settings=model_settings(settings),
-        tools=core_tools(),
+        tools=tools,
         mcp_servers=mcp_servers or [],
     )
+
+
+def _mcp_skip_names(settings: Settings) -> frozenset[str]:
+    if composio_enabled(settings):
+        return frozenset({"composio"})
+    return frozenset()
 
 
 async def run_agent(
@@ -233,8 +259,15 @@ async def run_agent(
         wabot=context.wabot,
     )
 
-    async with connected_mcp_servers(settings.mcp_config) as mcp_servers:
-        agent = build_agent(settings, mcp_servers=mcp_servers)
+    composio_tools = load_composio_tools(
+        settings, user_id=session_key, memory=memory
+    )
+    async with connected_mcp_servers(
+        settings.mcp_config, skip_names=_mcp_skip_names(settings)
+    ) as mcp_servers:
+        agent = build_agent(
+            settings, mcp_servers=mcp_servers, extra_tools=composio_tools
+        )
         result = await Runner.run(
             agent,
             runner_input,
@@ -348,8 +381,15 @@ async def run_agent_streamed(
     final_output = ""
     errored: Exception | None = None
 
-    async with connected_mcp_servers(settings.mcp_config) as mcp_servers:
-        agent = build_agent(settings, mcp_servers=mcp_servers)
+    composio_tools = load_composio_tools(
+        settings, user_id=session_key, memory=memory
+    )
+    async with connected_mcp_servers(
+        settings.mcp_config, skip_names=_mcp_skip_names(settings)
+    ) as mcp_servers:
+        agent = build_agent(
+            settings, mcp_servers=mcp_servers, extra_tools=composio_tools
+        )
 
         # Try the real streaming path. OfflineModel raises NotImplementedError
         # from stream_response — when that happens, or the SDK lacks streaming,

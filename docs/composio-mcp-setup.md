@@ -1,6 +1,10 @@
-# Composio MCP (1000+ app integrations)
+# Composio MCP (optional)
 
-wabot-agent can use [Composio Connect](https://docs.composio.dev/docs/composio-connect) as a remote MCP server so the agent can search tools, connect OAuth apps on demand, and run actions (Gmail, Notion, Slack, GitHub, etc.) through Composio’s meta-tools.
+**Recommended:** [composio-setup.md](composio-setup.md) — native tools with `COMPOSIO_API_KEY` + `WABOT_AGENT_COMPOSIO_ENABLED=true` (works with standard `ak_` keys).
+
+This page is only if you want [Composio Connect](https://docs.composio.dev/docs/composio-connect) as a remote MCP server instead:
+
+wabot-agent can use Composio Connect as a remote MCP server so the agent can search tools, connect OAuth apps on demand, and run actions (Gmail, Notion, Slack, GitHub, etc.) through Composio’s meta-tools.
 
 ## 1. API key (dashboard)
 
