@@ -181,7 +181,6 @@ async def _run_device_login(settings: Settings) -> None:
         return
 
     env = os.environ.copy()
-    auth_path = codex_auth_path(settings)
     env["CODEX_HOME"] = str(codex_home)
 
     try:

@@ -26,13 +26,13 @@ from .memory import (
 from .recipients import is_listed_recipient, recipients_match
 from .redaction import looks_sensitive, mask_phone, redact
 from .skills import list_skills, read_skill
-from .wabot import WabotClient
 from .task_progress import (
     TASK_STARTED_ACK,
     format_step_complete,
     format_task_plan,
     looks_like_multi_step_task,
 )
+from .wabot import WabotClient
 from .web_agent import web_agent_health
 from .web_fetch import fetch_url_to_media as download_url_to_media
 from .web_search import search_web as duckduckgo_search

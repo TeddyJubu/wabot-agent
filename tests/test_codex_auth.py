@@ -123,7 +123,9 @@ def test_ensure_codex_home_creates_directory(tmp_path: Path) -> None:
     assert home.is_dir()
 
 
-def test_legacy_home_codex_path_redirects_to_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_legacy_home_codex_path_redirects_to_data_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("HOME", str(tmp_path))
     settings = Settings(

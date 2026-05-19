@@ -9,6 +9,7 @@ from agents.tool import ToolContext
 from wabot_agent.agent import build_agent_instructions
 from wabot_agent.config import Settings
 from wabot_agent.events import EventLog
+from wabot_agent.mem0_store import _mem0_llm_env
 from wabot_agent.memory import InboundMessage, MemoryStore
 from wabot_agent.tools import (
     RuntimeContext,
@@ -16,7 +17,6 @@ from wabot_agent.tools import (
     add_mem0_memory,
     search_mem0_memories,
 )
-from wabot_agent.mem0_store import _mem0_llm_env
 from wabot_agent.wabot import FakeWabotClient
 
 
