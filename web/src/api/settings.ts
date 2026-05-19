@@ -3,7 +3,7 @@ export interface MaskedField {
   preview: string | null;
 }
 
-export type ModelProvider = "openrouter" | "ollama" | "ollama_cloud";
+export type ModelProvider = "codex" | "openrouter" | "ollama" | "ollama_cloud";
 
 export interface SettingsView {
   env_source: string;
@@ -18,6 +18,16 @@ export interface SettingsView {
     model: string;
     label: string;
     live: boolean;
+  };
+  codex: {
+    access_token: MaskedField;
+    account_id: string | null;
+    auth_path: string;
+    base_url: string;
+    model: string;
+    live: boolean;
+    logged_in: boolean;
+    cli_available: boolean;
   };
   openrouter: {
     api_key: MaskedField;

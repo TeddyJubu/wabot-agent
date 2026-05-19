@@ -41,11 +41,31 @@ class Settings(BaseSettings):
     )
     openrouter_app_title: str = Field(default="wabot-agent", alias="OPENROUTER_APP_TITLE")
 
-    model_provider: Literal["openrouter", "ollama", "ollama_cloud"] = Field(
+    model_provider: Literal["codex", "openrouter", "ollama", "ollama_cloud"] = Field(
         default="openrouter",
         validation_alias=AliasChoices(
             "WABOT_AGENT_MODEL_PROVIDER", "VIGNESH_MODEL_PROVIDER", "LLM_PROVIDER"
         ),
+    )
+    codex_model: str = Field(
+        default="gpt-5.5",
+        validation_alias=AliasChoices("CODEX_MODEL", "WABOT_AGENT_CODEX_MODEL"),
+    )
+    codex_base_url: str = Field(
+        default="https://chatgpt.com/backend-api/codex",
+        validation_alias=AliasChoices("CODEX_BASE_URL", "WABOT_AGENT_CODEX_BASE_URL"),
+    )
+    codex_auth_path: Path = Field(
+        default=Path("~/.codex/auth.json"),
+        validation_alias=AliasChoices("CODEX_AUTH_PATH", "WABOT_AGENT_CODEX_AUTH_PATH"),
+    )
+    codex_access_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("CODEX_ACCESS_TOKEN", "WABOT_AGENT_CODEX_ACCESS_TOKEN"),
+    )
+    codex_account_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("CODEX_ACCOUNT_ID", "WABOT_AGENT_CODEX_ACCOUNT_ID"),
     )
     ollama_model: str = Field(
         default="gemma4:31b-cloud",
@@ -595,6 +615,14 @@ class Settings(BaseSettings):
         ),
     )
 
+    @field_validator("codex_base_url")
+    @classmethod
+    def validate_codex_base_url(cls, value: str) -> str:
+        from .codex_auth import require_safe_codex_url
+
+        require_safe_codex_url(value)
+        return value
+
     @field_validator("cf_access_team_domain", "cf_access_aud", mode="before")
     @classmethod
     def empty_cf_access_to_none(cls, value: object) -> object:
@@ -632,6 +660,10 @@ class Settings(BaseSettings):
     def live_model_enabled(self) -> bool:
         if self.offline_mode:
             return False
+        if self.model_provider == "codex":
+            from .codex_auth import load_codex_credentials
+
+            return load_codex_credentials(self) is not None
         if self.model_provider == "openrouter":
             return bool(self.openrouter_api_key)
         if self.model_provider == "ollama_cloud":
@@ -662,8 +694,15 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     from .cache_paths import configure_process_caches
+    from .codex_auth import detect_model_provider, model_provider_explicitly_set
+    from .runtime_overrides import apply_overrides, load_overrides
 
     settings = Settings()
     settings.ensure_dirs()
+    overrides = load_overrides(settings.runtime_overrides_path)
+    if not model_provider_explicitly_set(overrides):
+        settings.model_provider = detect_model_provider(settings)  # type: ignore[assignment]
+    if overrides:
+        apply_overrides(settings, overrides)
     configure_process_caches(settings)
     return settings

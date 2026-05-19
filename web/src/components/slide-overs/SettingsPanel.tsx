@@ -1,4 +1,10 @@
-import { type FormEvent, useEffect, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import {
+  cancelCodexDeviceLogin,
+  fetchCodexLogin,
+  startCodexDeviceLogin,
+  type CodexLoginView,
+} from "@/api/codex";
 import {
   fetchSettings,
   patchSettings,
@@ -9,6 +15,7 @@ import {
 type Policy = "dry_run" | "allowlist" | "allow_all" | "owner";
 
 const PROVIDER_LABELS: Record<ModelProvider, string> = {
+  codex: "ChatGPT / Codex",
   openrouter: "OpenRouter",
   ollama: "Ollama (local)",
   ollama_cloud: "Ollama Cloud",
@@ -17,11 +24,41 @@ const PROVIDER_LABELS: Record<ModelProvider, string> = {
 export default function SettingsPanel() {
   const [view, setView] = useState<SettingsView | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
-  const [provider, setProvider] = useState<ModelProvider>("openrouter");
+  const [provider, setProvider] = useState<ModelProvider>("codex");
   const [policy, setPolicy] = useState<Policy>("allow_all");
   const [recipients, setRecipients] = useState("");
   const [owners, setOwners] = useState("");
   const [status, setStatus] = useState("");
+  const [codexLogin, setCodexLogin] = useState<CodexLoginView | null>(null);
+  const [codexBusy, setCodexBusy] = useState(false);
+  const codexPollRef = useRef<number | null>(null);
+
+  const refreshCodexLogin = useCallback(async () => {
+    try {
+      const next = await fetchCodexLogin();
+      setCodexLogin(next);
+      return next;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (provider !== "codex") {
+      if (codexPollRef.current) {
+        window.clearInterval(codexPollRef.current);
+        codexPollRef.current = null;
+      }
+      return;
+    }
+    void refreshCodexLogin();
+    return () => {
+      if (codexPollRef.current) {
+        window.clearInterval(codexPollRef.current);
+        codexPollRef.current = null;
+      }
+    };
+  }, [provider, refreshCodexLogin]);
 
   useEffect(() => {
     fetchSettings()
@@ -107,6 +144,135 @@ export default function SettingsPanel() {
           {view.llm.live ? "" : " (offline — set API key or disable offline mode)"}
         </p>
       </fieldset>
+
+      {provider === "codex" && (
+        <fieldset className="space-y-2">
+          <legend className="text-xs font-medium uppercase tracking-wider text-fg-muted">
+            ChatGPT / Codex
+          </legend>
+          <div className="rounded-card border border-border bg-bg-card/60 p-3 text-xs">
+            {view.codex.logged_in || codexLogin?.logged_in ? (
+              <p className="text-fg-muted">
+                Connected via ChatGPT subscription
+                {codexLogin?.auth_mode ? ` (${codexLogin.auth_mode})` : ""}.
+              </p>
+            ) : (
+              <p className="text-fg-muted">Not signed in to ChatGPT / Codex yet.</p>
+            )}
+            {!view.codex.cli_available && (
+              <p className="mt-2 text-fg-muted">
+                Install the Codex CLI on this machine and restart wabot-agent, or paste an access
+                token below.
+              </p>
+            )}
+            {codexLogin?.session.status === "pending" && codexLogin.session.url && codexLogin.session.code && (
+              <div className="mt-3 space-y-2">
+                <p>
+                  1. Open{" "}
+                  <a
+                    className="font-mono text-accent underline"
+                    href={codexLogin.session.url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {codexLogin.session.url}
+                  </a>
+                </p>
+                <p>
+                  2. Enter code:{" "}
+                  <span className="font-mono text-accent">{codexLogin.session.code}</span>
+                </p>
+                <p className="text-fg-muted">Waiting for approval…</p>
+              </div>
+            )}
+            {codexLogin?.session.detail && codexLogin.session.status === "failed" && (
+              <p className="mt-2 text-red-400">{codexLogin.session.detail}</p>
+            )}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button
+                type="button"
+                disabled={codexBusy || !view.codex.cli_available}
+                className="rounded-pill border border-border px-2.5 py-1 text-xs transition hover:border-accent disabled:opacity-50"
+                onClick={async () => {
+                  setCodexBusy(true);
+                  setStatus("Starting ChatGPT sign-in…");
+                  try {
+                    const next = await startCodexDeviceLogin();
+                    setCodexLogin(next);
+                    if (codexPollRef.current) window.clearInterval(codexPollRef.current);
+                    codexPollRef.current = window.setInterval(() => {
+                      void refreshCodexLogin().then((v) => {
+                        if (v?.session.status === "complete" || v?.logged_in) {
+                          if (codexPollRef.current) window.clearInterval(codexPollRef.current);
+                          codexPollRef.current = null;
+                          setStatus("ChatGPT sign-in complete.");
+                          void fetchSettings().then(setView);
+                        } else if (v?.session.status === "failed") {
+                          if (codexPollRef.current) window.clearInterval(codexPollRef.current);
+                          codexPollRef.current = null;
+                          setStatus(v.session.detail ?? "Sign-in failed.");
+                        }
+                      });
+                    }, 2000);
+                  } catch (err) {
+                    setStatus(`Sign-in error: ${String(err)}`);
+                  } finally {
+                    setCodexBusy(false);
+                  }
+                }}
+              >
+                Sign in with ChatGPT
+              </button>
+              {codexLogin?.session.status === "pending" && (
+                <button
+                  type="button"
+                  className="rounded-pill border border-border px-2.5 py-1 text-xs transition hover:border-accent"
+                  onClick={async () => {
+                    setCodexBusy(true);
+                    try {
+                      const next = await cancelCodexDeviceLogin();
+                      setCodexLogin(next);
+                      if (codexPollRef.current) window.clearInterval(codexPollRef.current);
+                      codexPollRef.current = null;
+                      setStatus("Sign-in cancelled.");
+                    } finally {
+                      setCodexBusy(false);
+                    }
+                  }}
+                >
+                  Cancel
+                </button>
+              )}
+            </div>
+          </div>
+          <p className="text-xs text-fg-muted">
+            Credentials are stored at <span className="font-mono">{view.codex.auth_path}</span> on
+            the machine running wabot-agent.
+          </p>
+          <Field
+            label="Model"
+            value={draft.codex_model ?? view.codex.model}
+            onChange={(v) => setDraft((d) => ({ ...d, codex_model: v }))}
+          />
+          <Field
+            label="Base URL"
+            value={draft.codex_base_url ?? view.codex.base_url}
+            onChange={(v) => setDraft((d) => ({ ...d, codex_base_url: v }))}
+          />
+          <Field
+            label="Access token (optional override)"
+            type="password"
+            placeholder={view.codex.access_token.preview ?? "from ~/.codex/auth.json"}
+            value={draft.codex_access_token ?? ""}
+            onChange={(v) => setDraft((d) => ({ ...d, codex_access_token: v }))}
+          />
+          <Field
+            label="Account ID (optional override)"
+            value={draft.codex_account_id ?? view.codex.account_id ?? ""}
+            onChange={(v) => setDraft((d) => ({ ...d, codex_account_id: v }))}
+          />
+        </fieldset>
+      )}
 
       {provider === "openrouter" && (
         <fieldset className="space-y-2">

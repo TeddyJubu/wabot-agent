@@ -6,6 +6,7 @@ import io
 import json
 import logging
 import secrets
+import shutil
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -135,6 +136,10 @@ class SettingsPatch(BaseModel):
     """
 
     model_provider: str | None = None
+    codex_model: str | None = None
+    codex_base_url: str | None = None
+    codex_access_token: str | None = None
+    codex_account_id: str | None = None
     openrouter_api_key: str | None = None
     openrouter_base_url: str | None = None
     openrouter_model: str | None = None
@@ -1140,6 +1145,25 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     ),
                 )
 
+        if "codex_base_url" in proposed:
+            try:
+                from .codex_auth import require_safe_codex_url
+
+                require_safe_codex_url(proposed["codex_base_url"])
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
+            if (
+                proposed["codex_base_url"] != settings.codex_base_url
+                and "codex_access_token" not in proposed
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Changing codex_base_url requires codex_access_token in the "
+                        "same PATCH so the existing stored token is not sent to a new endpoint."
+                    ),
+                )
+
         # Build the full set we'll persist (existing disk overrides + this patch),
         # then validate the WHOLE thing on a snapshot — not just the delta. This
         # catches the edge case where a stale/manually-edited overrides file
@@ -1178,6 +1202,28 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/settings/test/llm", dependencies=[human_dependency])
     async def test_llm() -> dict[str, Any]:
         return await _test_llm_endpoint(settings)
+
+    @app.get("/api/codex/login", dependencies=[human_dependency])
+    async def codex_login_status() -> dict[str, Any]:
+        from .codex_device_login import device_login_view, poll_device_login
+
+        await poll_device_login(settings)
+        return device_login_view(settings)
+
+    @app.post("/api/codex/login/device", dependencies=[human_dependency])
+    async def codex_login_device_start() -> dict[str, Any]:
+        from .codex_device_login import device_login_view, poll_device_login, start_device_login
+
+        await start_device_login(settings)
+        await poll_device_login(settings, wait_seconds=8)
+        return device_login_view(settings)
+
+    @app.post("/api/codex/login/device/cancel", dependencies=[human_dependency])
+    async def codex_login_device_cancel() -> dict[str, Any]:
+        from .codex_device_login import cancel_device_login, device_login_view
+
+        await cancel_device_login()
+        return device_login_view(settings)
 
     @app.post("/api/settings/test/wabot", dependencies=[human_dependency])
     async def test_wabot() -> dict[str, Any]:
@@ -1271,16 +1317,55 @@ def _require_safe_openrouter_url(field: str, url: str) -> None:
 
 async def _test_llm_endpoint(settings: Settings) -> dict[str, Any]:
     import httpx
+    from openai import AsyncOpenAI
+    from openai.types.responses import ResponseCompletedEvent
 
+    from .codex_auth import codex_request_headers, load_codex_credentials
     from .llm_provider import resolved_llm_api_key, resolved_llm_base_url
 
     label = llm_provider_label(settings)
     if not settings.live_model_enabled:
+        if settings.model_provider == "codex":
+            return {
+                "ok": False,
+                "detail": (
+                    "Codex / ChatGPT credentials are not configured. "
+                    "Run `codex login` or set CODEX_ACCESS_TOKEN."
+                ),
+            }
         if settings.model_provider == "openrouter":
             return {"ok": False, "detail": "OPENROUTER_API_KEY is not configured."}
         if settings.model_provider == "ollama_cloud":
             return {"ok": False, "detail": "OLLAMA_API_KEY is not configured."}
         return {"ok": False, "detail": "Offline mode is enabled."}
+
+    model = active_model_id(settings)
+    if settings.model_provider == "codex":
+        credentials = load_codex_credentials(settings)
+        if credentials is None:
+            return {"ok": False, "detail": "Codex credentials are missing."}
+        client = AsyncOpenAI(
+            api_key=credentials.access_token,
+            base_url=resolved_llm_base_url(settings),
+            default_headers=codex_request_headers(credentials),
+        )
+        try:
+            stream = await client.responses.create(
+                model=model,
+                instructions="You are a connectivity probe.",
+                input=[{"role": "user", "content": "Reply with exactly: ok"}],
+                store=False,
+                stream=True,
+            )
+            async for event in stream:
+                if isinstance(event, ResponseCompletedEvent):
+                    return {
+                        "ok": True,
+                        "detail": f"{label} reachable. Active model: {model}",
+                    }
+        except Exception as exc:
+            return {"ok": False, "detail": f"{label} connection failed: {exc}"}
+        return {"ok": False, "detail": f"{label} probe ended without a completed response."}
 
     url = resolved_llm_base_url(settings) + "/models"
     headers: dict[str, str] = {}
@@ -1292,7 +1377,6 @@ async def _test_llm_endpoint(settings: Settings) -> dict[str, Any]:
             resp = await client.get(url, headers=headers)
     except httpx.HTTPError as exc:
         return {"ok": False, "detail": f"{label} connection failed: {exc}"}
-    model = active_model_id(settings)
     if resp.status_code == 200:
         return {"ok": True, "detail": f"{label} reachable. Active model: {model}"}
     return {
@@ -1303,6 +1387,8 @@ async def _test_llm_endpoint(settings: Settings) -> dict[str, Any]:
 
 def _settings_view(settings: Settings) -> dict[str, Any]:
     """Build the GET /api/settings response: secrets masked, source-of-truth annotated."""
+    from .codex_auth import load_codex_credentials
+
     return {
         "env_source": ".env (immutable) + data/runtime_overrides.json (operator-mutable)",
         "send_policy": settings.send_policy,
@@ -1313,10 +1399,20 @@ def _settings_view(settings: Settings) -> dict[str, Any]:
         "max_agent_turns": settings.max_agent_turns,
         "llm": {
             "provider": settings.model_provider,
-            "provider_choices": ["openrouter", "ollama", "ollama_cloud"],
+            "provider_choices": ["codex", "openrouter", "ollama", "ollama_cloud"],
             "model": active_model_id(settings),
             "label": llm_provider_label(settings),
             "live": settings.live_model_enabled,
+        },
+        "codex": {
+            "access_token": mask_secret(settings.codex_access_token),
+            "account_id": settings.codex_account_id,
+            "auth_path": str(settings.codex_auth_path),
+            "base_url": settings.codex_base_url,
+            "model": settings.codex_model,
+            "live": settings.model_provider == "codex" and settings.live_model_enabled,
+            "logged_in": load_codex_credentials(settings) is not None,
+            "cli_available": shutil.which("codex") is not None,
         },
         "openrouter": {
             "api_key": mask_secret(settings.openrouter_api_key),

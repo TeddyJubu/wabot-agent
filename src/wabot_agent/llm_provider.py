@@ -4,10 +4,12 @@ from typing import Any, Literal
 
 from .config import Settings
 
-ModelProvider = Literal["openrouter", "ollama", "ollama_cloud"]
+ModelProvider = Literal["codex", "openrouter", "ollama", "ollama_cloud"]
 
 
 def active_model_id(settings: Settings) -> str:
+    if settings.model_provider == "codex":
+        return settings.codex_model
     if settings.model_provider == "openrouter":
         return settings.openrouter_model
     model = settings.ollama_model
@@ -20,6 +22,8 @@ def active_model_id(settings: Settings) -> str:
 
 
 def resolved_llm_base_url(settings: Settings) -> str:
+    if settings.model_provider == "codex":
+        return settings.codex_base_url.rstrip("/")
     if settings.model_provider == "openrouter":
         return settings.openrouter_base_url.rstrip("/")
     if settings.model_provider == "ollama_cloud":
@@ -28,6 +32,11 @@ def resolved_llm_base_url(settings: Settings) -> str:
 
 
 def resolved_llm_api_key(settings: Settings) -> str:
+    if settings.model_provider == "codex":
+        from .codex_auth import load_codex_credentials
+
+        creds = load_codex_credentials(settings)
+        return creds.access_token if creds else ""
     if settings.model_provider == "openrouter":
         return settings.openrouter_api_key or ""
     if settings.model_provider == "ollama_cloud":
@@ -49,6 +58,11 @@ def vision_supported(settings: Settings) -> bool:
     if not settings.live_model_enabled:
         return False
     model = active_model_id(settings).lower()
+    if settings.model_provider == "codex":
+        return any(
+            token in model
+            for token in ("gpt-4o", "gpt-4.1", "gpt-5", "vision", "codex")
+        )
     if settings.model_provider == "openrouter":
         return any(
             token in model
@@ -74,6 +88,8 @@ def vision_supported(settings: Settings) -> bool:
 
 
 def llm_provider_label(settings: Settings) -> str:
+    if settings.model_provider == "codex":
+        return "ChatGPT / Codex subscription"
     if settings.model_provider == "openrouter":
         return "OpenRouter"
     if settings.model_provider == "ollama_cloud":

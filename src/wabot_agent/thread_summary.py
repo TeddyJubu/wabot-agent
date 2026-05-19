@@ -87,28 +87,52 @@ async def summarize_thread(
         return cap_turn_prompt(prior_summary or "", max_chars)
 
     model = settings.session_summary_model or active_model_id(settings)
-    client = AsyncOpenAI(
-        api_key=resolved_llm_api_key(settings),
-        base_url=resolved_llm_base_url(settings),
-        default_headers=llm_default_headers(settings),
-    )
+    user_text = "\n".join(user_parts)
     try:
-        response = await client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": _SUMMARY_SYSTEM},
-                {"role": "user", "content": "\n".join(user_parts)},
-            ],
-            max_tokens=settings.session_summary_max_output_tokens,
-            temperature=0.2,
-        )
+        if settings.model_provider == "codex":
+            from .codex_auth import codex_request_headers, load_codex_credentials
+
+            credentials = load_codex_credentials(settings)
+            if credentials is None:
+                raise RuntimeError("codex credentials are not configured")
+            client = AsyncOpenAI(
+                api_key=credentials.access_token,
+                base_url=resolved_llm_base_url(settings),
+                default_headers=codex_request_headers(credentials),
+            )
+            stream = await client.responses.create(
+                model=model,
+                instructions=_SUMMARY_SYSTEM,
+                input=[{"role": "user", "content": user_text}],
+                store=False,
+                stream=True,
+            )
+            content_parts: list[str] = []
+            async for event in stream:
+                if event.type == "response.output_text.delta":
+                    content_parts.append(event.delta)
+            content = "".join(content_parts)
+        else:
+            client = AsyncOpenAI(
+                api_key=resolved_llm_api_key(settings),
+                base_url=resolved_llm_base_url(settings),
+                default_headers=llm_default_headers(settings),
+            )
+            response = await client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": _SUMMARY_SYSTEM},
+                    {"role": "user", "content": user_text},
+                ],
+                max_tokens=settings.session_summary_max_output_tokens,
+                temperature=0.2,
+            )
+            content = response.choices[0].message.content if response.choices else None
     except Exception as exc:
         logger.warning("session_summary_llm_failed: %s", exc)
         return _fallback_summary(
             dropped_items, prior_summary=prior_summary, max_chars=max_chars
         )
-
-    content = response.choices[0].message.content if response.choices else None
     if not content or not content.strip():
         return _fallback_summary(
             dropped_items, prior_summary=prior_summary, max_chars=max_chars

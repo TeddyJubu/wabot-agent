@@ -8,11 +8,36 @@ from wabot_agent.llm_provider import (
 )
 
 
-def test_openrouter_live_requires_key() -> None:
-    settings = Settings(WABOT_AGENT_OFFLINE_MODE=False, _env_file=None)
+def test_codex_live_requires_credentials(tmp_path) -> None:
+    settings = Settings(
+        WABOT_AGENT_MODEL_PROVIDER="codex",
+        CODEX_AUTH_PATH=str(tmp_path / "missing.json"),
+        WABOT_AGENT_OFFLINE_MODE=False,
+        _env_file=None,
+    )
     assert not settings.live_model_enabled
 
     settings = Settings(
+        WABOT_AGENT_MODEL_PROVIDER="codex",
+        CODEX_ACCESS_TOKEN="test-token",
+        WABOT_AGENT_OFFLINE_MODE=False,
+        _env_file=None,
+    )
+    assert settings.live_model_enabled
+    assert active_model_id(settings) == settings.codex_model
+    assert resolved_llm_base_url(settings) == "https://chatgpt.com/backend-api/codex"
+
+
+def test_openrouter_live_requires_key() -> None:
+    settings = Settings(
+        WABOT_AGENT_MODEL_PROVIDER="openrouter",
+        WABOT_AGENT_OFFLINE_MODE=False,
+        _env_file=None,
+    )
+    assert not settings.live_model_enabled
+
+    settings = Settings(
+        WABOT_AGENT_MODEL_PROVIDER="openrouter",
         OPENROUTER_API_KEY="sk-test",
         WABOT_AGENT_OFFLINE_MODE=False,
         _env_file=None,

@@ -18,6 +18,8 @@ from agents.tool import Tool
 from agents.usage import Usage
 from openai import AsyncOpenAI
 
+from .codex_auth import codex_request_headers, load_codex_credentials
+from .codex_model import CodexSubscriptionModel
 from .config import Settings
 from .llm_provider import (
     active_model_id,
@@ -31,9 +33,10 @@ from .llm_provider import (
 from .redaction import redact_text
 
 try:
-    from agents import OpenAIChatCompletionsModel
+    from agents import OpenAIChatCompletionsModel, OpenAIResponsesModel
 except ImportError:  # pragma: no cover - dependency import guard
     OpenAIChatCompletionsModel = None  # type: ignore[assignment]
+    OpenAIResponsesModel = None  # type: ignore[assignment]
 
 
 class OfflineModel(Model):
@@ -101,6 +104,23 @@ def build_model(settings: Settings) -> Model:
     if not settings.live_model_enabled:
         return OfflineModel()
 
+    if settings.model_provider == "codex":
+        if OpenAIResponsesModel is None:  # pragma: no cover
+            raise RuntimeError("openai-agents is missing OpenAIResponsesModel.")
+        credentials = load_codex_credentials(settings)
+        if credentials is None:
+            return OfflineModel()
+        client = AsyncOpenAI(
+            api_key=credentials.access_token,
+            base_url=resolved_llm_base_url(settings),
+            default_headers=codex_request_headers(credentials),
+        )
+        inner = OpenAIResponsesModel(
+            model=active_model_id(settings),
+            openai_client=client,
+        )
+        return CodexSubscriptionModel(inner)
+
     if OpenAIChatCompletionsModel is None:  # pragma: no cover
         raise RuntimeError("openai-agents is missing OpenAIChatCompletionsModel.")
 
@@ -117,7 +137,17 @@ def build_model(settings: Settings) -> Model:
 
 
 def model_settings(settings: Settings) -> ModelSettings:
-    kwargs: dict[str, Any] = {
+    if settings.model_provider == "codex":
+        # ChatGPT-backed Codex rejects several OpenAI request knobs.
+        kwargs: dict[str, Any] = {"store": False, "parallel_tool_calls": False}
+        reasoning = reasoning_for_model(settings)
+        if reasoning is not None:
+            kwargs["reasoning"] = reasoning
+        if not omit_tool_choice(settings):
+            kwargs["tool_choice"] = _tool_choice_auto()
+        return ModelSettings(**kwargs)
+
+    kwargs = {
         "temperature": settings.agent_temperature,
         "max_tokens": max_tokens_for_model(settings),
         "parallel_tool_calls": False,

@@ -29,6 +29,13 @@ def mem0_enabled(settings: Settings) -> bool:
         return False
     if settings.mem0_use_platform:
         return bool(settings.mem0_api_key)
+    if settings.model_provider == "codex":
+        # Mem0 uses Chat Completions; keep it on OpenRouter when configured.
+        if settings.openrouter_api_key:
+            return True
+        from .codex_auth import load_codex_credentials
+
+        return load_codex_credentials(settings) is not None
     if settings.model_provider == "openrouter":
         return bool(settings.openrouter_api_key)
     if settings.model_provider == "ollama_cloud":
@@ -39,6 +46,11 @@ def mem0_enabled(settings: Settings) -> bool:
 def _llm_api_key(settings: Settings) -> str | None:
     if settings.mem0_use_platform:
         return settings.mem0_api_key
+    if settings.model_provider == "codex":
+        from .codex_auth import load_codex_credentials
+
+        creds = load_codex_credentials(settings)
+        return creds.access_token if creds else None
     if settings.model_provider == "openrouter":
         return settings.openrouter_api_key
     if settings.model_provider == "ollama_cloud":
@@ -64,6 +76,21 @@ def _config_cache_key(settings: Settings) -> str:
 
 def _mem0_openai_llm(settings: Settings) -> tuple[str, str, str]:
     """API key, OpenAI-compatible base URL, and model for Mem0 fact extraction."""
+    if settings.model_provider == "codex":
+        if settings.openrouter_api_key:
+            return (
+                settings.openrouter_api_key,
+                settings.openrouter_base_url,
+                settings.mem0_llm_model or settings.openrouter_model,
+            )
+        from .codex_auth import load_codex_credentials
+
+        creds = load_codex_credentials(settings)
+        return (
+            creds.access_token if creds else "",
+            settings.codex_base_url,
+            settings.mem0_llm_model or settings.codex_model,
+        )
     if settings.model_provider == "openrouter":
         return (
             settings.openrouter_api_key or "",
@@ -106,13 +133,13 @@ def _mem0_embedding_dims(settings: Settings) -> int:
 
 
 def _mem0_use_fastembed(settings: Settings) -> bool:
-    return settings.model_provider in ("ollama", "ollama_cloud")
+    return settings.model_provider in ("codex", "ollama", "ollama_cloud")
 
 
 @contextmanager
 def _mem0_llm_env(settings: Settings):
     """Mem0's OpenAI LLM uses OpenRouter whenever OPENROUTER_API_KEY is set."""
-    if settings.model_provider == "openrouter":
+    if settings.model_provider in ("codex", "openrouter"):
         yield
         return
     saved = {

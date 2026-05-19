@@ -26,6 +26,10 @@ from .config import Settings
 MUTABLE_FIELDS: frozenset[str] = frozenset(
     {
         "model_provider",
+        "codex_model",
+        "codex_base_url",
+        "codex_access_token",
+        "codex_account_id",
         "openrouter_api_key",
         "openrouter_base_url",
         "openrouter_model",
@@ -51,7 +55,7 @@ MUTABLE_FIELDS: frozenset[str] = frozenset(
 
 # Fields whose values are secrets and must be masked when read back over the API.
 SECRET_FIELDS: frozenset[str] = frozenset(
-    {"openrouter_api_key", "ollama_api_key", "wabot_token"}
+    {"codex_access_token", "openrouter_api_key", "ollama_api_key", "wabot_token"}
 )
 
 
@@ -117,6 +121,20 @@ def apply_overrides(settings: Settings, overrides: dict[str, Any]) -> set[str]:
             setattr(settings, key, value)
             changed.add(key)
     return changed
+
+
+def clear_codex_token_override(settings: Settings) -> None:
+    """Drop dashboard-pasted Codex tokens so a fresh auth.json login takes effect."""
+    merged = load_overrides(settings.runtime_overrides_path)
+    changed = False
+    for key in ("codex_access_token", "codex_account_id"):
+        if key in merged:
+            merged.pop(key, None)
+            changed = True
+    if changed:
+        save_overrides(settings.runtime_overrides_path, merged)
+    settings.codex_access_token = None
+    settings.codex_account_id = None
 
 
 def mask_secret(value: str | None) -> dict[str, Any]:
