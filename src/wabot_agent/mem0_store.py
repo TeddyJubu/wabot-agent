@@ -49,7 +49,7 @@ def _config_cache_key(settings: Settings) -> str:
             str(settings.mem0_use_platform),
             str(settings.mem0_path),
             settings.mem0_collection,
-            settings.mem0_llm_model,
+            str(settings.mem0_llm_model or ""),
             settings.mem0_embed_model,
             settings.openrouter_base_url,
         ]
@@ -66,7 +66,13 @@ def build_mem0_config(settings: Settings) -> dict[str, Any]:
         return {"api_key": api_key}
 
     settings.mem0_path.mkdir(parents=True, exist_ok=True)
-    if settings.model_provider == "openrouter":
+    # Mem0 needs an OpenAI-compatible /embeddings endpoint. Prefer OpenRouter when
+    # configured even if chat uses ollama_cloud (Ollama has no embeddings API).
+    if settings.openrouter_api_key:
+        api_key = settings.openrouter_api_key
+        base_url = settings.openrouter_base_url
+        llm_model = settings.mem0_llm_model or settings.openrouter_model
+    elif settings.model_provider == "openrouter":
         base_url = settings.openrouter_base_url
         llm_model = settings.mem0_llm_model or settings.openrouter_model
     elif settings.model_provider == "ollama_cloud":
