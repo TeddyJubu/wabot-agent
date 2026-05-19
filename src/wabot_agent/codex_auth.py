@@ -22,7 +22,26 @@ class CodexCredentials:
 
 
 def codex_auth_path(settings: Settings) -> Path:
-    return settings.codex_auth_path.expanduser()
+    """Resolve where Codex CLI stores auth.json.
+
+    Default ~/.codex/auth.json is rewritten to data/codex/auth.json when HOME is the
+    app directory (typical VPS: systemd HOME=/opt/wabot-agent). That keeps credentials
+    under data/ (writable with ProtectSystem, excluded from rsync --delete).
+    """
+    path = settings.codex_auth_path.expanduser()
+    legacy = Path.cwd() / ".codex" / "auth.json"
+    if path == legacy:
+        return settings.data_dir.resolve() / "codex" / "auth.json"
+    if not path.is_absolute():
+        return (Path.cwd() / path).resolve()
+    return path
+
+
+def ensure_codex_home(settings: Settings) -> Path:
+    """Create the Codex config directory (CODEX_HOME) if missing."""
+    home = codex_auth_path(settings).parent
+    home.mkdir(parents=True, exist_ok=True)
+    return home
 
 
 def require_safe_codex_url(url: str) -> None:

@@ -27,6 +27,7 @@ MUTABLE_FIELDS: frozenset[str] = frozenset(
     {
         "model_provider",
         "codex_model",
+        "codex_reasoning_effort",
         "codex_base_url",
         "codex_access_token",
         "codex_account_id",

@@ -25,6 +25,10 @@ export interface SettingsView {
     auth_path: string;
     base_url: string;
     model: string;
+    model_choices: string[];
+    reasoning_effort: string;
+    reasoning_effort_choices: string[];
+    reasoning_effort_labels: Record<string, string>;
     live: boolean;
     logged_in: boolean;
     cli_available: boolean;

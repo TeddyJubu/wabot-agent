@@ -51,12 +51,18 @@ class Settings(BaseSettings):
         default="gpt-5.5",
         validation_alias=AliasChoices("CODEX_MODEL", "WABOT_AGENT_CODEX_MODEL"),
     )
+    codex_reasoning_effort: str = Field(
+        default="medium",
+        validation_alias=AliasChoices(
+            "CODEX_REASONING_EFFORT", "WABOT_AGENT_CODEX_REASONING_EFFORT"
+        ),
+    )
     codex_base_url: str = Field(
         default="https://chatgpt.com/backend-api/codex",
         validation_alias=AliasChoices("CODEX_BASE_URL", "WABOT_AGENT_CODEX_BASE_URL"),
     )
     codex_auth_path: Path = Field(
-        default=Path("~/.codex/auth.json"),
+        default=Path("data/codex/auth.json"),
         validation_alias=AliasChoices("CODEX_AUTH_PATH", "WABOT_AGENT_CODEX_AUTH_PATH"),
     )
     codex_access_token: str | None = Field(
@@ -623,6 +629,19 @@ class Settings(BaseSettings):
         require_safe_codex_url(value)
         return value
 
+    @field_validator("codex_reasoning_effort")
+    @classmethod
+    def validate_codex_reasoning_effort(cls, value: str) -> str:
+        from .codex_models import CODEX_REASONING_EFFORT_CHOICES
+
+        normalized = value.strip().lower()
+        allowed = set(CODEX_REASONING_EFFORT_CHOICES)
+        if normalized not in allowed:
+            raise ValueError(
+                f"codex_reasoning_effort must be one of {sorted(allowed)}; got '{value}'."
+            )
+        return normalized
+
     @field_validator("cf_access_team_domain", "cf_access_aud", mode="before")
     @classmethod
     def empty_cf_access_to_none(cls, value: object) -> object:
@@ -685,6 +704,9 @@ class Settings(BaseSettings):
 
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
+        from .codex_auth import ensure_codex_home
+
+        ensure_codex_home(self)
         self.media_dir.mkdir(parents=True, exist_ok=True)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)

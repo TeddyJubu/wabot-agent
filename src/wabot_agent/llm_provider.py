@@ -119,11 +119,21 @@ def max_tokens_for_model(settings: Settings) -> int:
 
 
 def reasoning_for_model(settings: Settings) -> Any | None:
+    if settings.model_provider == "codex":
+        return _codex_reasoning(settings)
+
     model = active_model_id(settings).lower()
-    if "thinking" in model or "trinity" in model or (
-        settings.model_provider != "openrouter" and "minimax" in model
-    ):
+    if "thinking" in model or "trinity" in model or "minimax" in model:
         from openai.types.shared.reasoning import Reasoning
 
         return Reasoning(effort="high")
     return None
+
+
+def _codex_reasoning(settings: Settings) -> Any | None:
+    from openai.types.shared.reasoning import Reasoning
+
+    effort = settings.codex_reasoning_effort.strip().lower()
+    if effort in ("", "default", "none"):
+        return None
+    return Reasoning(effort=effort)  # type: ignore[arg-type]

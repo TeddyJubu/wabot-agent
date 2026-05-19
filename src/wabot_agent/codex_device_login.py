@@ -10,7 +10,12 @@ import shutil
 from dataclasses import dataclass
 from typing import Literal
 
-from .codex_auth import auth_file_mtime, codex_auth_path, load_codex_credentials
+from .codex_auth import (
+    auth_file_mtime,
+    codex_auth_path,
+    ensure_codex_home,
+    load_codex_credentials,
+)
 from .config import Settings
 from .runtime_overrides import clear_codex_token_override
 
@@ -60,8 +65,11 @@ def parse_device_auth_output(text: str) -> tuple[str, str] | None:
 
 
 def device_login_view(settings: Settings) -> dict[str, object]:
+    global _session
     creds = load_codex_credentials(settings)
     logged_in = creds is not None and _session.status != "pending"
+    if logged_in and _session.status == "failed":
+        _session = DeviceLoginSession(status="idle")
     return {
         "cli_available": codex_cli_available(),
         "logged_in": logged_in,
@@ -92,6 +100,7 @@ async def start_device_login(settings: Settings) -> DeviceLoginSession:
         _auth_mtime_at_start = auth_file_mtime(settings)
         _session = DeviceLoginSession(status="pending")
         _task = asyncio.create_task(_run_device_login(settings))
+        _task.add_done_callback(_device_login_task_done)
         return _session
 
 
@@ -143,12 +152,37 @@ def _auth_file_refreshed(settings: Settings) -> bool:
     return current > _auth_mtime_at_start
 
 
+def _device_login_task_done(task: asyncio.Task[None]) -> None:
+    global _session
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is None:
+        return
+    logger.exception("codex device login task failed")
+    _session = DeviceLoginSession(
+        status="failed",
+        url=_session.url,
+        code=_session.code,
+        detail=str(exc),
+    )
+
+
 async def _run_device_login(settings: Settings) -> None:
     global _proc, _session
 
+    try:
+        codex_home = ensure_codex_home(settings)
+    except OSError as exc:
+        _session = DeviceLoginSession(
+            status="failed",
+            detail=f"Cannot create Codex config directory: {exc}",
+        )
+        return
+
     env = os.environ.copy()
     auth_path = codex_auth_path(settings)
-    env.setdefault("CODEX_HOME", str(auth_path.parent))
+    env["CODEX_HOME"] = str(codex_home)
 
     try:
         _proc = await asyncio.create_subprocess_exec(
@@ -180,18 +214,26 @@ async def _run_device_login(settings: Settings) -> None:
         returncode = await _proc.wait()
         _proc = None
 
-    if returncode == 0 and _auth_file_refreshed(settings) and load_codex_credentials(settings):
+    combined = _ANSI_RE.sub("", "".join(chunks))
+    creds = load_codex_credentials(settings)
+    login_succeeded = (
+        creds is not None
+        and (
+            "Successfully logged in" in combined
+            or (returncode == 0 and _auth_file_refreshed(settings))
+        )
+    )
+    if login_succeeded:
         clear_codex_token_override(settings)
         _session = DeviceLoginSession(
             status="complete",
             url=_session.url,
             code=_session.code,
-            detail="Signed in with ChatGPT.",
+            detail=None,
         )
         return
 
-    combined = _ANSI_RE.sub("", "".join(chunks))
-    detail = combined.strip()[-400:] or f"codex login exited with code {returncode}"
+    detail = _failure_detail(combined, returncode)
     _session = DeviceLoginSession(
         status="failed",
         url=_session.url,
@@ -199,3 +241,19 @@ async def _run_device_login(settings: Settings) -> None:
         detail=detail,
     )
     logger.warning("codex device login failed: %s", detail)
+
+
+def _failure_detail(output: str, returncode: int) -> str:
+    """Short operator-facing message — never dump raw CLI banners."""
+    lower = output.lower()
+    if "permission denied" in lower:
+        return "Could not write Codex credentials. Check data/codex permissions on the server."
+    if "path does not exist" in lower and "codex_home" in lower:
+        return "Codex config directory is missing. Restart wabot-agent and try again."
+    lines = [ln.strip() for ln in output.splitlines() if ln.strip()]
+    for line in reversed(lines):
+        if line.startswith("Error") or "error:" in line.lower():
+            return line[:240]
+    if returncode != 0:
+        return f"Codex login exited with code {returncode}."
+    return "Sign-in did not complete. Try again or paste an access token below."

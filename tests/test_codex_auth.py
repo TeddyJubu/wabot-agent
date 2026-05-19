@@ -8,7 +8,9 @@ import pytest
 
 import wabot_agent.codex_device_login as codex_device_login
 from wabot_agent.codex_auth import (
+    codex_auth_path,
     detect_model_provider,
+    ensure_codex_home,
     load_codex_credentials,
     model_provider_explicitly_set,
     require_safe_codex_url,
@@ -107,6 +109,30 @@ def test_require_safe_codex_url_rejects_untrusted_host() -> None:
 
 def test_require_safe_codex_url_accepts_default() -> None:
     require_safe_codex_url("https://chatgpt.com/backend-api/codex")
+
+
+def test_ensure_codex_home_creates_directory(tmp_path: Path) -> None:
+    auth_path = tmp_path / "nested" / ".codex" / "auth.json"
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        codex_auth_path=auth_path,
+        _env_file=None,
+    )
+    home = ensure_codex_home(settings)
+    assert home == auth_path.parent
+    assert home.is_dir()
+
+
+def test_legacy_home_codex_path_redirects_to_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    settings = Settings(
+        data_dir=tmp_path / "data",
+        codex_auth_path=Path("~/.codex/auth.json"),
+        _env_file=None,
+    )
+    resolved = codex_auth_path(settings)
+    assert resolved == (tmp_path / "data" / "codex" / "auth.json").resolve()
 
 
 def test_detect_model_provider_prefers_codex_auth_file(tmp_path: Path) -> None:

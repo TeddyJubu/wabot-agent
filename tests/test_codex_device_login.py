@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from wabot_agent.codex_device_login import parse_device_auth_output
+from wabot_agent.codex_device_login import _failure_detail, parse_device_auth_output
 
 SAMPLE = """
 Welcome to Codex
@@ -19,3 +19,10 @@ Device codes are a common phishing target.
 def test_parse_device_auth_output() -> None:
     parsed = parse_device_auth_output(SAMPLE)
     assert parsed == ("https://auth.openai.com/codex/device", "AY53-ERUBQ")
+
+
+def test_failure_detail_is_short_not_raw_cli_banner() -> None:
+    raw = SAMPLE + "\nSuccessfully logged in\n"
+    detail = _failure_detail(raw, 1)
+    assert "Welcome to Codex" not in detail
+    assert len(detail) < 200

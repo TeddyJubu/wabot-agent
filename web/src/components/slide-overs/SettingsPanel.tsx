@@ -151,108 +151,142 @@ export default function SettingsPanel() {
             ChatGPT / Codex
           </legend>
           <div className="rounded-card border border-border bg-bg-card/60 p-3 text-xs">
-            {view.codex.logged_in || codexLogin?.logged_in ? (
-              <p className="text-fg-muted">
-                Connected via ChatGPT subscription
-                {codexLogin?.auth_mode ? ` (${codexLogin.auth_mode})` : ""}.
-              </p>
-            ) : (
-              <p className="text-fg-muted">Not signed in to ChatGPT / Codex yet.</p>
-            )}
-            {!view.codex.cli_available && (
-              <p className="mt-2 text-fg-muted">
-                Install the Codex CLI on this machine and restart wabot-agent, or paste an access
-                token below.
-              </p>
-            )}
-            {codexLogin?.session.status === "pending" && codexLogin.session.url && codexLogin.session.code && (
-              <div className="mt-3 space-y-2">
-                <p>
-                  1. Open{" "}
-                  <a
-                    className="font-mono text-accent underline"
-                    href={codexLogin.session.url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {codexLogin.session.url}
-                  </a>
-                </p>
-                <p>
-                  2. Enter code:{" "}
-                  <span className="font-mono text-accent">{codexLogin.session.code}</span>
-                </p>
-                <p className="text-fg-muted">Waiting for approval…</p>
-              </div>
-            )}
-            {codexLogin?.session.detail && codexLogin.session.status === "failed" && (
-              <p className="mt-2 text-red-400">{codexLogin.session.detail}</p>
-            )}
-            <div className="mt-3 flex flex-wrap gap-2">
-              <button
-                type="button"
-                disabled={codexBusy || !view.codex.cli_available}
-                className="rounded-pill border border-border px-2.5 py-1 text-xs transition hover:border-accent disabled:opacity-50"
-                onClick={async () => {
-                  setCodexBusy(true);
-                  setStatus("Starting ChatGPT sign-in…");
-                  try {
-                    const next = await startCodexDeviceLogin();
-                    setCodexLogin(next);
-                    if (codexPollRef.current) window.clearInterval(codexPollRef.current);
-                    codexPollRef.current = window.setInterval(() => {
-                      void refreshCodexLogin().then((v) => {
-                        if (v?.session.status === "complete" || v?.logged_in) {
-                          if (codexPollRef.current) window.clearInterval(codexPollRef.current);
-                          codexPollRef.current = null;
-                          setStatus("ChatGPT sign-in complete.");
-                          void fetchSettings().then(setView);
-                        } else if (v?.session.status === "failed") {
-                          if (codexPollRef.current) window.clearInterval(codexPollRef.current);
-                          codexPollRef.current = null;
-                          setStatus(v.session.detail ?? "Sign-in failed.");
-                        }
-                      });
-                    }, 2000);
-                  } catch (err) {
-                    setStatus(`Sign-in error: ${String(err)}`);
-                  } finally {
-                    setCodexBusy(false);
-                  }
-                }}
-              >
-                Sign in with ChatGPT
-              </button>
-              {codexLogin?.session.status === "pending" && (
-                <button
-                  type="button"
-                  className="rounded-pill border border-border px-2.5 py-1 text-xs transition hover:border-accent"
-                  onClick={async () => {
-                    setCodexBusy(true);
-                    try {
-                      const next = await cancelCodexDeviceLogin();
-                      setCodexLogin(next);
-                      if (codexPollRef.current) window.clearInterval(codexPollRef.current);
-                      codexPollRef.current = null;
-                      setStatus("Sign-in cancelled.");
-                    } finally {
-                      setCodexBusy(false);
-                    }
-                  }}
-                >
-                  Cancel
-                </button>
-              )}
-            </div>
+            {(() => {
+              const signedIn = Boolean(view.codex.logged_in || codexLogin?.logged_in);
+              const pending = codexLogin?.session.status === "pending";
+              const failed =
+                codexLogin?.session.status === "failed" &&
+                Boolean(codexLogin.session.detail) &&
+                !signedIn;
+
+              return (
+                <>
+                  {signedIn ? (
+                    <p className="text-emerald-400/90">
+                      Connected via ChatGPT subscription
+                      {codexLogin?.auth_mode ? ` (${codexLogin.auth_mode})` : ""}.
+                    </p>
+                  ) : (
+                    <p className="text-fg-muted">Not signed in to ChatGPT / Codex yet.</p>
+                  )}
+                  {!view.codex.cli_available && (
+                    <p className="mt-2 text-fg-muted">
+                      Install the Codex CLI on this machine and restart wabot-agent, or paste an
+                      access token below.
+                    </p>
+                  )}
+                  {pending && codexLogin.session.url && codexLogin.session.code && (
+                    <ol className="mt-3 list-decimal space-y-2 pl-4 text-fg-muted">
+                      <li>
+                        Open{" "}
+                        <a
+                          className="text-accent underline"
+                          href={codexLogin.session.url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          auth.openai.com/codex/device
+                        </a>{" "}
+                        and sign in.
+                      </li>
+                      <li>
+                        Enter code{" "}
+                        <span className="rounded bg-bg-elevated px-1.5 py-0.5 font-mono text-sm text-accent">
+                          {codexLogin.session.code}
+                        </span>
+                      </li>
+                      <li className="list-none pl-0">Waiting for approval…</li>
+                    </ol>
+                  )}
+                  {failed && (
+                    <p className="mt-2 rounded border border-red-500/30 bg-red-500/10 px-2 py-1.5 text-red-300">
+                      {codexLogin.session.detail}
+                    </p>
+                  )}
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {!signedIn && (
+                      <button
+                        type="button"
+                        disabled={codexBusy || !view.codex.cli_available || pending}
+                        className="rounded-pill border border-border px-2.5 py-1 text-xs transition hover:border-accent disabled:opacity-50"
+                        onClick={async () => {
+                          setCodexBusy(true);
+                          setStatus("Starting ChatGPT sign-in…");
+                          try {
+                            const next = await startCodexDeviceLogin();
+                            setCodexLogin(next);
+                            if (codexPollRef.current) window.clearInterval(codexPollRef.current);
+                            codexPollRef.current = window.setInterval(() => {
+                              void refreshCodexLogin().then((v) => {
+                                if (v?.session.status === "complete" || v?.logged_in) {
+                                  if (codexPollRef.current) {
+                                    window.clearInterval(codexPollRef.current);
+                                  }
+                                  codexPollRef.current = null;
+                                  setCodexLogin(v);
+                                  setStatus("ChatGPT sign-in complete.");
+                                  void fetchSettings().then(setView);
+                                } else if (v?.session.status === "failed" && !v.logged_in) {
+                                  if (codexPollRef.current) {
+                                    window.clearInterval(codexPollRef.current);
+                                  }
+                                  codexPollRef.current = null;
+                                  setCodexLogin(v);
+                                  setStatus(v.session.detail ?? "Sign-in failed.");
+                                }
+                              });
+                            }, 2000);
+                          } catch (err) {
+                            setStatus(`Sign-in error: ${String(err)}`);
+                          } finally {
+                            setCodexBusy(false);
+                          }
+                        }}
+                      >
+                        Sign in with ChatGPT
+                      </button>
+                    )}
+                    {pending && (
+                      <button
+                        type="button"
+                        className="rounded-pill border border-border px-2.5 py-1 text-xs transition hover:border-accent"
+                        onClick={async () => {
+                          setCodexBusy(true);
+                          try {
+                            const next = await cancelCodexDeviceLogin();
+                            setCodexLogin(next);
+                            if (codexPollRef.current) window.clearInterval(codexPollRef.current);
+                            codexPollRef.current = null;
+                            setStatus("Sign-in cancelled.");
+                          } finally {
+                            setCodexBusy(false);
+                          }
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                </>
+              );
+            })()}
           </div>
           <p className="text-xs text-fg-muted">
             Credentials are stored at <span className="font-mono">{view.codex.auth_path}</span> on
             the machine running wabot-agent.
           </p>
-          <Field
+          <SelectField
             label="Model"
             value={draft.codex_model ?? view.codex.model}
+            choices={view.codex.model_choices}
             onChange={(v) => setDraft((d) => ({ ...d, codex_model: v }))}
+          />
+          <SelectField
+            label="Reasoning effort"
+            value={draft.codex_reasoning_effort ?? view.codex.reasoning_effort}
+            choices={view.codex.reasoning_effort_choices}
+            choiceLabels={view.codex.reasoning_effort_labels}
+            onChange={(v) => setDraft((d) => ({ ...d, codex_reasoning_effort: v }))}
           />
           <Field
             label="Base URL"
@@ -262,7 +296,7 @@ export default function SettingsPanel() {
           <Field
             label="Access token (optional override)"
             type="password"
-            placeholder={view.codex.access_token.preview ?? "from ~/.codex/auth.json"}
+            placeholder={view.codex.access_token.preview ?? "from data/codex/auth.json"}
             value={draft.codex_access_token ?? ""}
             onChange={(v) => setDraft((d) => ({ ...d, codex_access_token: v }))}
           />
@@ -442,6 +476,34 @@ function Field({ label, value, placeholder, type = "text", onChange }: FieldProp
         onChange={(e) => onChange(e.target.value)}
         className="mt-1 w-full rounded-card border border-border bg-bg-card px-3 py-2 text-sm font-mono"
       />
+    </label>
+  );
+}
+
+interface SelectFieldProps {
+  label: string;
+  value: string;
+  choices: string[];
+  choiceLabels?: Record<string, string>;
+  onChange: (v: string) => void;
+}
+
+function SelectField({ label, value, choices, choiceLabels, onChange }: SelectFieldProps) {
+  const options = choices.includes(value) ? choices : [value, ...choices];
+  return (
+    <label className="block">
+      <span className="text-xs text-fg-muted">{label}</span>
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="mt-1 w-full rounded-card border border-border bg-bg-card px-3 py-2 text-sm"
+      >
+        {options.map((choice) => (
+          <option key={choice} value={choice}>
+            {choiceLabels?.[choice] ?? choice}
+          </option>
+        ))}
+      </select>
     </label>
   );
 }

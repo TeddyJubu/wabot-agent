@@ -24,6 +24,8 @@ set -euo pipefail
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:/home/linuxbrew/.linuxbrew/bin:$PATH"
 cd -- "$1"
 uv sync --all-extras
+mkdir -p "$1/data/codex"
+sudo chown wabotagent:wabotagent "$1/data/codex" 2>/dev/null || true
 sudo systemctl restart wabot-agent
 sudo systemctl status wabot-agent --no-pager
 REMOTE

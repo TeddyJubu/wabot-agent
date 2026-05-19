@@ -137,6 +137,7 @@ class SettingsPatch(BaseModel):
 
     model_provider: str | None = None
     codex_model: str | None = None
+    codex_reasoning_effort: str | None = None
     codex_base_url: str | None = None
     codex_access_token: str | None = None
     codex_account_id: str | None = None
@@ -1388,6 +1389,11 @@ async def _test_llm_endpoint(settings: Settings) -> dict[str, Any]:
 def _settings_view(settings: Settings) -> dict[str, Any]:
     """Build the GET /api/settings response: secrets masked, source-of-truth annotated."""
     from .codex_auth import load_codex_credentials
+    from .codex_models import (
+        CODEX_REASONING_EFFORT_CHOICES,
+        CODEX_REASONING_LABELS,
+        codex_model_choices_for_settings,
+    )
 
     return {
         "env_source": ".env (immutable) + data/runtime_overrides.json (operator-mutable)",
@@ -1410,6 +1416,10 @@ def _settings_view(settings: Settings) -> dict[str, Any]:
             "auth_path": str(settings.codex_auth_path),
             "base_url": settings.codex_base_url,
             "model": settings.codex_model,
+            "model_choices": codex_model_choices_for_settings(settings.codex_model),
+            "reasoning_effort": settings.codex_reasoning_effort,
+            "reasoning_effort_choices": list(CODEX_REASONING_EFFORT_CHOICES),
+            "reasoning_effort_labels": CODEX_REASONING_LABELS,
             "live": settings.model_provider == "codex" and settings.live_model_enabled,
             "logged_in": load_codex_credentials(settings) is not None,
             "cli_available": shutil.which("codex") is not None,

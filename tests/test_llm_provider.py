@@ -28,6 +28,34 @@ def test_codex_live_requires_credentials(tmp_path) -> None:
     assert resolved_llm_base_url(settings) == "https://chatgpt.com/backend-api/codex"
 
 
+def test_codex_reasoning_effort_from_settings() -> None:
+    from openai.types.shared.reasoning import Reasoning
+
+    from wabot_agent.llm_provider import reasoning_for_model
+
+    settings = Settings(
+        model_provider="codex",
+        codex_reasoning_effort="high",
+        offline_mode=False,
+        _env_file=None,
+    )
+    reasoning = reasoning_for_model(settings)
+    assert isinstance(reasoning, Reasoning)
+    assert reasoning.effort == "high"
+
+
+def test_codex_reasoning_default_omits_block() -> None:
+    from wabot_agent.llm_provider import reasoning_for_model
+
+    settings = Settings(
+        model_provider="codex",
+        codex_reasoning_effort="default",
+        offline_mode=False,
+        _env_file=None,
+    )
+    assert reasoning_for_model(settings) is None
+
+
 def test_openrouter_live_requires_key() -> None:
     settings = Settings(
         WABOT_AGENT_MODEL_PROVIDER="openrouter",
