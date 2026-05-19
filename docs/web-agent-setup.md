@@ -16,6 +16,16 @@ Set in `.env`:
 - `FIRECRAWL_API_KEY=fc-...` — [firecrawl.dev](https://firecrawl.dev)
 - `GOOGLE_GENERATIVE_AI_API_KEY=...` (or `ANTHROPIC_API_KEY` / `OPENAI_API_KEY`)
 
+**Ollama Cloud (OpenAI-compatible):** reuse your wabot `OLLAMA_API_KEY` and point the sidecar at Ollama’s API. Use the `openai:` provider (not `custom-openai:` — LangChain’s run path cannot infer that provider). Pick a model id without extra colons (e.g. `minimax-m2.5`, `deepseek-v3.2`); ids like `gemma4:31b` break `MODEL=provider:model` parsing.
+
+```bash
+MODEL=openai:minimax-m2.5
+OPENAI_API_KEY=<OLLAMA_API_KEY>
+OPENAI_BASE_URL=https://ollama.com/v1
+```
+
+`scripts/setup-firecrawl-vps.sh` writes this automatically when `OLLAMA_API_KEY` is present in wabot’s `.env`.
+
 ```bash
 npm install
 npm run doctor
