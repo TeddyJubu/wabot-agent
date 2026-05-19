@@ -23,7 +23,14 @@ from .events import EventLog
 from .inbound_media import build_inbound_file_context, voice_transcript_from_context
 from .mcp import connected_mcp_servers
 from .mem0_store import capture_turn_mem0, inject_mem0_context, mem0_enabled
-from .memory import InboundMessage, MemoryStore, inbound_memory_contact_id
+from .memory import (
+    InboundMessage,
+    MemoryStore,
+    inbound_chat_session_id,
+    inbound_memory_contact_id,
+    inbound_memory_user_ids,
+    inbound_person_memory_id,
+)
 from .models import build_model, model_settings
 from .output_sanitize import strip_model_thinking
 from .redaction import redact
@@ -64,7 +71,7 @@ Before your final reply, call `remember_contact_fact` for crisp key/value items
 **What counts as important:** names and roles, preferences, recurring requests, open tasks,
 relationships ("message John when…"), business details, and corrections to prior mistakes.
 **Do not store:** passwords, OTPs, API keys, full card numbers, or clinical patient records.
-In group chats, use `contact` = the group `chat` JID (same scope as the conversation).
+In group chats, use `contact` = the **sender** JID (memory follows the person, not only the group).
 """
 
 INSTRUCTIONS_MEMORY_MEM0 = """## Memory (mandatory — do not skip)
@@ -72,10 +79,9 @@ INSTRUCTIONS_MEMORY_MEM0 = """## Memory (mandatory — do not skip)
 You must **actively** maintain long-term memory. Do not rely on the current thread alone.
 
 **Before you answer (every inbound turn):**
-- Call `search_mem0_memories` with a short query about the topic and `user_id` = sender
-  (or group `chat` JID in groups).
-- Call `recall_contact_memory` with the same id (`contact` = sender in DMs,
-  group `chat` JID in groups).
+- Call `search_mem0_memories` with a short query (defaults to the sender — includes
+  memories from other chats with this person).
+- Call `recall_contact_memory` with `contact` = sender (not the group JID).
 - Use what you find; if memory is empty, say so only when they explicitly ask "do you remember…"
 
 **After you understand the message — save important facts before your final reply:**
@@ -221,7 +227,13 @@ async def run_agent(
     session_id: str | None = None,
 ) -> AgentRunResult:
     run_id = str(uuid.uuid4())
-    session_key = session_id or (inbound.sender if inbound else "operator")
+    session_key = session_id or (
+        inbound_chat_session_id(inbound) if inbound else "operator"
+    )
+    memory_user_ids = inbound_memory_user_ids(inbound) if inbound else ["operator"]
+    person_memory_id = (
+        inbound_person_memory_id(inbound) if inbound else memory_user_ids[0]
+    )
     sqlite_session = build_agent_session(settings, session_key)
     run_config = build_agent_run_config(settings, session_key, memory)
     context = RuntimeContext(
@@ -249,7 +261,7 @@ async def run_agent(
         )
     if mem0_enabled(settings):
         augmented = await inject_mem0_context(
-            settings, augmented, user_id=session_key
+            settings, augmented, user_ids=memory_user_ids
         )
     augmented = cap_turn_prompt(augmented, settings.prompt_max_chars)
     runner_input = await prepare_runner_input(
@@ -260,7 +272,7 @@ async def run_agent(
     )
 
     composio_tools = load_composio_tools(
-        settings, user_id=session_key, memory=memory
+        settings, user_id=person_memory_id, memory=memory
     )
     async with connected_mcp_servers(
         settings.mcp_config, skip_names=_mcp_skip_names(settings)
@@ -286,7 +298,7 @@ async def run_agent(
         try:
             await capture_turn_mem0(
                 settings,
-                user_id=session_key,
+                user_id=person_memory_id,
                 user_text=prompt,
                 assistant_text=final_output,
                 run_id=run_id,
@@ -341,7 +353,13 @@ async def run_agent_streamed(
     so the client only needs one parser.
     """
     run_id = str(uuid.uuid4())
-    session_key = session_id or (inbound.sender if inbound else "operator")
+    session_key = session_id or (
+        inbound_chat_session_id(inbound) if inbound else "operator"
+    )
+    memory_user_ids = inbound_memory_user_ids(inbound) if inbound else ["operator"]
+    person_memory_id = (
+        inbound_person_memory_id(inbound) if inbound else memory_user_ids[0]
+    )
     sqlite_session = build_agent_session(settings, session_key)
     run_config = build_agent_run_config(settings, session_key, memory)
     context = RuntimeContext(
@@ -369,7 +387,7 @@ async def run_agent_streamed(
         )
     if mem0_enabled(settings):
         augmented = await inject_mem0_context(
-            settings, augmented, user_id=session_key
+            settings, augmented, user_ids=memory_user_ids
         )
     augmented = cap_turn_prompt(augmented, settings.prompt_max_chars)
     runner_input = await prepare_runner_input(
@@ -382,7 +400,7 @@ async def run_agent_streamed(
     errored: Exception | None = None
 
     composio_tools = load_composio_tools(
-        settings, user_id=session_key, memory=memory
+        settings, user_id=person_memory_id, memory=memory
     )
     async with connected_mcp_servers(
         settings.mcp_config, skip_names=_mcp_skip_names(settings)
@@ -464,7 +482,7 @@ async def run_agent_streamed(
         try:
             await capture_turn_mem0(
                 settings,
-                user_id=session_key,
+                user_id=person_memory_id,
                 user_text=prompt,
                 assistant_text=final_output,
                 run_id=run_id,
@@ -651,18 +669,19 @@ def _augment_prompt(
     if inbound is None:
         return prompt
     memory_user = inbound_memory_contact_id(inbound)
+    mem0_ids = inbound_memory_user_ids(inbound)
     mem0_on = mem0_enabled(settings)
     if mem0_on:
         recall_step = (
-            f"2) Recall memory for contact={memory_user}: call search_mem0_memories "
-            f"(user_id={memory_user}, query the topic) and recall_contact_memory "
-            f"(contact={memory_user}).\n"
+            f"2) Recall memory for sender={memory_user} (includes facts from other chats "
+            f"with this person): call search_mem0_memories (query the topic; optional "
+            f"user_id one of {mem0_ids}) and recall_contact_memory (contact={memory_user}).\n"
         )
         persist_step = (
-            f"7) If they shared anything important (preferences, names, deadlines, standing "
-            f"requests, or said remember/don't forget), call add_mem0_memory (user_id="
-            f"{memory_user}) and/or remember_contact_fact (contact={memory_user}) BEFORE "
-            "your final reply.\n"
+            f"7) If they shared anything important (preferences, names, deadlines, passcodes, "
+            f"standing requests, or said remember/don't forget), call add_mem0_memory "
+            f"(user_id={memory_user}) and/or remember_contact_fact (contact={memory_user}) "
+            "BEFORE your final reply.\n"
         )
     else:
         recall_step = (
@@ -695,7 +714,8 @@ def _augment_prompt(
     if inbound.is_group:
         group_note = (
             "Group chat: reply to the group using send_whatsapp_text(to=chat, ...) when you need "
-            "an extra message; auto-reply posts to chat. For Mem0, use user_id=chat (group JID). "
+            "an extra message; auto-reply posts to chat. Long-term memory is keyed to sender "
+            f"({memory_user}), not only this group — recall works across their other chats. "
             "Add the group JID to WABOT_AGENT_ALLOWED_RECIPIENTS when send_policy=allowlist.\n"
         )
     return (

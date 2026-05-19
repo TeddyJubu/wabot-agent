@@ -34,11 +34,31 @@ class InboundMessage:
     has_media: bool = False
 
 
-def inbound_memory_contact_id(inbound: InboundMessage) -> str:
-    """Scope for Mem0, SQLite contact facts, and agent session id (group chat JID or DM sender)."""
+def inbound_person_memory_id(inbound: InboundMessage) -> str:
+    """Person scope for Mem0 and SQLite facts (sender JID — same across DMs and groups)."""
+    return inbound.sender.strip()
+
+
+def inbound_chat_session_id(inbound: InboundMessage) -> str:
+    """Per-thread agent session id (group chat JID in groups, sender in DMs)."""
     if inbound.is_group:
         return (inbound.chat or inbound.sender).strip()
     return inbound.sender.strip()
+
+
+def inbound_memory_user_ids(inbound: InboundMessage) -> list[str]:
+    """Mem0 recall ids: always the sender; also the group JID in group chats."""
+    person = inbound_person_memory_id(inbound)
+    if inbound.is_group:
+        chat = inbound_chat_session_id(inbound)
+        if chat and chat != person:
+            return [person, chat]
+    return [person]
+
+
+def inbound_memory_contact_id(inbound: InboundMessage) -> str:
+    """Scope for durable memory tools (sender JID, not group chat)."""
+    return inbound_person_memory_id(inbound)
 
 
 class MemoryStore:

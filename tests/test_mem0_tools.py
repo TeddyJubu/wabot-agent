@@ -46,7 +46,7 @@ def _group_inbound() -> InboundMessage:
     )
 
 
-def test_mem0_user_id_uses_group_chat_jid(
+def test_mem0_user_id_uses_sender_in_groups(
     settings: Settings,
     memory: MemoryStore,
     event_log: EventLog,
@@ -65,7 +65,7 @@ def test_mem0_user_id_uses_group_chat_jid(
         tool_call_id="c",
         tool_arguments="{}",
     )
-    assert _mem0_user_id(ctx) == "120363@g.us"
+    assert _mem0_user_id(ctx) == "111@s.whatsapp.net"
 
 
 @pytest.mark.asyncio
@@ -97,7 +97,7 @@ async def test_search_mem0_memories_disabled_is_fast(
 
 
 @pytest.mark.asyncio
-async def test_search_mem0_memories_defaults_to_group_chat(
+async def test_search_mem0_memories_defaults_to_sender_and_group(
     settings: Settings,
     memory: MemoryStore,
     event_log: EventLog,
@@ -129,8 +129,9 @@ async def test_search_mem0_memories_defaults_to_group_chat(
     ) as mock_search:
         result = await search_mem0_memories.on_invoke_tool(ctx, '{"query":"prefs"}')
     assert result["ok"] is True
-    mock_search.assert_called_once()
-    assert mock_search.call_args.kwargs["user_id"] == "120363@g.us"
+    assert mock_search.call_count == 2
+    searched_ids = {c.kwargs["user_id"] for c in mock_search.call_args_list}
+    assert searched_ids == {"111@s.whatsapp.net", "120363@g.us"}
 
 
 @pytest.mark.asyncio

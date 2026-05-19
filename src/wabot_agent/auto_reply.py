@@ -4,7 +4,7 @@ from typing import Any
 
 from .agent import AgentRunResult
 from .config import Settings
-from .memory import InboundMessage, inbound_memory_contact_id
+from .memory import InboundMessage, inbound_chat_session_id
 from .output_sanitize import strip_model_thinking
 from .recipients import recipients_match
 from .redaction import mask_phone, redact
@@ -17,7 +17,7 @@ def inbound_reply_destination(inbound: InboundMessage) -> str:
 
 
 def inbound_session_id(inbound: InboundMessage) -> str:
-    return inbound_memory_contact_id(inbound)
+    return inbound_chat_session_id(inbound)
 
 
 def agent_already_replied_to(result: AgentRunResult, destination: str) -> bool:

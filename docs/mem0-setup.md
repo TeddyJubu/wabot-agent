@@ -11,9 +11,11 @@ wabot-agent integrates [Mem0](https://github.com/mem0ai/mem0) for semantic, per-
 
 On each agent run (when enabled):
 
-1. **Retrieve** — Mem0 searches memories for the session `user_id` (WhatsApp sender or group `chat` JID).
+1. **Retrieve** — Mem0 searches by **sender JID** (same person in DMs and groups). In group chats it also searches the group JID for thread-specific facts.
 2. **Inject** — Top matches are prepended to the prompt.
-3. **Capture** — After the reply, user + assistant messages are added to Mem0.
+3. **Capture** — After the reply, turns are stored under the **sender** so facts follow the person across chats.
+
+Agent conversation history stays **per chat thread** (group JID vs DM); only long-term memory is person-scoped.
 
 ## Enable (OSS, recommended for VPS)
 

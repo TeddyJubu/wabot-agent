@@ -360,15 +360,25 @@ async def inject_mem0_context(
     settings: Settings,
     prompt: str,
     *,
-    user_id: str,
+    user_ids: list[str],
 ) -> str:
     if not settings.mem0_inject_on_run:
         return prompt
-    searched = await search_memories(settings, user_id=user_id, query=prompt)
-    if not searched.get("ok"):
-        return prompt
+    merged: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for user_id in user_ids:
+        if not user_id.strip():
+            continue
+        searched = await search_memories(settings, user_id=user_id, query=prompt)
+        if not searched.get("ok"):
+            continue
+        for row in searched.get("results") or []:
+            text = str(row.get("memory") or "").strip()
+            if text and text not in seen:
+                seen.add(text)
+                merged.append(row)
     prefix = format_memories_for_prompt(
-        searched.get("results") or [],
+        merged,
         max_chars=settings.mem0_prompt_max_chars,
     )
     return prefix + prompt if prefix else prompt

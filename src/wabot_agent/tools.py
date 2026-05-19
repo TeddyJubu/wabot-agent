@@ -17,7 +17,12 @@ from .mem0_store import (
     mem0_enabled,
     search_memories_sync,
 )
-from .memory import InboundMessage, MemoryStore, inbound_memory_contact_id
+from .memory import (
+    InboundMessage,
+    MemoryStore,
+    inbound_memory_contact_id,
+    inbound_memory_user_ids,
+)
 from .recipients import is_listed_recipient, recipients_match
 from .redaction import looks_sensitive, mask_phone, redact
 from .skills import list_skills, read_skill
@@ -105,11 +110,19 @@ def _requester_jid(ctx: RunContextWrapper[RuntimeContext]) -> str | None:
 
 
 def _mem0_user_id(ctx: RunContextWrapper[RuntimeContext]) -> str | None:
+    """Default Mem0 user id: sender (person), not group chat JID."""
     inbound = ctx.context.inbound
     if inbound is None:
         return None
     uid = inbound_memory_contact_id(inbound).strip()
     return uid or None
+
+
+def _mem0_user_ids(ctx: RunContextWrapper[RuntimeContext]) -> list[str]:
+    inbound = ctx.context.inbound
+    if inbound is None:
+        return []
+    return inbound_memory_user_ids(inbound)
 
 
 def _maybe_auto_track_outbound(
@@ -1360,20 +1373,31 @@ async def search_mem0_memories(
     user_id: str | None = None,
     top_k: int = 5,
 ) -> dict[str, Any]:
-    """Search Mem0 memories. Call before answering (user_id = sender or group chat JID)."""
+    """Search Mem0 memories. Defaults to sender (searches person + group ids in groups)."""
     if not mem0_enabled(ctx.context.settings):
         payload = {"ok": False, "reason": "mem0_disabled", "results": []}
     else:
-        uid = (user_id or _mem0_user_id(ctx) or "").strip()
-        if not uid:
+        ids = [user_id.strip()] if user_id and user_id.strip() else _mem0_user_ids(ctx)
+        if not ids:
             payload = {"ok": False, "reason": "no_user_id", "results": []}
         else:
-            payload = search_memories_sync(
-                ctx.context.settings,
-                user_id=uid,
-                query=query,
-                top_k=top_k,
-            )
+            merged: list[dict[str, str]] = []
+            seen: set[str] = set()
+            for uid in ids:
+                part = search_memories_sync(
+                    ctx.context.settings,
+                    user_id=uid,
+                    query=query,
+                    top_k=top_k,
+                )
+                if not part.get("ok"):
+                    continue
+                for row in part.get("results") or []:
+                    text = str(row.get("memory") or "").strip()
+                    if text and text not in seen:
+                        seen.add(text)
+                        merged.append(row)
+            payload = {"ok": True, "count": len(merged), "results": merged[:top_k]}
     ctx.context.memory.record_tool_event(ctx.context.run_id, "search_mem0_memories", payload)
     return redact(payload)
 
