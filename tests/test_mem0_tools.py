@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from unittest.mock import patch
 
 import pytest
@@ -15,7 +16,24 @@ from wabot_agent.tools import (
     add_mem0_memory,
     search_mem0_memories,
 )
+from wabot_agent.mem0_store import _mem0_llm_env
 from wabot_agent.wabot import FakeWabotClient
+
+
+def test_mem0_llm_env_strips_openrouter_for_ollama_cloud() -> None:
+    settings = Settings(
+        model_provider="ollama_cloud",
+        ollama_api_key="ollama-test",
+        offline_mode=False,
+        _env_file=None,
+    )
+    os.environ["OPENROUTER_API_KEY"] = "sk-or-test"
+    try:
+        with _mem0_llm_env(settings):
+            assert "OPENROUTER_API_KEY" not in os.environ
+        assert os.environ.get("OPENROUTER_API_KEY") == "sk-or-test"
+    finally:
+        os.environ.pop("OPENROUTER_API_KEY", None)
 
 
 def _group_inbound() -> InboundMessage:

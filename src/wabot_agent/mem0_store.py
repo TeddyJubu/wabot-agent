@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import threading
+from contextlib import contextmanager
 from typing import Any
 
 from .config import Settings
+from .llm_provider import active_model_id
 from .redaction import looks_sensitive, redact
 
 logger = logging.getLogger(__name__)
@@ -44,44 +47,114 @@ def _llm_api_key(settings: Settings) -> str | None:
 
 
 def _config_cache_key(settings: Settings) -> str:
+    llm_key, base_url, llm_model = _mem0_openai_llm(settings)
+    embed_model = _mem0_fastembed_model(settings)
     return "|".join(
         [
             str(settings.mem0_use_platform),
             str(settings.mem0_path),
             settings.mem0_collection,
-            str(settings.mem0_llm_model or ""),
-            settings.mem0_embed_model,
-            settings.openrouter_base_url,
+            str(settings.mem0_llm_model or llm_model),
+            embed_model,
+            base_url,
+            settings.model_provider,
         ]
     )
 
 
-def build_mem0_config(settings: Settings) -> dict[str, Any]:
-    """Build Mem0 OSS config (local Qdrant + OpenAI-compatible LLM/embedder)."""
-    api_key = _llm_api_key(settings)
-    if not api_key:
-        raise Mem0UnavailableError("no API key for mem0 LLM/embedder")
+def _mem0_openai_llm(settings: Settings) -> tuple[str, str, str]:
+    """API key, OpenAI-compatible base URL, and model for Mem0 fact extraction."""
+    if settings.model_provider == "openrouter":
+        return (
+            settings.openrouter_api_key or "",
+            settings.openrouter_base_url,
+            settings.mem0_llm_model or settings.openrouter_model,
+        )
+    if settings.model_provider in ("ollama", "ollama_cloud"):
+        return (
+            settings.ollama_api_key or "ollama",
+            settings.ollama_cloud_base_url
+            if settings.model_provider == "ollama_cloud"
+            else settings.ollama_base_url,
+            settings.mem0_llm_model or active_model_id(settings),
+        )
+    return (
+        settings.ollama_api_key or "ollama",
+        settings.ollama_base_url,
+        settings.mem0_llm_model or settings.ollama_model,
+    )
 
+
+def _mem0_fastembed_model(settings: Settings) -> str:
+    """Local ONNX embedder model (Ollama Cloud has no /v1/embeddings)."""
+    model = settings.mem0_embed_model
+    if model == "text-embedding-3-small":
+        return "BAAI/bge-small-en-v1.5"
+    return model
+
+
+def _mem0_embedding_dims(settings: Settings) -> int:
+    if _mem0_use_fastembed(settings):
+        # BAAI/bge-small-en-v1.5 → 384; override via WABOT_AGENT_MEM0_EMBED_MODEL if needed.
+        model = _mem0_fastembed_model(settings)
+        if "bge-small" in model:
+            return 384
+        if "gte-large" in model:
+            return 1024
+        return 384
+    return 1536
+
+
+def _mem0_use_fastembed(settings: Settings) -> bool:
+    return settings.model_provider in ("ollama", "ollama_cloud")
+
+
+@contextmanager
+def _mem0_llm_env(settings: Settings):
+    """Mem0's OpenAI LLM uses OpenRouter whenever OPENROUTER_API_KEY is set."""
+    if settings.model_provider == "openrouter":
+        yield
+        return
+    saved = {
+        key: os.environ.pop(key)
+        for key in ("OPENROUTER_API_KEY", "OPENROUTER_API_BASE")
+        if key in os.environ
+    }
+    try:
+        yield
+    finally:
+        os.environ.update(saved)
+
+
+def build_mem0_config(settings: Settings) -> dict[str, Any]:
+    """Build Mem0 OSS config (local Qdrant + LLM + embedder)."""
     if settings.mem0_use_platform:
+        api_key = _llm_api_key(settings)
+        if not api_key:
+            raise Mem0UnavailableError("no API key for mem0 platform")
         return {"api_key": api_key}
 
+    api_key, base_url, llm_model = _mem0_openai_llm(settings)
+    if not api_key and settings.model_provider != "ollama":
+        raise Mem0UnavailableError("no API key for mem0 LLM")
+
     settings.mem0_path.mkdir(parents=True, exist_ok=True)
-    # Mem0 needs an OpenAI-compatible /embeddings endpoint. Prefer OpenRouter when
-    # configured even if chat uses ollama_cloud (Ollama has no embeddings API).
-    if settings.openrouter_api_key:
-        api_key = settings.openrouter_api_key
-        base_url = settings.openrouter_base_url
-        llm_model = settings.mem0_llm_model or settings.openrouter_model
-    elif settings.model_provider == "openrouter":
-        base_url = settings.openrouter_base_url
-        llm_model = settings.mem0_llm_model or settings.openrouter_model
-    elif settings.model_provider == "ollama_cloud":
-        base_url = settings.ollama_cloud_base_url
-        llm_model = settings.mem0_llm_model or settings.ollama_model
+
+    embedder: dict[str, Any]
+    if _mem0_use_fastembed(settings):
+        embedder = {
+            "provider": "fastembed",
+            "config": {"model": _mem0_fastembed_model(settings)},
+        }
     else:
-        base_url = settings.ollama_base_url
-        llm_model = settings.mem0_llm_model or settings.ollama_model
-    embed_model = settings.mem0_embed_model
+        embedder = {
+            "provider": "openai",
+            "config": {
+                "model": settings.mem0_embed_model,
+                "api_key": api_key,
+                "openai_base_url": base_url,
+            },
+        }
 
     return {
         "vector_store": {
@@ -90,6 +163,7 @@ def build_mem0_config(settings: Settings) -> dict[str, Any]:
                 "path": str(settings.mem0_path),
                 "collection_name": settings.mem0_collection,
                 "on_disk": True,
+                "embedding_model_dims": _mem0_embedding_dims(settings),
             },
         },
         "llm": {
@@ -101,14 +175,7 @@ def build_mem0_config(settings: Settings) -> dict[str, Any]:
                 "temperature": 0.1,
             },
         },
-        "embedder": {
-            "provider": "openai",
-            "config": {
-                "model": embed_model,
-                "api_key": api_key,
-                "openai_base_url": base_url,
-            },
-        },
+        "embedder": embedder,
     }
 
 
@@ -127,10 +194,11 @@ def get_mem0_memory(settings: Settings) -> Any:
         from mem0 import Memory
 
         config = build_mem0_config(settings)
-        if settings.mem0_use_platform:
-            _memory_instance = Memory(api_key=config["api_key"])
-        else:
-            _memory_instance = Memory.from_config(config)
+        with _mem0_llm_env(settings):
+            if settings.mem0_use_platform:
+                _memory_instance = Memory(api_key=config["api_key"])
+            else:
+                _memory_instance = Memory.from_config(config)
         _memory_config_key = key
         return _memory_instance
 
@@ -175,8 +243,9 @@ def search_memories_sync(
         return {"ok": False, "reason": "empty_query", "results": []}
     try:
         memory = get_mem0_memory(settings)
-    except Mem0UnavailableError as exc:
-        return {"ok": False, "reason": str(exc), "results": []}
+    except (Mem0UnavailableError, Exception) as exc:  # noqa: BLE001
+        logger.warning("mem0 init/search unavailable: %s", exc)
+        return {"ok": False, "reason": redact(str(exc)), "results": []}
 
     limit = top_k if top_k is not None else settings.mem0_top_k
     try:
@@ -205,8 +274,9 @@ def add_memory_sync(
 
     try:
         memory = get_mem0_memory(settings)
-    except Mem0UnavailableError as exc:
-        return {"ok": False, "reason": str(exc)}
+    except (Mem0UnavailableError, Exception) as exc:  # noqa: BLE001
+        logger.warning("mem0 init/add unavailable: %s", exc)
+        return {"ok": False, "reason": redact(str(exc))}
 
     try:
         result = memory.add(

@@ -14,6 +14,7 @@ Environment=UV_CACHE_DIR=/opt/wabot-agent/.uv-cache
 Environment=HF_HOME=/opt/wabot-agent/data/hf-cache
 Environment=HF_HUB_CACHE=/opt/wabot-agent/data/hf-cache/hub
 Environment=XDG_CACHE_HOME=/opt/wabot-agent/data/cache
+Environment=HOME=/opt/wabot-agent
 ExecStart=/usr/local/bin/uv run --frozen --no-sync python main.py
 Restart=always
 RestartSec=5
