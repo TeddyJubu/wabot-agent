@@ -35,7 +35,8 @@ from .models import build_model, model_settings
 from .output_sanitize import strip_model_thinking
 from .redaction import redact
 from .skills import render_skill_summary
-from .tools import RuntimeContext, core_tools
+from .task_progress import looks_like_multi_step_task
+from .tools import RuntimeContext, core_tools, maybe_send_task_started_ack
 from .ui_envelopes import build_ui_envelope
 from .vision_input import prepare_runner_input
 from .wabot import WabotClient
@@ -109,6 +110,8 @@ INSTRUCTIONS_TOOLS = """## Tools (use them proactively)
 - To find and send an image: search_images → fetch_url_to_media → send_whatsapp_file to the
   requester. Do not claim you cannot browse the web without trying these tools first.
 - mark_whatsapp_read, send_whatsapp_typing — when appropriate for the conversation.
+- send_task_plan / report_task_step_complete / send_task_progress — multi-step tasks:
+  post a plan and WhatsApp updates per step (see Multi-step tasks section).
 - create_reminder / list_reminders / cancel_reminder — schedule WhatsApp reminders (ISO due_at).
 - track_outbound_conversation / list_outbound_tasks / get_outbound_task_status — owner outreach
   follow-up; successful owner sends auto-track; you are notified when the target replies.
@@ -157,6 +160,22 @@ INSTRUCTIONS_INBOUND = """## Inbound auto-reply
   (or rely on auto-track) so the owner gets a WhatsApp update when they reply.
 """
 
+INSTRUCTIONS_MULTI_STEP = """## Multi-step tasks (plan + progress on WhatsApp)
+
+When a request needs **several tools**, **multiple minutes**, or **3+ distinct actions**:
+
+1. **Plan first** — Call `send_task_plan` with 3–8 short step titles before heavy work.
+   Do not start scraping, bulk sends, or long research without posting the plan.
+2. **After each step** — Call `report_task_step_complete` with step number, title, and
+   one-line outcome before moving on.
+3. **Long silent stretches** — If a step takes >60s with no other update, call
+   `send_task_progress` (e.g. "Still fetching page 4/12…").
+4. **Final answer** — Your closing plain-text reply should summarize results; do not
+   repeat the whole plan unless asked.
+
+Skip progress tools for quick one-shot questions (single lookup, yes/no, short reply).
+"""
+
 
 @dataclass
 class AgentRunResult:
@@ -187,7 +206,8 @@ def build_agent_instructions(settings: Settings, skill_summary: str) -> str:
             1,
         )
     return (
-        f"{INSTRUCTIONS}{memory_block}{tools_block}{INSTRUCTIONS_INBOUND}\n\n"
+        f"{INSTRUCTIONS}{memory_block}{tools_block}{INSTRUCTIONS_MULTI_STEP}"
+        f"{INSTRUCTIONS_INBOUND}\n\n"
         f"Installed local skills:\n{skill_summary}\n"
     )
 
@@ -270,6 +290,8 @@ async def run_agent(
         inbound=inbound,
         wabot=context.wabot,
     )
+
+    await maybe_send_task_started_ack(context, prompt)
 
     composio_tools = load_composio_tools(
         settings, user_id=person_memory_id, memory=memory
@@ -396,6 +418,9 @@ async def run_agent_streamed(
         inbound=inbound,
         wabot=context.wabot,
     )
+
+    await maybe_send_task_started_ack(context, prompt)
+
     final_output = ""
     errored: Exception | None = None
 
@@ -718,8 +743,16 @@ def _augment_prompt(
             f"({memory_user}), not only this group — recall works across their other chats. "
             "Add the group JID to WABOT_AGENT_ALLOWED_RECIPIENTS when send_policy=allowlist.\n"
         )
+    multi_step_note = ""
+    if looks_like_multi_step_task(inbound.text):
+        multi_step_note = (
+            "Multi-step task detected: call send_task_plan with your steps BEFORE "
+            "heavy work, then report_task_step_complete after each step. Use "
+            "send_task_progress if a step runs silently for more than a minute.\n\n"
+        )
     return (
         steps
+        + multi_step_note
         + group_note
         + "Inbound WhatsApp message:\n"
         f"- message_id: {inbound.id}\n"

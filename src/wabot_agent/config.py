@@ -286,6 +286,13 @@ class Settings(BaseSettings):
             "WABOT_AGENT_AUTO_REPLY", "VIGNESH_AUTO_REPLY", "WABOT_AGENT_AUTO_REPLY_ENABLED"
         ),
     )
+    task_progress_updates_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_TASK_PROGRESS_UPDATES",
+            "VIGNESH_TASK_PROGRESS_UPDATES",
+        ),
+    )
     group_auto_reply_enabled: bool = Field(
         default=True,
         validation_alias=AliasChoices(
