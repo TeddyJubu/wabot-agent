@@ -16,6 +16,7 @@ import SlashMenu from "@/components/SlashMenu";
 import ToolCard from "@/components/tool-cards/ToolCard";
 import PairingPanel from "@/components/slide-overs/PairingPanel";
 import RunsPanel from "@/components/slide-overs/RunsPanel";
+import GroupsPanel from "@/components/slide-overs/GroupsPanel";
 import SettingsPanel from "@/components/slide-overs/SettingsPanel";
 import { matchSlash } from "@/hooks/useSlashCommands";
 import { usePairingStream } from "@/hooks/usePairingStream";
@@ -228,6 +229,9 @@ export default function App() {
       </SlideOver>
       <SlideOver open={slideOver === "runs"} onClose={close} title="Recent runs">
         <RunsPanel />
+      </SlideOver>
+      <SlideOver open={slideOver === "groups"} onClose={close} title="WhatsApp groups">
+        <GroupsPanel />
       </SlideOver>
       <SlideOver open={slideOver === "settings"} onClose={close} title="Settings">
         <SettingsPanel />

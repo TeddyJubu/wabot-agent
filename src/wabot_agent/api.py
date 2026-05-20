@@ -110,6 +110,31 @@ class PresencePayload(BaseModel):
     media: str | None = None
 
 
+class GroupCreateRequest(BaseModel):
+    name: str = Field(min_length=1)
+    participants: list[str] = Field(default_factory=list)
+
+
+class GroupUpdateRequest(BaseModel):
+    name: str | None = None
+    topic: str | None = None
+    announce: bool | None = None
+    locked: bool | None = None
+
+
+class GroupParticipantsRequest(BaseModel):
+    participants: list[str] = Field(min_length=1)
+    action: str = "add"
+
+
+class GroupInviteRequest(BaseModel):
+    reset: bool = False
+
+
+class GroupJoinRequest(BaseModel):
+    invite_link: str = Field(min_length=1)
+
+
 class HistorySyncSummaryPayload(BaseModel):
     type: str = "history_sync"
     sync_type: str
@@ -1240,6 +1265,96 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 else "wabot reachable but session not ready."
             ),
         }
+
+    @app.get("/api/whatsapp/groups", dependencies=[human_dependency])
+    async def list_whatsapp_groups_api() -> dict[str, Any]:
+        try:
+            return redact(await wabot.list_groups())
+        except WabotError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.post("/api/whatsapp/groups", dependencies=[human_dependency])
+    async def create_whatsapp_group_api(body: GroupCreateRequest) -> dict[str, Any]:
+        try:
+            return redact(await wabot.create_group(body.name, body.participants))
+        except WabotError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.get("/api/whatsapp/groups/{group_jid}", dependencies=[human_dependency])
+    async def get_whatsapp_group_api(group_jid: str) -> dict[str, Any]:
+        try:
+            return redact(await wabot.get_group(group_jid))
+        except WabotError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.patch("/api/whatsapp/groups/{group_jid}", dependencies=[human_dependency])
+    async def update_whatsapp_group_api(
+        group_jid: str, body: GroupUpdateRequest
+    ) -> dict[str, Any]:
+        if (
+            body.name is None
+            and body.topic is None
+            and body.announce is None
+            and body.locked is None
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="provide at least one of name, topic, announce, locked",
+            )
+        try:
+            return redact(
+                await wabot.update_group(
+                    group_jid,
+                    name=body.name,
+                    topic=body.topic,
+                    announce=body.announce,
+                    locked=body.locked,
+                )
+            )
+        except WabotError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.post(
+        "/api/whatsapp/groups/{group_jid}/participants",
+        dependencies=[human_dependency],
+    )
+    async def update_whatsapp_group_participants_api(
+        group_jid: str, body: GroupParticipantsRequest
+    ) -> dict[str, Any]:
+        try:
+            return redact(
+                await wabot.update_group_participants(
+                    group_jid, body.participants, action=body.action
+                )
+            )
+        except WabotError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.post("/api/whatsapp/groups/{group_jid}/leave", dependencies=[human_dependency])
+    async def leave_whatsapp_group_api(group_jid: str) -> dict[str, Any]:
+        try:
+            return redact(await wabot.leave_group(group_jid))
+        except WabotError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.post(
+        "/api/whatsapp/groups/{group_jid}/invite",
+        dependencies=[human_dependency],
+    )
+    async def get_whatsapp_group_invite_api(
+        group_jid: str, body: GroupInviteRequest
+    ) -> dict[str, Any]:
+        try:
+            return redact(await wabot.get_group_invite(group_jid, reset=body.reset))
+        except WabotError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.post("/api/whatsapp/groups/join", dependencies=[human_dependency])
+    async def join_whatsapp_group_api(body: GroupJoinRequest) -> dict[str, Any]:
+        try:
+            return redact(await wabot.join_group(body.invite_link))
+        except WabotError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     return app
 

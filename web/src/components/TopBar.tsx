@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from "react";
-import { Smartphone, Clock, Settings } from "lucide-react";
+import { Smartphone, Clock, Settings, Users } from "lucide-react";
 import { ClerkNavAuth } from "./ClerkNavAuth";
 import StatusDot from "./StatusDot";
 import StatusPopover from "./StatusPopover";
@@ -31,6 +31,9 @@ export default function TopBar() {
         </IconBtn>
         <IconBtn onClick={() => open("runs")} label="Runs history">
           <Clock className="size-4" />
+        </IconBtn>
+        <IconBtn onClick={() => open("groups")} label="WhatsApp groups">
+          <Users className="size-4" />
         </IconBtn>
         <IconBtn onClick={() => open("settings")} label="Settings">
           <Settings className="size-4" />

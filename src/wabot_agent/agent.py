@@ -10,7 +10,11 @@ from typing import Any
 from agents import Agent, RunConfig, Runner
 from agents.tracing import set_tracing_disabled
 
-from .composio_tools import composio_enabled, load_composio_tools
+from .composio_tools import (
+    build_composio_prompt_context,
+    composio_enabled,
+    load_composio_tools,
+)
 from .config import Settings
 from .context_management import (
     build_agent_run_config,
@@ -122,7 +126,11 @@ INSTRUCTIONS_TOOLS = """## Tools (use them proactively)
   cancel_web_research — Firecrawl web-agent deep scraping (owner-only). Queue long research jobs;
   results are delivered on WhatsApp as text + CSV/document when complete. Read skills/web-research
   for lead-gen briefs.
-- Groups, reactions, edits, mutes, archives — when the task requires them.
+- Groups: list_whatsapp_groups, create_whatsapp_group, get_whatsapp_group,
+  update_whatsapp_group (name/topic/announce/locked), update_whatsapp_group_participants
+  (add/remove/promote/demote), get_whatsapp_group_invite, join_whatsapp_group,
+  leave_whatsapp_group — when the task requires them.
+- Reactions, edits, mutes, archives — when the task requires them.
 
 ## Policy & safety
 
@@ -144,12 +152,16 @@ INSTRUCTIONS_TOOLS_MEM0 = (
     "- search_mem0_memories / add_mem0_memory / mem0_status — semantic long-term memory (Mem0).\n"
 )
 
-INSTRUCTIONS_TOOLS_COMPOSIO = (
-    "- Composio (Gmail, GitHub, Slack, Notion, etc.) — use COMPOSIO_* tools for external apps.\n"
-    "- Call COMPOSIO_MANAGE_CONNECTIONS when auth is required; send the OAuth link in your "
-    "reply so the user can approve in a browser.\n"
-    "- Then use COMPOSIO_SEARCH_TOOLS / COMPOSIO_MULTI_EXECUTE_TOOL as needed.\n"
-)
+INSTRUCTIONS_TOOLS_COMPOSIO = """- Composio (Gmail, Google Calendar, GitHub, Slack, …) —
+  COMPOSIO_* meta-tools only.
+- **Gmail & Calendar are connected** for this operator. For any email or calendar question,
+  you MUST call COMPOSIO_SEARCH_TOOLS then COMPOSIO_MULTI_EXECUTE_TOOL in this turn before
+  stating facts. Re-fetch every turn; never reuse stale inbox/calendar summaries from chat.
+- **Never hallucinate** mail or events: no invented subjects, senders, times, attendees, or counts.
+  If tools fail or return empty, say that plainly — do not guess.
+- Read skill `composio-gmail-calendar` (read_local_skill) before non-trivial mail/calendar work.
+- COMPOSIO_MANAGE_CONNECTIONS when auth fails; paste the OAuth link in your reply.
+"""
 
 INSTRUCTIONS_INBOUND = """## Inbound auto-reply
 
@@ -327,6 +339,10 @@ async def run_agent(
         augmented = await inject_mem0_context(
             settings, augmented, user_ids=memory_user_ids
         )
+    composio_tools = load_composio_tools(
+        settings, user_id=person_memory_id, memory=memory
+    )
+    augmented += build_composio_prompt_context(tools_loaded=bool(composio_tools))
     augmented = cap_turn_prompt(augmented, settings.prompt_max_chars)
     runner_input = await prepare_runner_input(
         augmented,
@@ -336,10 +352,6 @@ async def run_agent(
     )
 
     await maybe_send_task_started_ack(context, prompt)
-
-    composio_tools = load_composio_tools(
-        settings, user_id=person_memory_id, memory=memory
-    )
 
     async def _execute_run() -> Any:
         async with connected_mcp_servers(
@@ -492,6 +504,10 @@ async def run_agent_streamed(
         augmented = await inject_mem0_context(
             settings, augmented, user_ids=memory_user_ids
         )
+    composio_tools = load_composio_tools(
+        settings, user_id=person_memory_id, memory=memory
+    )
+    augmented += build_composio_prompt_context(tools_loaded=bool(composio_tools))
     augmented = cap_turn_prompt(augmented, settings.prompt_max_chars)
     runner_input = await prepare_runner_input(
         augmented,
@@ -501,10 +517,6 @@ async def run_agent_streamed(
     )
 
     await maybe_send_task_started_ack(context, prompt)
-
-    composio_tools = load_composio_tools(
-        settings, user_id=person_memory_id, memory=memory
-    )
 
     final_output = ""
     errored: Exception | None = None

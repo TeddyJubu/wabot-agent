@@ -4,6 +4,7 @@ from unittest.mock import MagicMock, patch
 
 from wabot_agent.agent import build_agent_instructions
 from wabot_agent.composio_tools import (
+    build_composio_prompt_context,
     composio_enabled,
     load_composio_tools,
     reset_composio_client_for_tests,
@@ -64,3 +65,12 @@ def test_build_agent_instructions_mention_composio_when_enabled() -> None:
     )
     text = build_agent_instructions(settings, "")
     assert "COMPOSIO_MANAGE_CONNECTIONS" in text
+    assert "Never hallucinate" in text
+    assert "composio-gmail-calendar" in text
+
+
+def test_build_composio_prompt_context_only_when_tools_loaded() -> None:
+    assert build_composio_prompt_context(tools_loaded=False) == ""
+    loaded = build_composio_prompt_context(tools_loaded=True)
+    assert "COMPOSIO_SEARCH_TOOLS" in loaded
+    assert "never invent" in loaded.lower()

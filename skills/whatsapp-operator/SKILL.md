@@ -33,7 +33,10 @@ Use this skill before changing WhatsApp state, sending messages, or handling inb
 - React with `react_whatsapp_message`; edit own messages with `edit_whatsapp_message`;
   revoke with `revoke_whatsapp_message` (pass `sender` for others' messages in groups).
 - Create groups with `create_whatsapp_group`; inspect via `get_whatsapp_group`;
-  invite links via `get_whatsapp_group_invite`; join via `join_whatsapp_group`.
+  rename or change settings with `update_whatsapp_group` (name, topic/description,
+  announce-only, admin-only edits); add/remove/promote/demote members with
+  `update_whatsapp_group_participants`; invite links via `get_whatsapp_group_invite`;
+  join via `join_whatsapp_group`; leave with `leave_whatsapp_group`.
 - Mute, archive, or pin chats with `mute_whatsapp_chat`, `archive_whatsapp_chat`,
   `pin_whatsapp_chat` (syncs via WhatsApp app state).
 - Profile metadata: `get_whatsapp_user_info(jid)` (status, picture id, verified business name).
@@ -58,6 +61,8 @@ Use this skill before changing WhatsApp state, sending messages, or handling inb
 - Avoid bulk or cold outreach. Escalate to the operator instead.
 - **Memory is mandatory:** recall before answering; persist important facts every turn
   (read `mem0-memory` skill). Store only useful, non-secret memory. Prefer concise facts.
+- **Gmail / Google Calendar:** read `composio-gmail-calendar` and call Composio tools every turn;
+  never invent emails, meetings, or availability — only report live tool results.
 
 ## Failure Handling
 

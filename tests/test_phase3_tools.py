@@ -9,8 +9,11 @@ from wabot_agent.tools import (
     RuntimeContext,
     create_whatsapp_group,
     get_whatsapp_group,
+    leave_whatsapp_group,
     react_whatsapp_message,
     revoke_whatsapp_message,
+    update_whatsapp_group,
+    update_whatsapp_group_participants,
 )
 from wabot_agent.wabot import FakeWabotClient
 
@@ -92,6 +95,64 @@ async def test_create_group_blocked_dry_run(
     )
     assert result["ok"] is False
     assert result["reason"] == "dry_run"
+
+
+async def test_update_group_blocked_dry_run(
+    settings: Settings,
+    memory: MemoryStore,
+    event_log: EventLog,
+    fake_wabot: FakeWabotClient,
+) -> None:
+    ctx = ToolContext(
+        RuntimeContext(settings, memory, fake_wabot, event_log, run_id="run-update"),
+        tool_name="update_whatsapp_group",
+        tool_call_id="call-update",
+        tool_arguments="{}",
+    )
+    result = await update_whatsapp_group.on_invoke_tool(
+        ctx, '{"group_jid":"120363123456789012@g.us","name":"New Name"}'
+    )
+    assert result["ok"] is False
+    assert result["reason"] == "dry_run"
+
+
+async def test_update_group_participants_add(
+    settings: Settings,
+    memory: MemoryStore,
+    event_log: EventLog,
+    fake_wabot: FakeWabotClient,
+) -> None:
+    live = settings.model_copy(update={"send_policy": "allow_all"})
+    ctx = ToolContext(
+        RuntimeContext(live, memory, fake_wabot, event_log, run_id="run-parts"),
+        tool_name="update_whatsapp_group_participants",
+        tool_call_id="call-parts",
+        tool_arguments="{}",
+    )
+    result = await update_whatsapp_group_participants.on_invoke_tool(
+        ctx,
+        '{"group_jid":"120363123456789012@g.us","participants":["+15550001111"],"action":"add"}',
+    )
+    assert result["ok"] is True
+
+
+async def test_leave_group_when_ready(
+    settings: Settings,
+    memory: MemoryStore,
+    event_log: EventLog,
+    fake_wabot: FakeWabotClient,
+) -> None:
+    live = settings.model_copy(update={"send_policy": "allow_all"})
+    ctx = ToolContext(
+        RuntimeContext(live, memory, fake_wabot, event_log, run_id="run-leave"),
+        tool_name="leave_whatsapp_group",
+        tool_call_id="call-leave",
+        tool_arguments="{}",
+    )
+    result = await leave_whatsapp_group.on_invoke_tool(
+        ctx, '{"group_jid":"120363123456789012@g.us"}'
+    )
+    assert result["ok"] is True
 
 
 async def test_revoke_returns_payload(

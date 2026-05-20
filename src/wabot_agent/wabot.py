@@ -161,6 +161,41 @@ class WabotClient:
     async def join_group(self, invite_link: str) -> dict[str, Any]:
         return await self._post_json("/groups/join", {"invite_link": invite_link})
 
+    async def update_group(
+        self,
+        jid: str,
+        *,
+        name: str | None = None,
+        topic: str | None = None,
+        announce: bool | None = None,
+        locked: bool | None = None,
+    ) -> dict[str, Any]:
+        body: dict[str, Any] = {}
+        if name is not None:
+            body["name"] = name
+        if topic is not None:
+            body["topic"] = topic
+        if announce is not None:
+            body["announce"] = announce
+        if locked is not None:
+            body["locked"] = locked
+        return await self._patch_json(f"/groups/{quote(jid, safe='')}", body)
+
+    async def update_group_participants(
+        self,
+        jid: str,
+        participants: list[str],
+        *,
+        action: str = "add",
+    ) -> dict[str, Any]:
+        return await self._post_json(
+            f"/groups/{quote(jid, safe='')}/participants",
+            {"participants": participants, "action": action},
+        )
+
+    async def leave_group(self, jid: str) -> dict[str, Any]:
+        return await self._post_json(f"/groups/{quote(jid, safe='')}/leave", {})
+
     async def mark_read(
         self,
         chat: str,
@@ -506,6 +541,38 @@ class FakeWabotClient(WabotClient):
 
     async def join_group(self, invite_link: str) -> dict[str, Any]:
         return {"ok": True, "jid": "fake@g.us"}
+
+    async def update_group(
+        self,
+        jid: str,
+        *,
+        name: str | None = None,
+        topic: str | None = None,
+        announce: bool | None = None,
+        locked: bool | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "jid": jid,
+            "group": {"jid": jid, "name": name or "fake group"},
+        }
+
+    async def update_group_participants(
+        self,
+        jid: str,
+        participants: list[str],
+        *,
+        action: str = "add",
+    ) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "jid": jid,
+            "action": action,
+            "participants": [{"jid": p, "is_admin": False} for p in participants],
+        }
+
+    async def leave_group(self, jid: str) -> dict[str, Any]:
+        return {"ok": True, "jid": jid, "left": True}
 
     async def send_text(self, to: str, text: str) -> dict[str, Any]:
         payload = {"id": f"fake-{len(self.sent) + 1}", "to": to, "text": text}

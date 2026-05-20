@@ -24,6 +24,17 @@ When a toolkit needs auth, the agent calls `COMPOSIO_MANAGE_CONNECTIONS` and sho
 
 You can also pre-connect apps under [dashboard.composio.dev → Connect Apps](https://dashboard.composio.dev/).
 
+## Gmail & Google Calendar (no hallucinations)
+
+When Gmail and Calendar are connected, the agent:
+
+- Injects a **per-turn** reminder to call `COMPOSIO_SEARCH_TOOLS` + `COMPOSIO_MULTI_EXECUTE_TOOL` before stating any mail or calendar facts.
+- Loads the **`composio-gmail-calendar`** skill (`skills/composio-gmail-calendar/SKILL.md`) — use `read_local_skill` for detailed rules.
+- **Re-fetches on every turn** — it must not reuse stale inbox/event summaries from chat history.
+- **Fails closed** — if tools error or return empty, it reports that; it does not invent subjects, times, or attendees.
+
+Verify from WhatsApp or dashboard chat: *"What are my last 3 unread emails?"* — you should see Composio tool calls in the run log before the reply.
+
 ## MCP alternative (optional)
 
 See [composio-mcp-setup.md](composio-mcp-setup.md) if you specifically want remote MCP instead of native tools. Do not enable both for the same Composio account unless you know you need both.

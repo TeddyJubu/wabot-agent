@@ -25,7 +25,7 @@ export interface ChatMessage {
   cards?: UiEnvelope[];
 }
 
-export type SlideOverId = "qr" | "runs" | "settings" | null;
+export type SlideOverId = "qr" | "runs" | "groups" | "settings" | null;
 
 interface State {
   messages: ChatMessage[];

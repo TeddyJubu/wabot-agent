@@ -78,6 +78,18 @@ def load_composio_tools(
         return []
 
 
+def build_composio_prompt_context(*, tools_loaded: bool) -> str:
+    """Per-turn reminder when Composio tools are attached (anti-hallucination for mail/calendar)."""
+    if not tools_loaded:
+        return ""
+    return (
+        "\n\n[Composio: Gmail & Google Calendar are connected. For this message, if it "
+        "mentions email, inbox, Gmail, calendar, meetings, schedule, or availability — "
+        "call COMPOSIO_SEARCH_TOOLS and COMPOSIO_MULTI_EXECUTE_TOOL before answering. "
+        "State only what those tools return in this turn; never invent messages or events.]\n"
+    )
+
+
 def reset_composio_client_for_tests() -> None:
     global _composio_client
     _composio_client = None

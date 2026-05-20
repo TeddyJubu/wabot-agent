@@ -861,6 +861,88 @@ async def join_whatsapp_group(
 
 
 @function_tool
+async def update_whatsapp_group(
+    ctx: RunContextWrapper[RuntimeContext],
+    group_jid: str,
+    name: str | None = None,
+    topic: str | None = None,
+    announce: bool | None = None,
+    locked: bool | None = None,
+) -> dict[str, Any]:
+    """Update group settings (name/subject, description topic, announce-only, admin-only info)."""
+    if blocked := await _dry_run_block(ctx, "update_whatsapp_group"):
+        return blocked
+    blocked = await _wabot_ready_or_block(ctx, "update_whatsapp_group")
+    if blocked is not None:
+        return blocked
+    if name is None and topic is None and announce is None and locked is None:
+        return {"ok": False, "detail": "provide at least one of name, topic, announce, locked"}
+    try:
+        payload = await ctx.context.wabot.update_group(
+            group_jid,
+            name=name,
+            topic=topic,
+            announce=announce,
+            locked=locked,
+        )
+        payload = {"ok": True, "result": redact(payload)}
+    except Exception as exc:
+        payload = {"ok": False, "detail": str(exc)}
+    ctx.context.memory.record_tool_event(ctx.context.run_id, "update_whatsapp_group", payload)
+    return payload
+
+
+@function_tool
+async def update_whatsapp_group_participants(
+    ctx: RunContextWrapper[RuntimeContext],
+    group_jid: str,
+    participants: list[str],
+    action: str = "add",
+) -> dict[str, Any]:
+    """Add, remove, promote, or demote group members (action: add|remove|promote|demote)."""
+    if blocked := await _dry_run_block(ctx, "update_whatsapp_group_participants"):
+        return blocked
+    blocked = await _wabot_ready_or_block(ctx, "update_whatsapp_group_participants")
+    if blocked is not None:
+        return blocked
+    normalized = action.strip().lower()
+    if normalized not in {"add", "remove", "promote", "demote"}:
+        return {"ok": False, "detail": "action must be add, remove, promote, or demote"}
+    if not participants:
+        return {"ok": False, "detail": "participants list is required"}
+    try:
+        payload = await ctx.context.wabot.update_group_participants(
+            group_jid, participants, action=normalized
+        )
+        payload = {"ok": True, "result": redact(payload)}
+    except Exception as exc:
+        payload = {"ok": False, "detail": str(exc)}
+    ctx.context.memory.record_tool_event(
+        ctx.context.run_id, "update_whatsapp_group_participants", payload
+    )
+    return payload
+
+
+@function_tool
+async def leave_whatsapp_group(
+    ctx: RunContextWrapper[RuntimeContext], group_jid: str
+) -> dict[str, Any]:
+    """Leave a WhatsApp group the linked device has joined."""
+    if blocked := await _dry_run_block(ctx, "leave_whatsapp_group"):
+        return blocked
+    blocked = await _wabot_ready_or_block(ctx, "leave_whatsapp_group")
+    if blocked is not None:
+        return blocked
+    try:
+        payload = await ctx.context.wabot.leave_group(group_jid)
+        payload = {"ok": True, "result": redact(payload)}
+    except Exception as exc:
+        payload = {"ok": False, "detail": str(exc)}
+    ctx.context.memory.record_tool_event(ctx.context.run_id, "leave_whatsapp_group", payload)
+    return payload
+
+
+@function_tool
 async def get_whatsapp_user_info(
     ctx: RunContextWrapper[RuntimeContext], jid: str
 ) -> dict[str, Any]:
@@ -1630,6 +1712,9 @@ def core_tools() -> list[Any]:
         get_whatsapp_group,
         get_whatsapp_group_invite,
         join_whatsapp_group,
+        update_whatsapp_group,
+        update_whatsapp_group_participants,
+        leave_whatsapp_group,
         mute_whatsapp_chat,
         archive_whatsapp_chat,
         pin_whatsapp_chat,
