@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import time
 from typing import Any
 
 from .config import Settings
@@ -10,7 +11,9 @@ from .memory import MemoryStore
 logger = logging.getLogger(__name__)
 
 _COMPOSIO_SESSION_FACT_KEY = "composio_session_id"
+_COMPOSIO_TOOLS_TTL_SEC = 300.0
 _composio_client: Any | None = None
+_composio_tools_cache: dict[str, tuple[float, list[Any]]] = {}
 
 
 def composio_enabled(settings: Settings) -> bool:
@@ -41,6 +44,17 @@ def _stored_session_id(memory: MemoryStore, user_id: str) -> str | None:
     return memory.get_contact_fact(user_id, _COMPOSIO_SESSION_FACT_KEY)
 
 
+def _cached_composio_tools(user_id: str) -> list[Any] | None:
+    entry = _composio_tools_cache.get(user_id)
+    if entry is None:
+        return None
+    cached_at, tools = entry
+    if time.monotonic() - cached_at > _COMPOSIO_TOOLS_TTL_SEC:
+        _composio_tools_cache.pop(user_id, None)
+        return None
+    return tools
+
+
 def load_composio_tools(
     settings: Settings,
     *,
@@ -50,6 +64,10 @@ def load_composio_tools(
     """Return OpenAI Agents–ready Composio tool router tools for this user."""
     if not composio_enabled(settings):
         return []
+
+    cached = _cached_composio_tools(user_id)
+    if cached is not None:
+        return cached
 
     _ensure_composio_api_key(settings)
     try:
@@ -66,8 +84,9 @@ def load_composio_tools(
                 sid,
                 source="composio",
             )
-        tools = session.tools()
-        return list(tools) if tools else []
+        tools = list(session.tools() or [])
+        _composio_tools_cache[user_id] = (time.monotonic(), tools)
+        return tools
     except Exception as exc:  # noqa: BLE001
         logger.warning("composio tools unavailable for %s: %s", user_id, exc)
         return []
@@ -88,3 +107,4 @@ def build_composio_prompt_context(*, tools_loaded: bool) -> str:
 def reset_composio_client_for_tests() -> None:
     global _composio_client
     _composio_client = None
+    _composio_tools_cache.clear()

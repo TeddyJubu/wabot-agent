@@ -407,44 +407,44 @@ class MemoryStore:
 
     def bulk_record_inbound(self, messages: list[InboundMessage]) -> dict[str, Any]:
         """Persist history-sync rows without marking them processed for auto-reply."""
-        stored = 0
+        if not messages:
+            return {"stored": 0, "count": 0}
+        rows = [
+            (
+                inbound.id,
+                inbound.sender,
+                inbound.chat,
+                str(redact(inbound.text)),
+                inbound.push_name,
+                1 if inbound.is_group else 0,
+                inbound.timestamp or now_iso(),
+                inbound.media_kind,
+                inbound.media_mime,
+                inbound.media_filename,
+                1 if inbound.has_media else 0,
+            )
+            for inbound in messages
+        ]
+        sql = """
+            insert into inbound_messages (
+                message_id, sender, chat, text, push_name, is_group, received_at,
+                media_kind, media_mime, media_filename, has_media
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            on conflict(message_id) do update set
+              sender = excluded.sender,
+              chat = excluded.chat,
+              text = excluded.text,
+              push_name = excluded.push_name,
+              is_group = excluded.is_group,
+              received_at = excluded.received_at,
+              media_kind = excluded.media_kind,
+              media_mime = excluded.media_mime,
+              media_filename = excluded.media_filename,
+              has_media = excluded.has_media
+        """
         with self.connect() as conn:
-            for inbound in messages:
-                safe_text = str(redact(inbound.text))
-                conn.execute(
-                    """
-                    insert into inbound_messages (
-                        message_id, sender, chat, text, push_name, is_group, received_at,
-                        media_kind, media_mime, media_filename, has_media
-                    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    on conflict(message_id) do update set
-                      sender = excluded.sender,
-                      chat = excluded.chat,
-                      text = excluded.text,
-                      push_name = excluded.push_name,
-                      is_group = excluded.is_group,
-                      received_at = excluded.received_at,
-                      media_kind = excluded.media_kind,
-                      media_mime = excluded.media_mime,
-                      media_filename = excluded.media_filename,
-                      has_media = excluded.has_media
-                    """,
-                    (
-                        inbound.id,
-                        inbound.sender,
-                        inbound.chat,
-                        safe_text,
-                        inbound.push_name,
-                        1 if inbound.is_group else 0,
-                        inbound.timestamp or now_iso(),
-                        inbound.media_kind,
-                        inbound.media_mime,
-                        inbound.media_filename,
-                        1 if inbound.has_media else 0,
-                    ),
-                )
-                stored += 1
-        return {"stored": stored, "count": len(messages)}
+            conn.executemany(sql, rows)
+        return {"stored": len(rows), "count": len(messages)}
 
     def record_inbound(self, inbound: InboundMessage) -> None:
         safe_text = str(redact(inbound.text))

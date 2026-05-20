@@ -127,18 +127,24 @@ def load_global_memory(settings: Settings) -> str:
 
 
 def save_instructions(settings: Settings, content: str) -> dict[str, Any]:
+    from .instructions_cache import invalidate_instructions_cache
+
     ensure_knowledge_files(settings)
     path = _instructions_path(settings)
     path.write_text(content, encoding="utf-8")
     _invalidate_cache(path)
+    invalidate_instructions_cache()
     return _doc_meta(path, settings.knowledge_instructions_max_chars)
 
 
 def save_global_memory(settings: Settings, content: str) -> dict[str, Any]:
+    from .instructions_cache import invalidate_instructions_cache
+
     ensure_knowledge_files(settings)
     path = _memory_path(settings)
     path.write_text(content, encoding="utf-8")
     _invalidate_cache(path)
+    invalidate_instructions_cache()
     return _doc_meta(path, settings.knowledge_memory_max_chars)
 
 

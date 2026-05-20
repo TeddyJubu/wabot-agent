@@ -1045,12 +1045,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.put("/api/memory/agent-notes", dependencies=[human_dependency])
     async def upsert_agent_note(body: MemoryFactBody) -> dict[str, Any]:
+        from .instructions_cache import invalidate_instructions_cache
+
         result = memory.remember_agent_note(body.key, body.value)
+        invalidate_instructions_cache()
         return redact(result)
 
     @app.delete("/api/memory/agent-notes/{key}", dependencies=[human_dependency])
     async def delete_agent_note_route(key: str) -> dict[str, Any]:
-        return redact(memory.delete_agent_note(key))
+        from .instructions_cache import invalidate_instructions_cache
+
+        result = memory.delete_agent_note(key)
+        invalidate_instructions_cache()
+        return redact(result)
 
     @app.get("/api/memory/{contact}", dependencies=[human_dependency])
     async def contact_memory(contact: str) -> dict[str, Any]:

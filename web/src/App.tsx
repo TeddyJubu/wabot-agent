@@ -128,9 +128,11 @@ export default function App() {
       });
     } catch (err) {
       const id = ensureAssistant();
+      flushDeltaBatch();
       appendDelta(id, `\n\n[network error: ${String(err)}]`);
       finishAssistant(id);
     } finally {
+      flushDeltaBatch();
       if (assistantId != null) finishAssistant(assistantId);
       setPending(false);
     }

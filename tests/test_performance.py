@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -168,6 +169,66 @@ def test_instructions_cache_skips_rereads(tmp_path: Path) -> None:
         build_kwargs={"settings": settings, "skill_summary": summary_two},
     )
     assert build_calls == 1
+
+
+def test_instructions_cache_busts_on_agent_notes(
+    memory: MemoryStore,
+    tmp_path: Path,
+) -> None:
+    skills_dir = tmp_path / "skills"
+    skill_dir = skills_dir / "demo"
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("demo skill", encoding="utf-8")
+    settings = Settings(skills_dir=skills_dir, _env_file=None)
+
+    invalidate_instructions_cache()
+    build_calls = 0
+
+    def counting_build(**_kwargs: object) -> str:
+        nonlocal build_calls
+        build_calls += 1
+        return "cached instructions"
+
+    summary = cached_render_skill_summary(skills_dir)
+    kwargs = {"settings": settings, "skill_summary": summary}
+    cached_build_agent_instructions(
+        settings,
+        memory=memory,
+        build_fn=counting_build,
+        build_kwargs=kwargs,
+    )
+    cached_build_agent_instructions(
+        settings,
+        memory=memory,
+        build_fn=counting_build,
+        build_kwargs=kwargs,
+    )
+    assert build_calls == 1
+
+    memory.remember_agent_note("policy", "reply briefly")
+    cached_build_agent_instructions(
+        settings,
+        memory=memory,
+        build_fn=counting_build,
+        build_kwargs=kwargs,
+    )
+    assert build_calls == 2
+
+
+def test_bulk_record_inbound_completes_quickly(memory: MemoryStore) -> None:
+    messages = [
+        InboundMessage(
+            id=f"hist-{i}",
+            sender=f"+{i}",
+            chat=None,
+            text=f"message {i}",
+        )
+        for i in range(200)
+    ]
+    started = time.perf_counter()
+    memory.bulk_record_inbound(messages)
+    elapsed = time.perf_counter() - started
+    assert elapsed < 2.0
 
 
 @pytest.mark.asyncio

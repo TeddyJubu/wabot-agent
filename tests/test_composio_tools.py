@@ -56,6 +56,29 @@ def test_load_composio_tools_creates_session_and_persists_id(tmp_path) -> None:
     assert any(f["key"] == "composio_session_id" and f["value"] == "trs_test123" for f in facts)
 
 
+def test_load_composio_tools_caches_per_user(tmp_path) -> None:
+    reset_composio_client_for_tests()
+    memory = MemoryStore(tmp_path / "db2.sqlite3")
+    settings = Settings(
+        composio_enabled=True,
+        composio_api_key="ak_test",
+        offline_mode=False,
+        _env_file=None,
+    )
+    mock_session = MagicMock()
+    mock_session.session_id = "trs_cached"
+    mock_session.tools.return_value = [MagicMock(name="COMPOSIO_SEARCH_TOOLS")]
+    mock_composio = MagicMock()
+    mock_composio.create.return_value = mock_session
+
+    with patch("wabot_agent.composio_tools._get_composio_client", return_value=mock_composio):
+        first = load_composio_tools(settings, user_id="user_cache", memory=memory)
+        second = load_composio_tools(settings, user_id="user_cache", memory=memory)
+
+    assert first is second
+    mock_session.tools.assert_called_once()
+
+
 def test_build_agent_instructions_mention_composio_when_enabled() -> None:
     settings = Settings(
         composio_enabled=True,

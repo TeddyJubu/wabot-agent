@@ -351,11 +351,12 @@ def build_agent(
     mcp_servers: list[Any] | None = None,
     *,
     extra_tools: list[Any] | None = None,
+    memory: MemoryStore | None = None,
 ) -> Agent[RuntimeContext]:
     skill_summary = cached_render_skill_summary(settings.skills_dir)
     instructions = cached_build_agent_instructions(
         settings,
-        memory=None,
+        memory=memory,
         build_fn=build_agent_instructions,
         build_kwargs={"settings": settings, "skill_summary": skill_summary},
     )
@@ -451,7 +452,10 @@ async def run_agent(
             settings.mcp_config, skip_names=_mcp_skip_names(settings)
         ) as mcp_servers:
             agent = build_agent(
-                settings, mcp_servers=mcp_servers, extra_tools=composio_tools
+                settings,
+                mcp_servers=mcp_servers,
+                extra_tools=composio_tools,
+                memory=memory,
             )
             return await Runner.run(
                 agent,
@@ -599,7 +603,10 @@ async def run_agent_streamed(
             settings.mcp_config, skip_names=_mcp_skip_names(settings)
         ) as mcp_servers:
             agent = build_agent(
-                settings, mcp_servers=mcp_servers, extra_tools=composio_tools
+                settings,
+                mcp_servers=mcp_servers,
+                extra_tools=composio_tools,
+                memory=memory,
             )
             use_streaming = (
                 hasattr(Runner, "run_streamed") and settings.live_model_enabled

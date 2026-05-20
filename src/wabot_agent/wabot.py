@@ -62,8 +62,10 @@ class WabotClient:
 
     async def health(self) -> WabotHealth:
         try:
-            client = self._client(timeout=10.0)
-            resp = await client.get(f"{self.endpoint}/health")
+            resp = await self._client().get(
+                f"{self.endpoint}/health",
+                timeout=10.0,
+            )
         except httpx.HTTPError as exc:
             return WabotHealth(reachable=False, detail=str(exc))
         if resp.status_code != 200:
