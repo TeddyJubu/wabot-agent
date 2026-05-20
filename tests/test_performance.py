@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -190,7 +190,7 @@ def test_instructions_cache_busts_on_agent_notes(
         return "cached instructions"
 
     summary = cached_render_skill_summary(skills_dir)
-    kwargs = {"settings": settings, "skill_summary": summary}
+    kwargs = {"settings": settings, "skill_summary": summary, "memory": memory}
     cached_build_agent_instructions(
         settings,
         memory=memory,

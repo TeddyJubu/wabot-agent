@@ -347,7 +347,12 @@ def format_memories_for_prompt(results: list[dict[str, str]], *, max_chars: int)
     lines = [f"- {row['memory']}" for row in results if row.get("memory")]
     if not lines:
         return ""
-    block = "Relevant long-term memories (Mem0):\n" + "\n".join(lines)
+    block = (
+        "Relevant long-term memories (Mem0) — if these conflict with Client "
+        "instructions, Operator knowledge, Agent notes, or Contact facts in "
+        "your system prompt, prefer those dashboard layers:\n"
+        + "\n".join(lines)
+    )
     if len(block) <= max_chars:
         return block + "\n\n"
     trimmed = block[: max_chars - 20].rsplit("\n", 1)[0]

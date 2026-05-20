@@ -59,7 +59,7 @@ const deltaBatch = new Map<string, string>();
 let deltaFlushScheduled = false;
 
 function scheduleDeltaFlush(
-  flush: () => void,
+  _flush: () => void,
   set: (fn: (s: State) => Partial<State>) => void,
 ) {
   if (deltaFlushScheduled) return;

@@ -37,8 +37,12 @@ def test_ensure_knowledge_files_seeds_templates(tmp_path: Path) -> None:
 
     assert instructions.exists()
     assert memory.exists()
-    assert "Client instructions" in instructions.read_text(encoding="utf-8")
-    assert "Operator knowledge" in memory.read_text(encoding="utf-8")
+    instructions_text = instructions.read_text(encoding="utf-8")
+    memory_text = memory.read_text(encoding="utf-8")
+    assert "Julia" in instructions_text
+    assert "Epicware" in instructions_text
+    assert "Operator knowledge" in memory_text
+    assert "Epicware" in memory_text
 
 
 def test_save_and_load_with_cache(tmp_path: Path) -> None:

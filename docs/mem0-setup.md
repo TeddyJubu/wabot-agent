@@ -2,17 +2,22 @@
 
 wabot-agent integrates [Mem0](https://github.com/mem0ai/mem0) for semantic, per-contact memory alongside the existing SQLite `contact_facts` store.
 
-## How it works
+## How it works (with the Knowledge dashboard)
 
-| Layer | Role |
-|-------|------|
-| **SQLite** (`contact_facts`, `agent_notes`) | Explicit key/value facts the agent stores via tools |
-| **Mem0** (`data/mem0_qdrant/`) | Semantic search + automatic learning from each turn |
+| Layer | Where you edit | Injected |
+|-------|----------------|----------|
+| **Client instructions** | `/knowledge` → Instructions | System prompt (every run) |
+| **Operator knowledge** | `/knowledge` → Memory (`memory.md`) | System prompt (every run) |
+| **Agent notes** | `/knowledge` → Notes | System prompt (every run) |
+| **Contact facts** | `/knowledge` → Contacts | Prepended per turn (this sender) |
+| **Mem0** | Auto + `add_mem0_memory` tool | Prepended per turn (semantic search) |
 
-On each agent run (when enabled):
+**Precedence:** dashboard layers 1–4 win over Mem0 if they conflict. Use Mem0 for conversational nuance; use the dashboard for curated business rules and explicit key/value facts.
+
+On each agent run (when Mem0 is enabled):
 
 1. **Retrieve** — Mem0 searches by **sender JID** (same person in DMs and groups). In group chats it also searches the group JID for thread-specific facts.
-2. **Inject** — Top matches are prepended to the prompt.
+2. **Inject** — Top matches are prepended to the user message (after contact facts).
 3. **Capture** — After the reply, turns are stored under the **sender** so facts follow the person across chats.
 
 Agent conversation history stays **per chat thread** (group JID vs DM); only long-term memory is person-scoped.

@@ -30,12 +30,13 @@ from .events import EventLog
 from .inbound_media import build_inbound_file_context, voice_transcript_from_context
 from .instructions_cache import cached_build_agent_instructions, cached_render_skill_summary
 from .knowledge_store import (
+    format_agent_notes,
     format_contact_facts,
     load_global_memory,
     load_instructions,
 )
-from .media_download import download_inbound_media
 from .mcp import connected_mcp_servers
+from .media_download import download_inbound_media
 from .mem0_store import capture_turn_mem0, inject_mem0_context, mem0_enabled
 from .memory import (
     InboundMessage,
@@ -76,11 +77,32 @@ look up. Do not give one-line non-answers when the user needs help.
    is what the person reads (no tool names, no JSON, no <thinking> blocks).
 """
 
-INSTRUCTIONS_MEMORY_SQLITE = """## Memory (structured facts)
+INSTRUCTIONS_KNOWLEDGE_LAYERS = """## Knowledge layers (precedence)
+
+Operator-curated **Knowledge** dashboard (`/knowledge`) is authoritative. On each turn you
+also receive **Contact facts** (per sender) and, when Mem0 is enabled, **Mem0** hits prepended
+to the user message. If anything conflicts, prefer this order:
+
+1. **Client instructions** (system prompt) — business behavior, tone, rules.
+2. **Operator knowledge** (system prompt) — global durable facts from the Memory tab.
+3. **Agent notes** (system prompt when present) — structured global key/value from the Notes tab.
+4. **Contact facts** (per-turn) — explicit per-person key/value from the Contacts tab.
+5. **Mem0** (per-turn, when enabled) — semantic conversation memory; supplements 1–4 only.
+
+**Where to save new facts:** global/business rules → `/knowledge` Instructions or Memory tabs
+(not Mem0 alone); per-contact key/value → Contacts tab or `remember_contact_fact`; global
+key/value rules → Notes tab or `remember_agent_note`; conversational nuance → `add_mem0_memory`
+or Mem0 auto-capture.
+"""
+
+INSTRUCTIONS_MEMORY_SQLITE = """## Memory tools (SQLite)
 
 Before answering, call `recall_contact_memory` when prior context may matter.
-Before your final reply, call `remember_contact_fact` for crisp key/value items
-(e.g. `timezone`, `preferred_name`) and `remember_agent_note` only for global operator rules.
+Before your final reply, call `remember_contact_fact` for crisp per-contact key/value items
+(e.g. `timezone`, `preferred_name`) — these mirror the **Contacts** tab in `/knowledge`.
+Call `recall_agent_notes` if you need global notes not already in your system prompt.
+Use `remember_agent_note` only for quick runtime notes; prefer the **Notes** tab for
+operator-curated global rules.
 
 **What counts as important:** names and roles, preferences, recurring requests, open tasks,
 relationships ("message John when…"), business details, and corrections to prior mistakes.
@@ -88,24 +110,28 @@ relationships ("message John when…"), business details, and corrections to pri
 In group chats, use `contact` = the **sender** JID (memory follows the person, not only the group).
 """
 
-INSTRUCTIONS_MEMORY_MEM0 = """## Memory (mandatory — do not skip)
+INSTRUCTIONS_MEMORY_MEM0 = """## Memory tools (Mem0 + SQLite — mandatory when enabled)
 
 You must **actively** maintain long-term memory. Do not rely on the current thread alone.
+Mem0 auto-search may already be prepended to this turn; still use tools to store explicit facts.
 
 **Before you answer (every inbound turn):**
 - Call `search_mem0_memories` with a short query (defaults to the sender — includes
   memories from other chats with this person).
 - Call `recall_contact_memory` with `contact` = sender (not the group JID).
+- Call `recall_agent_notes` only if you need global notes beyond what is in your system prompt.
 - Use what you find; if memory is empty, say so only when they explicitly ask "do you remember…"
 
 **After you understand the message — save important facts before your final reply:**
-- Call `add_mem0_memory` for preferences, names, deadlines, business context, ongoing projects,
-  how they want to be addressed, and anything they say "remember" or "don't forget".
-- Call `remember_contact_fact` for crisp key/value items (e.g. `timezone`, `preferred_name`).
-- Call `remember_agent_note` only for global operator-wide rules (not per-contact secrets).
+- For crisp per-contact key/value → `remember_contact_fact` (canonical with **Contacts** tab).
+- For global operator key/value → prefer `/knowledge` Notes tab; use `remember_agent_note` only
+  for ephemeral runtime notes.
+- For conversational nuance, preferences, and "remember this" → `add_mem0_memory` (Mem0).
+- Do **not** duplicate facts already in Client instructions, Operator knowledge, or Agent notes
+  into Mem0 unless adding new detail.
 
-Mem0 may auto-capture the conversation when enabled — still call `add_mem0_memory` or
-`remember_contact_fact` for facts you must not lose, so they are explicit and searchable.
+Mem0 may auto-capture the conversation when enabled — still call `remember_contact_fact` or
+`add_mem0_memory` for facts you must not lose, so they are explicit and searchable.
 """
 
 INSTRUCTIONS_TOOLS = """## Tools (use them proactively)
@@ -208,7 +234,11 @@ class AgentRunResult:
     sent_destinations: frozenset[str] = frozenset()
 
 
-def build_agent_instructions(settings: Settings, skill_summary: str) -> str:
+def build_agent_instructions(
+    settings: Settings,
+    skill_summary: str,
+    memory: MemoryStore | None = None,
+) -> str:
     memory_block = (
         INSTRUCTIONS_MEMORY_MEM0
         if mem0_enabled(settings)
@@ -229,6 +259,7 @@ def build_agent_instructions(settings: Settings, skill_summary: str) -> str:
         )
     parts = [
         INSTRUCTIONS,
+        INSTRUCTIONS_KNOWLEDGE_LAYERS,
         memory_block,
         tools_block,
         INSTRUCTIONS_MULTI_STEP,
@@ -241,6 +272,13 @@ def build_agent_instructions(settings: Settings, skill_summary: str) -> str:
         parts.append(f"\n## Client instructions\n{custom}\n")
     if global_mem:
         parts.append(f"\n## Operator knowledge\n{global_mem}\n")
+    if memory is not None:
+        notes_block = format_agent_notes(
+            memory.agent_notes(),
+            settings.knowledge_contact_max_chars,
+        )
+        if notes_block:
+            parts.append(f"\n## Agent notes\n{notes_block}\n")
     return "".join(parts)
 
 
@@ -358,7 +396,11 @@ def build_agent(
         settings,
         memory=memory,
         build_fn=build_agent_instructions,
-        build_kwargs={"settings": settings, "skill_summary": skill_summary},
+        build_kwargs={
+            "settings": settings,
+            "skill_summary": skill_summary,
+            "memory": memory,
+        },
     )
     tools = [*core_tools(), *(extra_tools or [])]
     return Agent[RuntimeContext](

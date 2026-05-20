@@ -83,10 +83,6 @@ export default function App() {
     if (!trimmed) return;
     setInput("");
     setSlashIdx(0);
-    if (trimmed === "__open_knowledge__") {
-      window.location.href = "/knowledge";
-      return;
-    }
     if (trimmed.startsWith("__open_slide_over__:")) {
       const which = trimmed.split(":")[1] as Exclude<SlideOverId, null>;
       if (which === "qr" || which === "runs" || which === "settings") open(which);

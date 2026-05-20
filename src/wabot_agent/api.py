@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import time
 import io
 import json
 import logging
 import secrets
 import shutil
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field
 from qrcode.image.svg import SvgFillImage
 
 from .agent import run_agent, run_agent_streamed
+from .app_paths import static_directory
 from .auth import (
     AuthIdentity,
     maybe_mint_operator_cookie,
@@ -585,7 +586,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.event_hub = hub
     app.state.wabot = wabot
 
-    static_dir = Path(__file__).resolve().parents[2] / "static"
+    static_dir = static_directory()
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
 

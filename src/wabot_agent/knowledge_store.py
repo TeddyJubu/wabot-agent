@@ -6,9 +6,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from .app_paths import knowledge_templates_directory
 from .config import Settings
 
-_TEMPLATES_DIR = Path(__file__).resolve().parents[2] / "knowledge" / "templates"
+_TEMPLATES_DIR = knowledge_templates_directory()
 _INSTRUCTIONS_NAME = "instructions.md"
 _MEMORY_NAME = "memory.md"
 
@@ -62,6 +63,21 @@ def truncate_for_prompt(text: str, max_chars: int) -> str:
     suffix = "… [truncated]"
     keep = max(0, max_chars - len(suffix))
     return stripped[:keep].rstrip() + suffix
+
+
+def format_agent_notes(notes: list[dict[str, Any]], max_chars: int) -> str:
+    lines: list[str] = []
+    for row in notes:
+        if not isinstance(row, dict):
+            continue
+        key = str(row.get("key", "")).strip()
+        value = str(row.get("value", "")).strip()
+        if not key:
+            continue
+        lines.append(f"- {key}: {value}")
+    if not lines:
+        return ""
+    return truncate_for_prompt("\n".join(lines), max_chars)
 
 
 def format_contact_facts(facts: dict[str, Any], max_chars: int) -> str:
@@ -159,7 +175,7 @@ class KnowledgeDocMeta:
 
 def _doc_meta(path: Path, preview_max: int) -> dict[str, Any]:
     try:
-        text = path.read_text(encoding="utf-8")
+        text = _read_cached(path)
         mtime = path.stat().st_mtime
         updated_at = datetime.fromtimestamp(mtime, tz=UTC).isoformat()
     except OSError:

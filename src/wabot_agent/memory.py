@@ -359,20 +359,6 @@ class MemoryStore:
             return ""
         return str(row["m"])
 
-    def get_contact_fact(self, contact: str, key: str) -> str | None:
-        with self.connect() as conn:
-            row = conn.execute(
-                """
-                select value from contact_facts
-                where contact = ? and key = ?
-                """,
-                (contact, key),
-            ).fetchone()
-        if row is None:
-            return None
-        value = str(row["value"] or "").strip()
-        return value or None
-
     def delete_contact_fact(self, contact: str, key: str) -> dict[str, Any]:
         with self.connect() as conn:
             cur = conn.execute(
@@ -404,6 +390,20 @@ class MemoryStore:
             }
             for row in rows
         ]
+
+    def get_contact_fact(self, contact: str, key: str) -> str | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                select value from contact_facts
+                where contact = ? and key = ?
+                """,
+                (contact, key),
+            ).fetchone()
+        if row is None:
+            return None
+        value = str(row["value"] or "").strip()
+        return value or None
 
     def bulk_record_inbound(self, messages: list[InboundMessage]) -> dict[str, Any]:
         """Persist history-sync rows without marking them processed for auto-reply."""

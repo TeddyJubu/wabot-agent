@@ -25,6 +25,7 @@ export default function BlockNoteEditor({
   const [error, setError] = useState<string | null>(null);
   const loadedRef = useRef(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const markdownDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedRef = useRef(initialMarkdown);
 
   const charCount = markdown.length;
@@ -75,13 +76,18 @@ export default function BlockNoteEditor({
     [persist],
   );
 
-  const handleChange = useCallback(async () => {
+  const handleChange = useCallback(() => {
     if (!loadedRef.current) return;
-    const text = await editor.blocksToMarkdownLossy(editor.document);
-    setMarkdown(text);
-    const dirty = text !== lastSavedRef.current;
-    onDirtyChange?.(dirty);
-    if (dirty) scheduleSave(text);
+    if (markdownDebounceRef.current) clearTimeout(markdownDebounceRef.current);
+    markdownDebounceRef.current = setTimeout(() => {
+      void (async () => {
+        const text = await editor.blocksToMarkdownLossy(editor.document);
+        setMarkdown(text);
+        const dirty = text !== lastSavedRef.current;
+        onDirtyChange?.(dirty);
+        if (dirty) scheduleSave(text);
+      })();
+    }, 300);
   }, [editor, onDirtyChange, scheduleSave]);
 
   return (
