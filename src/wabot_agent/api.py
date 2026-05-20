@@ -10,7 +10,7 @@ import shutil
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import urlparse
 
 import qrcode
@@ -44,6 +44,8 @@ from .auto_reply import (
     inbound_session_id,
 )
 from .config import Settings, get_settings
+from .context_management import maybe_prune_audit_tables
+from .events import EventHub, EventLog
 from .knowledge_store import (
     ensure_knowledge_files,
     list_knowledge_docs,
@@ -52,8 +54,6 @@ from .knowledge_store import (
     save_global_memory,
     save_instructions,
 )
-from .context_management import maybe_prune_audit_tables
-from .events import EventHub, EventLog
 from .llm_provider import active_model_id, llm_provider_label
 from .memory import InboundMessage, MemoryStore
 from .recipients import is_owner_inbound
@@ -1445,7 +1445,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         dependencies=[human_dependency],
     )
     async def set_whatsapp_group_picture_api(
-        group_jid: str, file: UploadFile = File(...)
+        group_jid: str,
+        file: Annotated[UploadFile, File()],
     ) -> dict[str, Any]:
         suffix = Path(file.filename or "group.jpg").suffix or ".jpg"
         tmp = settings.media_dir / f"group-picture-upload-{secrets.token_hex(8)}{suffix}"

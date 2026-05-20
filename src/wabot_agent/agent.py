@@ -28,12 +28,12 @@ from .context_management import (
 )
 from .events import EventLog
 from .inbound_media import build_inbound_file_context, voice_transcript_from_context
-from .mcp import connected_mcp_servers
 from .knowledge_store import (
     format_contact_facts,
     load_global_memory,
     load_instructions,
 )
+from .mcp import connected_mcp_servers
 from .mem0_store import capture_turn_mem0, inject_mem0_context, mem0_enabled
 from .memory import (
     InboundMessage,
@@ -134,7 +134,8 @@ INSTRUCTIONS_TOOLS = """## Tools (use them proactively)
 - Groups: list_whatsapp_groups, create_whatsapp_group, get_whatsapp_group,
   update_whatsapp_group (name/topic/announce/locked), update_whatsapp_group_participants
   (add/remove/promote/demote), set_whatsapp_group_picture (JPEG path or remove=true),
-  get_whatsapp_group_invite, join_whatsapp_group, leave_whatsapp_group — when the task requires them.
+  get_whatsapp_group_invite, join_whatsapp_group, leave_whatsapp_group — when the task
+  requires them.
 - Reactions, edits, mutes, archives — when the task requires them.
 
 ## Policy & safety

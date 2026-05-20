@@ -6,7 +6,6 @@ from wabot_agent.config import Settings
 from wabot_agent.knowledge_store import (
     ensure_knowledge_files,
     format_contact_facts,
-    load_global_memory,
     load_instructions,
     read_global_memory_raw,
     read_instructions_raw,
