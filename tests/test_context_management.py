@@ -12,8 +12,12 @@ from wabot_agent.context_management import (
     build_agent_run_config,
     build_agent_session,
     cap_turn_prompt,
+    clear_agent_session,
+    is_recoverable_codex_session_error,
     make_session_input_callback,
     prune_agent_session_messages,
+    prune_codex_session_storage,
+    sanitize_codex_session_history,
     split_history_by_token_budget,
     strip_images_from_session_item,
     trim_history_for_tokens,
@@ -153,6 +157,114 @@ def test_prune_agent_session_messages(tmp_path: Path) -> None:
     ).fetchone()[0]
     conn.close()
     assert count == 5
+
+
+def test_sanitize_codex_session_history_drops_reasoning_and_orphan_outputs() -> None:
+    history = [
+        {"role": "user", "content": "hi"},
+        {
+            "type": "reasoning",
+            "id": "rs_abc123",
+            "summary": [{"type": "summary_text", "text": "thinking"}],
+        },
+        {
+            "type": "function_call",
+            "call_id": "call_ok",
+            "name": "wabot_health",
+            "arguments": "{}",
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call_orphan",
+            "output": '{"ok": true}',
+        },
+    ]
+    cleaned = sanitize_codex_session_history(history)
+    assert cleaned == [
+        {"role": "user", "content": "hi"},
+        {
+            "type": "function_call",
+            "call_id": "call_ok",
+            "name": "wabot_health",
+            "arguments": "{}",
+        },
+    ]
+
+
+def test_is_recoverable_codex_session_error() -> None:
+    assert is_recoverable_codex_session_error(
+        RuntimeError(
+            "No tool call found for function call output with call_id call_x."
+        )
+    )
+    assert is_recoverable_codex_session_error(
+        RuntimeError("Item rs_abc not found. Items are not persisted when store is false.")
+    )
+    assert not is_recoverable_codex_session_error(RuntimeError("rate limit"))
+
+
+def test_prune_codex_session_storage(tmp_path: Path) -> None:
+    db_path = tmp_path / "agent.db"
+    conn = sqlite3.connect(db_path)
+    conn.execute(
+        """
+        create table agent_messages (
+            id integer primary key autoincrement,
+            session_id text not null,
+            message_data text not null
+        )
+        """
+    )
+    rows = [
+        {"role": "user", "content": "hi"},
+        {"type": "reasoning", "id": "rs_abc", "summary": []},
+        {
+            "type": "function_call",
+            "call_id": "call_ok",
+            "name": "wabot_health",
+            "arguments": "{}",
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call_ok",
+            "output": "{}",
+        },
+        {
+            "type": "function_call_output",
+            "call_id": "call_bad",
+            "output": "{}",
+        },
+    ]
+    for row in rows:
+        conn.execute(
+            "insert into agent_messages (session_id, message_data) values (?, ?)",
+            ("operator", json.dumps(row)),
+        )
+    conn.commit()
+    conn.close()
+    deleted = prune_codex_session_storage(db_path, "operator")
+    assert deleted == 2
+    conn = sqlite3.connect(db_path)
+    remaining = conn.execute(
+        "select message_data from agent_messages where session_id = ? order by id",
+        ("operator",),
+    ).fetchall()
+    conn.close()
+    types = [json.loads(r[0]).get("type") or json.loads(r[0]).get("role") for r in remaining]
+    assert types == ["user", "function_call", "function_call_output"]
+
+
+def test_clear_agent_session(tmp_path: Path) -> None:
+    db_path = tmp_path / "agent.db"
+    _init_agent_messages(db_path, "s1", 3)
+    deleted = clear_agent_session(db_path, "s1")
+    assert deleted == 3
+    conn = sqlite3.connect(db_path)
+    count = conn.execute(
+        "select count(*) from agent_messages where session_id = ?", ("s1",)
+    ).fetchone()[0]
+    conn.close()
+    assert count == 0
 
 
 def test_memory_prune_audit_tables(tmp_path: Path) -> None:

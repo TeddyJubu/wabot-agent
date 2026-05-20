@@ -23,6 +23,40 @@ from agents.tool import Tool
 from agents.usage import Usage
 from openai.types.responses import Response, ResponseCompletedEvent
 
+from .context_management import sanitize_codex_session_history
+
+
+def _is_nonreplayable_output_item(item: Any) -> bool:
+    """Reasoning items break the next Codex request when store=false."""
+    typ = getattr(item, "type", None)
+    if typ == "reasoning":
+        return True
+    item_id = getattr(item, "id", None)
+    return isinstance(item_id, str) and item_id.startswith("rs_")
+
+
+def _filter_codex_response_output(output: list[Any]) -> list[Any]:
+    return [item for item in output if not _is_nonreplayable_output_item(item)]
+
+
+def _filter_completed_response(response: Response) -> Response:
+    filtered = _filter_codex_response_output(list(response.output))
+    if len(filtered) == len(response.output):
+        return response
+    return response.model_copy(update={"output": filtered})
+
+
+def _sanitize_codex_input(
+    input_value: str | list[TResponseInputItem],
+) -> str | list[TResponseInputItem]:
+    if isinstance(input_value, str):
+        return input_value
+    if not input_value:
+        return input_value
+    if all(isinstance(item, dict) for item in input_value):
+        return sanitize_codex_session_history(input_value)  # type: ignore[return-value]
+    return input_value
+
 
 class CodexSubscriptionModel(Model):
     """Codex ChatGPT subscription requires streamed Responses API calls."""
@@ -32,9 +66,15 @@ class CodexSubscriptionModel(Model):
 
     def _model_settings(self, model_settings: ModelSettings) -> ModelSettings:
         # ChatGPT-backed Codex rejects non-streaming, stored responses.
-        if model_settings.store is None:
-            return replace(model_settings, store=False)
-        return model_settings
+        # Reasoning items (rs_*) cannot be replayed when store=false — omit them.
+        resolved = (
+            replace(model_settings, store=False)
+            if model_settings.store is None
+            else model_settings
+        )
+        if resolved.store is False and resolved.reasoning is not None:
+            return replace(resolved, reasoning=None)
+        return resolved
 
     async def get_response(
         self,
@@ -51,11 +91,12 @@ class CodexSubscriptionModel(Model):
         prompt: Any | None = None,
     ) -> ModelResponse:
         resolved = self._model_settings(model_settings)
+        safe_input = _sanitize_codex_input(input)
         final_response: Response | None = None
         text_parts: list[str] = []
         async for chunk in self._inner.stream_response(
             system_instructions,
-            input,
+            safe_input,
             resolved,
             tools,
             output_schema,
@@ -75,7 +116,7 @@ class CodexSubscriptionModel(Model):
             raise ModelBehaviorError(
                 "Codex subscription response ended without response.completed"
             )
-        output = list(final_response.output)
+        output = _filter_codex_response_output(list(final_response.output))
         if not output and text_parts:
             output = [
                 ResponseOutputMessage(
@@ -125,10 +166,13 @@ class CodexSubscriptionModel(Model):
         conversation_id: str | None = None,
         prompt: Any | None = None,
     ) -> AsyncIterator[TResponseStreamEvent]:
+        """Dashboard streaming uses this path — must filter reasoning like get_response."""
+        resolved = self._model_settings(model_settings)
+        safe_input = _sanitize_codex_input(input)
         async for chunk in self._inner.stream_response(
             system_instructions,
-            input,
-            self._model_settings(model_settings),
+            safe_input,
+            resolved,
             tools,
             output_schema,
             handoffs,
@@ -137,4 +181,13 @@ class CodexSubscriptionModel(Model):
             conversation_id=conversation_id,
             prompt=prompt,
         ):
+            if isinstance(chunk, ResponseCompletedEvent):
+                filtered = _filter_completed_response(chunk.response)
+                if filtered is not chunk.response:
+                    yield ResponseCompletedEvent(
+                        type=chunk.type,
+                        response=filtered,
+                        sequence_number=chunk.sequence_number,
+                    )
+                    continue
             yield chunk

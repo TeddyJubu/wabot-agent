@@ -131,9 +131,8 @@ def reasoning_for_model(settings: Settings) -> Any | None:
 
 
 def _codex_reasoning(settings: Settings) -> Any | None:
-    from openai.types.shared.reasoning import Reasoning
-
-    effort = settings.codex_reasoning_effort.strip().lower()
-    if effort in ("", "default", "none"):
-        return None
-    return Reasoning(effort=effort)  # type: ignore[arg-type]
+    """Codex subscription uses store=false; reasoning items cannot be replayed."""
+    # Dashboard + WhatsApp use CodexSubscriptionModel which also strips reasoning
+    # from streamed responses. Keep effort unset until store=true is supported.
+    _ = settings.codex_reasoning_effort
+    return None

@@ -16,7 +16,10 @@ from .context_management import (
     build_agent_run_config,
     build_agent_session,
     cap_turn_prompt,
+    clear_agent_session,
+    is_recoverable_codex_session_error,
     maybe_prune_audit_tables,
+    maybe_prune_codex_session_storage,
     prune_session_storage,
 )
 from .events import EventLog
@@ -254,7 +257,6 @@ async def run_agent(
     person_memory_id = (
         inbound_person_memory_id(inbound) if inbound else memory_user_ids[0]
     )
-    sqlite_session = build_agent_session(settings, session_key)
     run_config = build_agent_run_config(settings, session_key, memory)
     context = RuntimeContext(
         settings=settings,
@@ -296,25 +298,48 @@ async def run_agent(
     composio_tools = load_composio_tools(
         settings, user_id=person_memory_id, memory=memory
     )
-    async with connected_mcp_servers(
-        settings.mcp_config, skip_names=_mcp_skip_names(settings)
-    ) as mcp_servers:
-        agent = build_agent(
-            settings, mcp_servers=mcp_servers, extra_tools=composio_tools
-        )
-        result = await Runner.run(
-            agent,
-            runner_input,
-            context=context,
-            max_turns=settings.max_agent_turns,
-            run_config=run_config,
-            session=sqlite_session,
-        )
+
+    async def _execute_run() -> Any:
+        async with connected_mcp_servers(
+            settings.mcp_config, skip_names=_mcp_skip_names(settings)
+        ) as mcp_servers:
+            agent = build_agent(
+                settings, mcp_servers=mcp_servers, extra_tools=composio_tools
+            )
+            return await Runner.run(
+                agent,
+                runner_input,
+                context=context,
+                max_turns=settings.max_agent_turns,
+                run_config=run_config,
+                session=build_agent_session(settings, session_key),
+            )
+
+    result: Any | None = None
+    for attempt in range(2):
+        try:
+            result = await _execute_run()
+            break
+        except Exception as exc:
+            if (
+                attempt == 0
+                and settings.model_provider == "codex"
+                and is_recoverable_codex_session_error(exc)
+            ):
+                clear_agent_session(settings.db_path, session_key)
+                continue
+            raise
+    assert result is not None
 
     await prune_session_storage(settings, session_key, memory)
+    maybe_prune_codex_session_storage(settings, session_key)
     maybe_prune_audit_tables(memory, settings)
 
     final_output = strip_model_thinking(str(result.final_output))
+    if settings.model_provider == "codex" and not final_output.strip():
+        if clear_agent_session(settings.db_path, session_key) > 0:
+            result = await _execute_run()
+            final_output = strip_model_thinking(str(result.final_output))
     memory.record_run(run_id, inbound.sender if inbound else None, prompt, final_output)
     if mem0_enabled(settings):
         try:
@@ -382,7 +407,6 @@ async def run_agent_streamed(
     person_memory_id = (
         inbound_person_memory_id(inbound) if inbound else memory_user_ids[0]
     )
-    sqlite_session = build_agent_session(settings, session_key)
     run_config = build_agent_run_config(settings, session_key, memory)
     context = RuntimeContext(
         settings=settings,
@@ -421,74 +445,93 @@ async def run_agent_streamed(
 
     await maybe_send_task_started_ack(context, prompt)
 
-    final_output = ""
-    errored: Exception | None = None
-
     composio_tools = load_composio_tools(
         settings, user_id=person_memory_id, memory=memory
     )
-    async with connected_mcp_servers(
-        settings.mcp_config, skip_names=_mcp_skip_names(settings)
-    ) as mcp_servers:
-        agent = build_agent(
-            settings, mcp_servers=mcp_servers, extra_tools=composio_tools
-        )
 
-        # Try the real streaming path. OfflineModel raises NotImplementedError
-        # from stream_response — when that happens, or the SDK lacks streaming,
-        # fall back to a single delta/final pair so the wire contract holds.
-        # Gate on live_model_enabled (not just offline_mode) since the offline
-        # echo model is also used when there's no OPENROUTER_API_KEY.
-        use_streaming = hasattr(Runner, "run_streamed") and settings.live_model_enabled
+    final_output = ""
+    errored: Exception | None = None
+    streamed_events: list[dict[str, Any]] = []
 
-        if use_streaming:
-            try:
-                stream_result = Runner.run_streamed(
-                    agent,
-                    runner_input,
-                    context=context,
-                    max_turns=settings.max_agent_turns,
-                    run_config=run_config,
-                    session=sqlite_session,
-                )
+    for attempt in range(2):
+        final_output = ""
+        errored = None
+        streamed_events = []
+        async with connected_mcp_servers(
+            settings.mcp_config, skip_names=_mcp_skip_names(settings)
+        ) as mcp_servers:
+            agent = build_agent(
+                settings, mcp_servers=mcp_servers, extra_tools=composio_tools
+            )
+            use_streaming = (
+                hasattr(Runner, "run_streamed") and settings.live_model_enabled
+            )
+
+            if use_streaming:
                 try:
-                    state: dict[str, str] = {}
-                    async for event in stream_result.stream_events():
-                        for payload in _translate_stream_event(event, state):
-                            yield payload
-                except Exception as exc:  # noqa: BLE001 — surface but cleanup
-                    errored = exc
+                    stream_result = Runner.run_streamed(
+                        agent,
+                        runner_input,
+                        context=context,
+                        max_turns=settings.max_agent_turns,
+                        run_config=run_config,
+                        session=build_agent_session(settings, session_key),
+                    )
                     try:
-                        stream_result.cancel()
-                    except Exception:  # noqa: BLE001
-                        pass
-                else:
-                    final_output = strip_model_thinking(str(stream_result.final_output or ""))
-            except NotImplementedError:
-                # Model doesn't implement stream_response — fall through to the
-                # non-streamed Runner.run() path below.
-                use_streaming = False
-            except Exception as exc:  # noqa: BLE001
-                errored = exc
+                        state: dict[str, str] = {}
+                        async for event in stream_result.stream_events():
+                            for payload in _translate_stream_event(event, state):
+                                streamed_events.append(payload)
+                    except Exception as exc:  # noqa: BLE001
+                        errored = exc
+                        try:
+                            stream_result.cancel()
+                        except Exception:  # noqa: BLE001
+                            pass
+                    else:
+                        final_output = strip_model_thinking(
+                            str(stream_result.final_output or "")
+                        )
+                except NotImplementedError:
+                    use_streaming = False
+                except Exception as exc:  # noqa: BLE001
+                    errored = exc
 
-        if not use_streaming and errored is None:
-            # Single-event fallback path (offline echo model, SDK without
-            # streaming, etc.). Identical wire contract: one synthetic delta
-            # carrying the entire final output, then the final marker.
-            try:
-                result = await Runner.run(
-                    agent,
-                    runner_input,
-                    context=context,
-                    max_turns=settings.max_agent_turns,
-                    run_config=run_config,
-                    session=sqlite_session,
-                )
-                final_output = strip_model_thinking(str(result.final_output))
-                if final_output:
-                    yield {"type": "delta", "text": final_output}
-            except Exception as exc:  # noqa: BLE001
-                errored = exc
+            if not use_streaming and errored is None:
+                try:
+                    result = await Runner.run(
+                        agent,
+                        runner_input,
+                        context=context,
+                        max_turns=settings.max_agent_turns,
+                        run_config=run_config,
+                        session=build_agent_session(settings, session_key),
+                    )
+                    final_output = strip_model_thinking(str(result.final_output))
+                    if final_output:
+                        streamed_events.append({"type": "delta", "text": final_output})
+                except Exception as exc:  # noqa: BLE001
+                    errored = exc
+
+        maybe_prune_codex_session_storage(settings, session_key)
+
+        if errored is not None:
+            if (
+                attempt == 0
+                and settings.model_provider == "codex"
+                and is_recoverable_codex_session_error(errored)
+            ):
+                clear_agent_session(settings.db_path, session_key)
+                continue
+            break
+
+        if settings.model_provider == "codex" and not final_output.strip():
+            if clear_agent_session(settings.db_path, session_key) > 0:
+                continue
+        break
+
+    for payload in streamed_events:
+        yield payload
 
     if errored is not None:
         message = redact(str(errored))
@@ -500,6 +543,7 @@ async def run_agent_streamed(
         return
 
     await prune_session_storage(settings, session_key, memory)
+    maybe_prune_codex_session_storage(settings, session_key)
     maybe_prune_audit_tables(memory, settings)
 
     memory.record_run(run_id, inbound.sender if inbound else None, prompt, final_output)

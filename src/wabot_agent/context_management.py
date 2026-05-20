@@ -80,6 +80,122 @@ def _shrink_content_part(part: Any, remaining_chars: int) -> Any:
     return part
 
 
+def is_recoverable_codex_session_error(exc: BaseException) -> bool:
+    """True when replayed SQLite history is incompatible with Codex store=false."""
+    msg = str(exc).lower()
+    return (
+        "no tool call found for function call output" in msg
+        or "not persisted when `store` is set to false" in msg
+        or "items are not persisted when" in msg
+    )
+
+
+def sanitize_codex_session_history(items: list[Any]) -> list[Any]:
+    """Drop reasoning rows and orphan tool outputs from replayed session history.
+
+    Codex uses store=false, so reasoning items (rs_*) are not valid on replay.
+    Orphan function_call_output rows break the Responses API input validator.
+    """
+    result: list[Any] = []
+    open_calls: set[str] = set()
+    for item in items:
+        if not isinstance(item, dict):
+            result.append(item)
+            continue
+        typ = str(item.get("type") or "")
+        item_id = str(item.get("id") or "")
+        if typ == "reasoning" or item_id.startswith("rs_"):
+            continue
+        if typ == "function_call":
+            call_id = item.get("call_id")
+            if call_id:
+                open_calls.add(str(call_id))
+            result.append(item)
+            continue
+        if typ == "function_call_output":
+            call_id = item.get("call_id")
+            if call_id and str(call_id) in open_calls:
+                result.append(item)
+                open_calls.discard(str(call_id))
+            continue
+        result.append(item)
+    return result
+
+
+def prune_codex_session_storage(db_path: Path | str, session_id: str) -> int:
+    """Remove reasoning and orphan tool rows persisted by the Agents SDK."""
+    path = Path(db_path)
+    if not path.exists():
+        return 0
+
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute("pragma busy_timeout=5000")
+        rows = conn.execute(
+            """
+            select id, message_data from agent_messages
+            where session_id = ?
+            order by id asc
+            """,
+            (session_id,),
+        ).fetchall()
+        open_calls: set[str] = set()
+        delete_ids: list[int] = []
+        for row_id, raw in rows:
+            try:
+                item = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if not isinstance(item, dict):
+                continue
+            typ = str(item.get("type") or "")
+            item_id = str(item.get("id") or "")
+            if typ == "reasoning" or item_id.startswith("rs_"):
+                delete_ids.append(row_id)
+                continue
+            if typ == "function_call":
+                call_id = item.get("call_id")
+                if call_id:
+                    open_calls.add(str(call_id))
+                continue
+            if typ == "function_call_output":
+                call_id = item.get("call_id")
+                if not call_id or str(call_id) not in open_calls:
+                    delete_ids.append(row_id)
+                else:
+                    open_calls.discard(str(call_id))
+        for row_id in delete_ids:
+            conn.execute("delete from agent_messages where id = ?", (row_id,))
+        conn.commit()
+        return len(delete_ids)
+    finally:
+        conn.close()
+
+
+def clear_agent_session(db_path: Path | str, session_id: str) -> int:
+    """Delete SDK session history and summary for one session. Returns rows deleted."""
+    path = Path(db_path)
+    if not path.exists():
+        return 0
+    conn = sqlite3.connect(path)
+    try:
+        conn.execute("pragma busy_timeout=5000")
+        cur = conn.execute(
+            "delete from agent_messages where session_id = ?", (session_id,)
+        )
+        deleted = cur.rowcount or 0
+        try:
+            conn.execute(
+                "delete from session_summaries where session_id = ?", (session_id,)
+            )
+        except sqlite3.OperationalError:
+            pass
+        conn.commit()
+        return deleted
+    finally:
+        conn.close()
+
+
 def strip_images_from_session_item(item: Any) -> Any:
     """Convert stored multimodal turns to plain text (avoids invalid image errors on replay)."""
     if not isinstance(item, dict):
@@ -302,6 +418,9 @@ def make_session_input_callback(
         # History must be text-only: replayed data: URLs break Ollama/OpenRouter vision.
         prefix = [strip_images_from_session_item(item) for item in prefix]
         kept = [strip_images_from_session_item(item) for item in kept]
+        if settings.model_provider == "codex":
+            prefix = sanitize_codex_session_history(prefix)
+            kept = sanitize_codex_session_history(kept)
 
         return prefix + kept + new_items
 
@@ -383,6 +502,12 @@ def prune_agent_session_messages(
         return cursor.rowcount
     finally:
         conn.close()
+
+
+def maybe_prune_codex_session_storage(settings: Settings, session_key: str) -> int:
+    if settings.model_provider != "codex":
+        return 0
+    return prune_codex_session_storage(settings.db_path, session_key)
 
 
 async def prune_session_storage(
