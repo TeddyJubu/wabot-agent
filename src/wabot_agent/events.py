@@ -50,13 +50,20 @@ class EventHub:
         """Capture the running event loop so sync publishers can dispatch safely."""
         self._loop = loop
 
-    def publish(self, name: str, payload: dict[str, Any]) -> Event:
+    def publish(
+        self, name: str, payload: dict[str, Any], *, already_redacted: bool = False
+    ) -> Event:
         with self._lock:
             self._counter += 1
+            redacted_payload = (
+                payload
+                if already_redacted
+                else (redact(payload) if isinstance(payload, dict) else payload)
+            )
             event = Event(
                 id=self._counter,
                 name=name,
-                payload=redact(payload) if isinstance(payload, dict) else payload,
+                payload=redacted_payload,
                 ts=datetime.now(UTC).isoformat(),
             )
             self._ring.append(event)
@@ -119,6 +126,6 @@ class EventLog:
             "payload": redacted,
         }
         with self.path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=True, sort_keys=True) + "\n")
+            f.write(json.dumps(entry, ensure_ascii=True) + "\n")
         if self.hub is not None:
-            self.hub.publish(event_type, redacted)
+            self.hub.publish(event_type, redacted, already_redacted=True)

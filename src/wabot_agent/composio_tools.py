@@ -38,12 +38,7 @@ def _get_composio_client():
 
 
 def _stored_session_id(memory: MemoryStore, user_id: str) -> str | None:
-    for fact in memory.recall_contact(user_id).get("facts", []):
-        if fact.get("key") == _COMPOSIO_SESSION_FACT_KEY:
-            value = str(fact.get("value") or "").strip()
-            if value:
-                return value
-    return None
+    return memory.get_contact_fact(user_id, _COMPOSIO_SESSION_FACT_KEY)
 
 
 def load_composio_tools(

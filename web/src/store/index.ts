@@ -36,6 +36,8 @@ interface State {
   addUser: (text: string) => string;
   startAssistant: () => string;
   appendDelta: (id: string, delta: string) => void;
+  appendDeltaBatched: (id: string, delta: string) => void;
+  flushDeltaBatch: () => void;
   finishAssistant: (id: string) => void;
   attachCard: (id: string, envelope: UiEnvelope) => void;
   openSlideOver: (which: Exclude<SlideOverId, null>) => void;
@@ -51,6 +53,34 @@ function deriveOverall(r: Readiness): ReadinessVariant {
   if (rows.some((x) => x.variant === "bad")) return "bad";
   if (rows.some((x) => x.variant === "warn" || x.variant === "pending")) return "warn";
   return "ok";
+}
+
+const deltaBatch = new Map<string, string>();
+let deltaFlushScheduled = false;
+
+function scheduleDeltaFlush(
+  flush: () => void,
+  set: (fn: (s: State) => Partial<State>) => void,
+) {
+  if (deltaFlushScheduled) return;
+  deltaFlushScheduled = true;
+  const runFlush = () => {
+    deltaFlushScheduled = false;
+    if (deltaBatch.size === 0) return;
+    const pending = new Map(deltaBatch);
+    deltaBatch.clear();
+    set((s) => ({
+      messages: s.messages.map((m) => {
+        const extra = pending.get(m.id);
+        return extra ? { ...m, text: m.text + extra } : m;
+      }),
+    }));
+  };
+  if (typeof requestAnimationFrame === "function") {
+    requestAnimationFrame(runFlush);
+  } else {
+    setTimeout(runFlush, 50);
+  }
 }
 
 export const useStore = create<State>((set) => ({
@@ -81,6 +111,22 @@ export const useStore = create<State>((set) => ({
     set((s) => ({
       messages: s.messages.map((m) => (m.id === id ? { ...m, text: m.text + delta } : m)),
     })),
+  appendDeltaBatched: (id, delta) => {
+    if (!delta) return;
+    deltaBatch.set(id, (deltaBatch.get(id) ?? "") + delta);
+    scheduleDeltaFlush(() => undefined, set);
+  },
+  flushDeltaBatch: () => {
+    if (deltaBatch.size === 0) return;
+    const pending = new Map(deltaBatch);
+    deltaBatch.clear();
+    set((s) => ({
+      messages: s.messages.map((m) => {
+        const extra = pending.get(m.id);
+        return extra ? { ...m, text: m.text + extra } : m;
+      }),
+    }));
+  },
   finishAssistant: (id) =>
     set((s) => ({
       messages: s.messages.map((m) => (m.id === id ? { ...m, streaming: false } : m)),

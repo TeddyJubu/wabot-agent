@@ -6,7 +6,7 @@ from agents.items import TResponseInputItem
 
 from .config import Settings
 from .llm_provider import active_model_id, vision_supported
-from .media_download import download_inbound_media
+from .media_download import MediaDownloadResult, download_inbound_media
 from .memory import InboundMessage
 from .wabot import WabotClient
 
@@ -27,9 +27,12 @@ async def fetch_inbound_image_data_url(
     wabot: WabotClient,
     inbound: InboundMessage,
     settings: Settings,
+    *,
+    downloaded: MediaDownloadResult | None = None,
 ) -> str | None:
     """Download inbound image bytes and return a data: URL for the vision API."""
-    downloaded = await download_inbound_media(wabot, inbound, settings)
+    if downloaded is None:
+        downloaded = await download_inbound_media(wabot, inbound, settings)
     if not downloaded.ok or downloaded.path is None:
         return None
     if downloaded.bytes > MAX_VISION_BYTES:
@@ -47,6 +50,7 @@ async def prepare_runner_input(
     settings: Settings,
     inbound: InboundMessage | None,
     wabot: WabotClient,
+    downloaded: MediaDownloadResult | None = None,
 ) -> str | list[TResponseInputItem]:
     """Text prompt, or multimodal input when an inbound image can be attached."""
     if inbound is None or not settings.vision_attach_images or not vision_supported(settings):
@@ -54,7 +58,9 @@ async def prepare_runner_input(
     if not inbound_is_image(inbound):
         return augmented_text
 
-    data_url = await fetch_inbound_image_data_url(wabot, inbound, settings)
+    data_url = await fetch_inbound_image_data_url(
+        wabot, inbound, settings, downloaded=downloaded
+    )
     if not data_url:
         return (
             augmented_text

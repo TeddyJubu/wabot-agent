@@ -28,6 +28,8 @@ export default function App() {
   const messages = useStore((s) => s.messages);
   const addUser = useStore((s) => s.addUser);
   const startAssistant = useStore((s) => s.startAssistant);
+  const appendDeltaBatched = useStore((s) => s.appendDeltaBatched);
+  const flushDeltaBatch = useStore((s) => s.flushDeltaBatch);
   const appendDelta = useStore((s) => s.appendDelta);
   const finishAssistant = useStore((s) => s.finishAssistant);
   const attachCard = useStore((s) => s.attachCard);
@@ -103,7 +105,7 @@ export default function App() {
         onEvent: (e) => {
           if (e.type === "delta") {
             deltaSeen = true;
-            appendDelta(ensureAssistant(), e.text);
+            appendDeltaBatched(ensureAssistant(), e.text);
           } else if (e.type === "tool_result") {
             const id = ensureAssistant();
             if (e.ui) {
@@ -113,10 +115,12 @@ export default function App() {
             // model's final prose are enough.
           } else if (e.type === "final") {
             const id = ensureAssistant();
+            flushDeltaBatch();
             if (!deltaSeen && e.output) appendDelta(id, e.output);
             finishAssistant(id);
           } else if (e.type === "error") {
             const id = ensureAssistant();
+            flushDeltaBatch();
             appendDelta(id, `\n\n[error: ${e.message}]`);
             finishAssistant(id);
           }

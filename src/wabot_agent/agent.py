@@ -28,11 +28,13 @@ from .context_management import (
 )
 from .events import EventLog
 from .inbound_media import build_inbound_file_context, voice_transcript_from_context
+from .instructions_cache import cached_build_agent_instructions, cached_render_skill_summary
 from .knowledge_store import (
     format_contact_facts,
     load_global_memory,
     load_instructions,
 )
+from .media_download import download_inbound_media
 from .mcp import connected_mcp_servers
 from .mem0_store import capture_turn_mem0, inject_mem0_context, mem0_enabled
 from .memory import (
@@ -46,7 +48,6 @@ from .memory import (
 from .models import build_model, model_settings
 from .output_sanitize import strip_model_thinking
 from .redaction import redact
-from .skills import render_skill_summary
 from .task_progress import looks_like_multi_step_task
 from .tools import RuntimeContext, core_tools, maybe_send_task_started_ack
 from .ui_envelopes import build_ui_envelope
@@ -243,14 +244,121 @@ def build_agent_instructions(settings: Settings, skill_summary: str) -> str:
     return "".join(parts)
 
 
+@dataclass
+class PreparedTurn:
+    run_id: str
+    session_key: str
+    memory_user_ids: list[str]
+    person_memory_id: str
+    run_config: RunConfig
+    context: RuntimeContext
+    augmented: str
+    runner_input: str | list[Any]
+    composio_tools: list[Any]
+
+
+async def _prepare_agent_turn(
+    prompt: str,
+    *,
+    settings: Settings,
+    memory: MemoryStore,
+    event_log: EventLog,
+    wabot: WabotClient | None = None,
+    inbound: InboundMessage | None = None,
+    session_id: str | None = None,
+) -> PreparedTurn:
+    run_id = str(uuid.uuid4())
+    session_key = session_id or (
+        inbound_chat_session_id(inbound) if inbound else "operator"
+    )
+    memory_user_ids = inbound_memory_user_ids(inbound) if inbound else ["operator"]
+    person_memory_id = (
+        inbound_person_memory_id(inbound) if inbound else memory_user_ids[0]
+    )
+    run_config = build_agent_run_config(settings, session_key, memory)
+    context = RuntimeContext(
+        settings=settings,
+        memory=memory,
+        wabot=wabot or WabotClient(settings.wabot_endpoint, settings.resolved_wabot_token),
+        event_log=event_log,
+        run_id=run_id,
+        inbound=inbound,
+    )
+    event_log.write("agent_run_start", {"run_id": run_id, "session_id": session_key})
+
+    augmented = _augment_prompt(prompt, inbound, settings)
+    downloaded = None
+    if (
+        inbound is not None
+        and inbound.has_media
+        and settings.file_process_inbound
+    ):
+        downloaded = await download_inbound_media(context.wabot, inbound, settings)
+    file_context = await build_inbound_file_context(
+        inbound,
+        settings=settings,
+        wabot=context.wabot,
+        downloaded=downloaded,
+    )
+    augmented += file_context
+    transcript = voice_transcript_from_context(file_context)
+    if transcript:
+        augmented = (
+            f"[Voice note transcription — reply to this text; ignore earlier "
+            f"failed-transcription replies in the thread if they conflict: "
+            f"\"{transcript}\"]\n\n"
+            + augmented
+        )
+    if person_memory_id:
+        facts = memory.recall_contact(person_memory_id)
+        block = format_contact_facts(
+            facts, max_chars=settings.knowledge_contact_max_chars
+        )
+        if block:
+            augmented = f"Known facts about this contact:\n{block}\n\n{augmented}"
+    if mem0_enabled(settings):
+        augmented = await inject_mem0_context(
+            settings, augmented, user_ids=memory_user_ids
+        )
+    composio_tools = load_composio_tools(
+        settings, user_id=person_memory_id, memory=memory
+    )
+    augmented += build_composio_prompt_context(tools_loaded=bool(composio_tools))
+    augmented = cap_turn_prompt(augmented, settings.prompt_max_chars)
+    runner_input = await prepare_runner_input(
+        augmented,
+        settings=settings,
+        inbound=inbound,
+        wabot=context.wabot,
+        downloaded=downloaded,
+    )
+    await maybe_send_task_started_ack(context, prompt)
+    return PreparedTurn(
+        run_id=run_id,
+        session_key=session_key,
+        memory_user_ids=memory_user_ids,
+        person_memory_id=person_memory_id,
+        run_config=run_config,
+        context=context,
+        augmented=augmented,
+        runner_input=runner_input,
+        composio_tools=composio_tools,
+    )
+
+
 def build_agent(
     settings: Settings,
     mcp_servers: list[Any] | None = None,
     *,
     extra_tools: list[Any] | None = None,
 ) -> Agent[RuntimeContext]:
-    skill_summary = render_skill_summary(settings.skills_dir)
-    instructions = build_agent_instructions(settings, skill_summary)
+    skill_summary = cached_render_skill_summary(settings.skills_dir)
+    instructions = cached_build_agent_instructions(
+        settings,
+        memory=None,
+        build_fn=build_agent_instructions,
+        build_kwargs={"settings": settings, "skill_summary": skill_summary},
+    )
     tools = [*core_tools(), *(extra_tools or [])]
     return Agent[RuntimeContext](
         name="wabot-agent-whatsapp-operator",
@@ -267,6 +375,8 @@ def _mcp_skip_names(settings: Settings) -> frozenset[str]:
         return frozenset({"composio"})
     return frozenset()
 
+
+_CODEX_EMPTY_OUTPUT_MAX_ATTEMPTS = 2
 
 _CODEX_LIGHTWEIGHT_INSTRUCTIONS = (
     "You are a helpful WhatsApp assistant. Reply in plain text only. "
@@ -319,62 +429,22 @@ async def run_agent(
     inbound: InboundMessage | None = None,
     session_id: str | None = None,
 ) -> AgentRunResult:
-    run_id = str(uuid.uuid4())
-    session_key = session_id or (
-        inbound_chat_session_id(inbound) if inbound else "operator"
-    )
-    memory_user_ids = inbound_memory_user_ids(inbound) if inbound else ["operator"]
-    person_memory_id = (
-        inbound_person_memory_id(inbound) if inbound else memory_user_ids[0]
-    )
-    run_config = build_agent_run_config(settings, session_key, memory)
-    context = RuntimeContext(
+    turn = await _prepare_agent_turn(
+        prompt,
         settings=settings,
         memory=memory,
-        wabot=wabot or WabotClient(settings.wabot_endpoint, settings.resolved_wabot_token),
         event_log=event_log,
-        run_id=run_id,
+        wabot=wabot,
         inbound=inbound,
+        session_id=session_id,
     )
-    event_log.write("agent_run_start", {"run_id": run_id, "session_id": session_key})
-
-    augmented = _augment_prompt(prompt, inbound, settings)
-    file_context = await build_inbound_file_context(
-        inbound, settings=settings, wabot=context.wabot
-    )
-    augmented += file_context
-    transcript = voice_transcript_from_context(file_context)
-    if transcript:
-        augmented = (
-            f"[Voice note transcription — reply to this text; ignore earlier "
-            f"failed-transcription replies in the thread if they conflict: "
-            f"\"{transcript}\"]\n\n"
-            + augmented
-        )
-    if person_memory_id:
-        facts = memory.recall_contact(person_memory_id)
-        block = format_contact_facts(
-            facts, max_chars=settings.knowledge_contact_max_chars
-        )
-        if block:
-            augmented = f"Known facts about this contact:\n{block}\n\n{augmented}"
-    if mem0_enabled(settings):
-        augmented = await inject_mem0_context(
-            settings, augmented, user_ids=memory_user_ids
-        )
-    composio_tools = load_composio_tools(
-        settings, user_id=person_memory_id, memory=memory
-    )
-    augmented += build_composio_prompt_context(tools_loaded=bool(composio_tools))
-    augmented = cap_turn_prompt(augmented, settings.prompt_max_chars)
-    runner_input = await prepare_runner_input(
-        augmented,
-        settings=settings,
-        inbound=inbound,
-        wabot=context.wabot,
-    )
-
-    await maybe_send_task_started_ack(context, prompt)
+    run_id = turn.run_id
+    session_key = turn.session_key
+    person_memory_id = turn.person_memory_id
+    run_config = turn.run_config
+    context = turn.context
+    runner_input = turn.runner_input
+    composio_tools = turn.composio_tools
 
     async def _execute_run() -> Any:
         async with connected_mcp_servers(
@@ -394,12 +464,17 @@ async def run_agent(
 
     result: Any | None = None
     final_output = ""
-    for attempt in range(5):
+    max_attempts = (
+        _CODEX_EMPTY_OUTPUT_MAX_ATTEMPTS
+        if settings.model_provider == "codex"
+        else 1
+    )
+    for attempt in range(max_attempts):
         try:
             result = await _execute_run()
         except Exception as exc:
             if (
-                attempt < 4
+                attempt < max_attempts - 1
                 and settings.model_provider == "codex"
                 and is_recoverable_codex_session_error(exc)
             ):
@@ -411,8 +486,9 @@ async def run_agent(
             break
         if settings.model_provider == "codex":
             logger.warning(
-                "Codex run returned empty output (attempt %s/5, session=%s)",
+                "Codex run returned empty output (attempt %s/%s, session=%s)",
                 attempt + 1,
+                max_attempts,
                 session_key,
             )
             clear_agent_session(settings.db_path, session_key)
@@ -491,71 +567,34 @@ async def run_agent_streamed(
     unavailable on the installed SDK. The wire shape is identical either way,
     so the client only needs one parser.
     """
-    run_id = str(uuid.uuid4())
-    session_key = session_id or (
-        inbound_chat_session_id(inbound) if inbound else "operator"
-    )
-    memory_user_ids = inbound_memory_user_ids(inbound) if inbound else ["operator"]
-    person_memory_id = (
-        inbound_person_memory_id(inbound) if inbound else memory_user_ids[0]
-    )
-    run_config = build_agent_run_config(settings, session_key, memory)
-    context = RuntimeContext(
+    turn = await _prepare_agent_turn(
+        prompt,
         settings=settings,
         memory=memory,
-        wabot=wabot or WabotClient(settings.wabot_endpoint, settings.resolved_wabot_token),
         event_log=event_log,
-        run_id=run_id,
+        wabot=wabot,
         inbound=inbound,
+        session_id=session_id,
     )
-    event_log.write("agent_run_start", {"run_id": run_id, "session_id": session_key})
-
-    augmented = _augment_prompt(prompt, inbound, settings)
-    file_context = await build_inbound_file_context(
-        inbound, settings=settings, wabot=context.wabot
-    )
-    augmented += file_context
-    transcript = voice_transcript_from_context(file_context)
-    if transcript:
-        augmented = (
-            f"[Voice note transcription — reply to this text; ignore earlier "
-            f"failed-transcription replies in the thread if they conflict: "
-            f"\"{transcript}\"]\n\n"
-            + augmented
-        )
-    if person_memory_id:
-        facts = memory.recall_contact(person_memory_id)
-        block = format_contact_facts(
-            facts, max_chars=settings.knowledge_contact_max_chars
-        )
-        if block:
-            augmented = f"Known facts about this contact:\n{block}\n\n{augmented}"
-    if mem0_enabled(settings):
-        augmented = await inject_mem0_context(
-            settings, augmented, user_ids=memory_user_ids
-        )
-    composio_tools = load_composio_tools(
-        settings, user_id=person_memory_id, memory=memory
-    )
-    augmented += build_composio_prompt_context(tools_loaded=bool(composio_tools))
-    augmented = cap_turn_prompt(augmented, settings.prompt_max_chars)
-    runner_input = await prepare_runner_input(
-        augmented,
-        settings=settings,
-        inbound=inbound,
-        wabot=context.wabot,
-    )
-
-    await maybe_send_task_started_ack(context, prompt)
+    run_id = turn.run_id
+    session_key = turn.session_key
+    person_memory_id = turn.person_memory_id
+    run_config = turn.run_config
+    context = turn.context
+    runner_input = turn.runner_input
+    composio_tools = turn.composio_tools
 
     final_output = ""
     errored: Exception | None = None
-    streamed_events: list[dict[str, Any]] = []
+    max_attempts = (
+        _CODEX_EMPTY_OUTPUT_MAX_ATTEMPTS
+        if settings.model_provider == "codex"
+        else 1
+    )
 
-    for attempt in range(5):
+    for attempt in range(max_attempts):
         final_output = ""
         errored = None
-        streamed_events = []
         async with connected_mcp_servers(
             settings.mcp_config, skip_names=_mcp_skip_names(settings)
         ) as mcp_servers:
@@ -580,7 +619,7 @@ async def run_agent_streamed(
                         state: dict[str, str] = {}
                         async for event in stream_result.stream_events():
                             for payload in _translate_stream_event(event, state):
-                                streamed_events.append(payload)
+                                yield payload
                     except Exception as exc:  # noqa: BLE001
                         errored = exc
                         try:
@@ -608,7 +647,7 @@ async def run_agent_streamed(
                     )
                     final_output = strip_model_thinking(str(result.final_output))
                     if final_output:
-                        streamed_events.append({"type": "delta", "text": final_output})
+                        yield {"type": "delta", "text": final_output}
                 except Exception as exc:  # noqa: BLE001
                     errored = exc
 
@@ -616,7 +655,7 @@ async def run_agent_streamed(
 
         if errored is not None:
             if (
-                attempt < 4
+                attempt < max_attempts - 1
                 and settings.model_provider == "codex"
                 and is_recoverable_codex_session_error(errored)
             ):
@@ -628,16 +667,21 @@ async def run_agent_streamed(
             break
         if settings.model_provider == "codex":
             logger.warning(
-                "Codex streamed run returned empty output (attempt %s/5, session=%s)",
+                "Codex streamed run returned empty output (attempt %s/%s, session=%s)",
                 attempt + 1,
+                max_attempts,
                 session_key,
             )
             clear_agent_session(settings.db_path, session_key)
+            if attempt + 1 >= max_attempts:
+                fallback = await _run_codex_lightweight_reply(
+                    settings, runner_input, context
+                )
+                if fallback.strip():
+                    final_output = fallback
+                    yield {"type": "delta", "text": final_output}
             continue
         break
-
-    for payload in streamed_events:
-        yield payload
 
     if errored is not None:
         message = redact(str(errored))

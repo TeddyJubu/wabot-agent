@@ -61,6 +61,9 @@ def inbound_memory_contact_id(inbound: InboundMessage) -> str:
     return inbound_person_memory_id(inbound)
 
 
+_thread_local = threading.local()
+
+
 class MemoryStore:
     def __init__(self, path: Path | str):
         self.path = Path(path)
@@ -68,23 +71,28 @@ class MemoryStore:
         self._lock = threading.RLock()
         self._init_db()
 
+    def _thread_connection(self) -> sqlite3.Connection:
+        conn = getattr(_thread_local, "conn", None)
+        conn_path = getattr(_thread_local, "path", None)
+        if conn is None or conn_path != self.path:
+            conn = sqlite3.connect(self.path, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            conn.execute("pragma synchronous=NORMAL")
+            conn.execute("pragma busy_timeout=5000")
+            _thread_local.conn = conn
+            _thread_local.path = self.path
+        return conn
+
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
         with self._lock:
-            conn = sqlite3.connect(self.path)
-            conn.row_factory = sqlite3.Row
-            # WAL is enabled once at _init_db (persisted in the DB file).
-            # These two pragmas are per-connection: synchronous=NORMAL pairs with
-            # WAL for fast commits with crash-safe durability, and busy_timeout
-            # lets writers wait briefly instead of failing with 'database is locked'
-            # when the dashboard SSE/runs reader races with run_agent writes.
-            conn.execute("pragma synchronous=NORMAL")
-            conn.execute("pragma busy_timeout=5000")
+            conn = self._thread_connection()
             try:
                 yield conn
                 conn.commit()
-            finally:
-                conn.close()
+            except Exception:
+                conn.rollback()
+                raise
 
     def _init_db(self) -> None:
         with self.connect() as conn:
@@ -344,6 +352,27 @@ class MemoryStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def agent_notes_max_updated_at(self) -> str:
+        with self.connect() as conn:
+            row = conn.execute("select max(updated_at) as m from agent_notes").fetchone()
+        if row is None or row["m"] is None:
+            return ""
+        return str(row["m"])
+
+    def get_contact_fact(self, contact: str, key: str) -> str | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                """
+                select value from contact_facts
+                where contact = ? and key = ?
+                """,
+                (contact, key),
+            ).fetchone()
+        if row is None:
+            return None
+        value = str(row["value"] or "").strip()
+        return value or None
+
     def delete_contact_fact(self, contact: str, key: str) -> dict[str, Any]:
         with self.connect() as conn:
             cur = conn.execute(
@@ -379,9 +408,42 @@ class MemoryStore:
     def bulk_record_inbound(self, messages: list[InboundMessage]) -> dict[str, Any]:
         """Persist history-sync rows without marking them processed for auto-reply."""
         stored = 0
-        for inbound in messages:
-            self.record_inbound(inbound)
-            stored += 1
+        with self.connect() as conn:
+            for inbound in messages:
+                safe_text = str(redact(inbound.text))
+                conn.execute(
+                    """
+                    insert into inbound_messages (
+                        message_id, sender, chat, text, push_name, is_group, received_at,
+                        media_kind, media_mime, media_filename, has_media
+                    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    on conflict(message_id) do update set
+                      sender = excluded.sender,
+                      chat = excluded.chat,
+                      text = excluded.text,
+                      push_name = excluded.push_name,
+                      is_group = excluded.is_group,
+                      received_at = excluded.received_at,
+                      media_kind = excluded.media_kind,
+                      media_mime = excluded.media_mime,
+                      media_filename = excluded.media_filename,
+                      has_media = excluded.has_media
+                    """,
+                    (
+                        inbound.id,
+                        inbound.sender,
+                        inbound.chat,
+                        safe_text,
+                        inbound.push_name,
+                        1 if inbound.is_group else 0,
+                        inbound.timestamp or now_iso(),
+                        inbound.media_kind,
+                        inbound.media_mime,
+                        inbound.media_filename,
+                        1 if inbound.has_media else 0,
+                    ),
+                )
+                stored += 1
         return {"stored": stored, "count": len(messages)}
 
     def record_inbound(self, inbound: InboundMessage) -> None:
@@ -523,19 +585,24 @@ class MemoryStore:
 
     def stats(self) -> dict[str, int]:
         with self.connect() as conn:
-            facts = conn.execute("select count(*) from contact_facts").fetchone()[0]
-            notes = conn.execute("select count(*) from agent_notes").fetchone()[0]
-            runs = conn.execute("select count(*) from runs").fetchone()[0]
-            processed = conn.execute("select count(*) from processed_messages").fetchone()[0]
-            inbound = conn.execute("select count(*) from inbound_messages").fetchone()[0]
-            tool_events = conn.execute("select count(*) from tool_events").fetchone()[0]
+            row = conn.execute(
+                """
+                select
+                  (select count(*) from contact_facts) as contact_facts,
+                  (select count(*) from agent_notes) as agent_notes,
+                  (select count(*) from runs) as runs,
+                  (select count(*) from processed_messages) as processed_messages,
+                  (select count(*) from inbound_messages) as inbound_messages,
+                  (select count(*) from tool_events) as tool_events
+                """
+            ).fetchone()
         return {
-            "contact_facts": facts,
-            "agent_notes": notes,
-            "runs": runs,
-            "processed_messages": processed,
-            "inbound_messages": inbound,
-            "tool_events": tool_events,
+            "contact_facts": int(row["contact_facts"]),
+            "agent_notes": int(row["agent_notes"]),
+            "runs": int(row["runs"]),
+            "processed_messages": int(row["processed_messages"]),
+            "inbound_messages": int(row["inbound_messages"]),
+            "tool_events": int(row["tool_events"]),
         }
 
     def prune_audit_tables(
@@ -850,14 +917,16 @@ class MemoryStore:
         self, *, sender: str, chat: str | None, is_group: bool
     ) -> dict[str, Any] | None:
         now = now_iso()
+        chat_jid = (chat or sender).strip()
         with self.connect() as conn:
             rows = conn.execute(
                 """
                 select * from outbound_tasks
                 where status = 'awaiting_reply' and expires_at > ?
+                  and (target_jid = ? or chat_jid = ?)
                 order by sent_at desc
                 """,
-                (now,),
+                (now, sender.strip(), chat_jid),
             ).fetchall()
         chat_jid = (chat or sender).strip()
         for row in rows:

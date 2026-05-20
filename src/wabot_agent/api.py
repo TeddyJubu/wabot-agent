@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import time
 import io
 import json
 import logging
@@ -403,6 +404,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     # Pairing poller state — last published payload + the asyncio task handle.
     pairing_state: dict[str, Any] = {"last": None, "task": None}
+    snapshot_cache: dict[str, Any] = {"at": 0.0, "payload": None}
+    _SNAPSHOT_TTL_SEC = 2.0
     scheduler_state: dict[str, Any] = {"task": None}
 
     def _pairing_payload(p: Any) -> dict[str, Any]:
@@ -573,6 +576,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     await sched_task
                 except (asyncio.CancelledError, Exception):  # noqa: BLE001
                     pass
+            await wabot.aclose()
 
     app = FastAPI(title="wabot-agent", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
@@ -1111,6 +1115,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         renders completely without follow-up REST calls. Subsequent state
         changes arrive as deltas on the same stream.
         """
+        now = time.monotonic()
+        cached = snapshot_cache.get("payload")
+        if (
+            cached is not None
+            and now - float(snapshot_cache.get("at") or 0.0) < _SNAPSHOT_TTL_SEC
+        ):
+            return cached
         wabot_health = await wabot.health()
         # Prefer the poller's cached pairing snapshot (already redacted on
         # publish); on cold start before the first tick fires, fall through
@@ -1118,7 +1129,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         pairing = pairing_state.get("last")
         if pairing is None:
             pairing = _pairing_payload(await wabot.pairing_qr())
-        return redact(
+        snapshot = redact(
             {
                 "ok": True,
                 "live_model": settings.live_model_enabled,
@@ -1137,6 +1148,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "runs": memory.recent_runs(limit=8),
             }
         )
+        snapshot_cache["at"] = now
+        snapshot_cache["payload"] = snapshot
+        return snapshot
 
     @app.get("/api/stream", dependencies=[human_dependency])
     async def event_stream(

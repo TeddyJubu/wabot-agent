@@ -46,11 +46,24 @@ class WabotClient:
         self.endpoint = endpoint.rstrip("/")
         self.token = token
         self.timeout = timeout
+        self._http: httpx.AsyncClient | None = None
+
+    def _client(self, *, timeout: float | None = None) -> httpx.AsyncClient:
+        if self._http is None:
+            self._http = httpx.AsyncClient(timeout=self.timeout)
+        if timeout is not None and timeout != self.timeout:
+            return httpx.AsyncClient(timeout=timeout)
+        return self._http
+
+    async def aclose(self) -> None:
+        if self._http is not None:
+            await self._http.aclose()
+            self._http = None
 
     async def health(self) -> WabotHealth:
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(f"{self.endpoint}/health")
+            client = self._client(timeout=10.0)
+            resp = await client.get(f"{self.endpoint}/health")
         except httpx.HTTPError as exc:
             return WabotHealth(reachable=False, detail=str(exc))
         if resp.status_code != 200:
@@ -67,12 +80,11 @@ class WabotClient:
         )
 
     async def _post_json(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.post(
-                f"{self.endpoint}{path}",
-                json=body,
-                headers=self._headers(),
-            )
+        resp = await self._client().post(
+            f"{self.endpoint}{path}",
+            json=body,
+            headers=self._headers(),
+        )
         if resp.status_code >= 400:
             raise WabotError(f"wabot returned HTTP {resp.status_code}: {resp.text[:300]}")
         if not resp.content:
@@ -80,8 +92,7 @@ class WabotClient:
         return resp.json()
 
     async def _get_json(self, path: str) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.get(f"{self.endpoint}{path}", headers=self._headers())
+        resp = await self._client().get(f"{self.endpoint}{path}", headers=self._headers())
         if resp.status_code >= 400:
             raise WabotError(f"wabot returned HTTP {resp.status_code}: {resp.text[:300]}")
         return resp.json()
@@ -94,14 +105,13 @@ class WabotClient:
         json: dict[str, Any] | None = None,
         params: dict[str, str] | None = None,
     ) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.request(
-                method,
-                f"{self.endpoint}{path}",
-                json=json,
-                params=params,
-                headers=self._headers(),
-            )
+        resp = await self._client().request(
+            method,
+            f"{self.endpoint}{path}",
+            json=json,
+            params=params,
+            headers=self._headers(),
+        )
         return self._handle_response(resp)
 
     async def _patch_json(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
@@ -201,20 +211,18 @@ class WabotClient:
         if not image_path.exists():
             raise WabotError(f"Image file does not exist: {image_path}")
         with image_path.open("rb") as f:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                resp = await client.post(
-                    f"{self.endpoint}/groups/{quote(jid, safe='')}/picture",
-                    files={"file": (image_path.name, f, "image/jpeg")},
-                    headers=self._headers(),
-                )
+            resp = await self._client().post(
+                f"{self.endpoint}/groups/{quote(jid, safe='')}/picture",
+                files={"file": (image_path.name, f, "image/jpeg")},
+                headers=self._headers(),
+            )
         return self._handle_response(resp)
 
     async def remove_group_picture(self, jid: str) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.delete(
-                f"{self.endpoint}/groups/{quote(jid, safe='')}/picture",
-                headers=self._headers(),
-            )
+        resp = await self._client().delete(
+            f"{self.endpoint}/groups/{quote(jid, safe='')}/picture",
+            headers=self._headers(),
+        )
         return self._handle_response(resp)
 
     async def mark_read(
@@ -270,12 +278,11 @@ class WabotClient:
             params["preview"] = "true"
         if picture_id:
             params["picture_id"] = picture_id
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            return await client.get(
-                f"{self.endpoint}/users/{quote(jid, safe='')}/picture",
-                params=params or None,
-                headers=self._headers(),
-            )
+        return await self._client().get(
+            f"{self.endpoint}/users/{quote(jid, safe='')}/picture",
+            params=params or None,
+            headers=self._headers(),
+        )
 
     async def inbox_recent(self, limit: int = 20) -> dict[str, Any]:
         if not self.token:
@@ -285,12 +292,11 @@ class WabotClient:
                 "detail": "WABOT_TOKEN is not configured and WABOT_TOKEN_FILE was not readable.",
             }
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(
-                    f"{self.endpoint}/inbox/recent",
-                    params={"limit": limit},
-                    headers=self._headers(),
-                )
+            resp = await self._client(timeout=10.0).get(
+                f"{self.endpoint}/inbox/recent",
+                params={"limit": limit},
+                headers=self._headers(),
+            )
         except httpx.HTTPError as exc:
             return {"reachable": False, "messages": [], "detail": str(exc)}
         if resp.status_code == 404:
@@ -325,8 +331,9 @@ class WabotClient:
                 detail="WABOT_TOKEN is not configured and WABOT_TOKEN_FILE was not readable.",
             )
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                resp = await client.get(f"{self.endpoint}/pairing/qr", headers=self._headers())
+            resp = await self._client(timeout=10.0).get(
+                f"{self.endpoint}/pairing/qr", headers=self._headers()
+            )
         except httpx.HTTPError as exc:
             return WabotPairingQR(supported=True, reachable=False, detail=str(exc))
         if resp.status_code == 404:
@@ -366,21 +373,19 @@ class WabotClient:
         return {"X-Token": self.token}
 
     async def send_text(self, to: str, text: str) -> dict[str, Any]:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            resp = await client.post(
-                f"{self.endpoint}/send",
-                json={"to": to, "text": text},
-                headers=self._headers(),
-            )
+        resp = await self._client().post(
+            f"{self.endpoint}/send",
+            json={"to": to, "text": text},
+            headers=self._headers(),
+        )
         return self._handle_response(resp)
 
     async def download_media(self, chat: str, message_id: str) -> httpx.Response:
-        async with httpx.AsyncClient(timeout=self.timeout) as client:
-            return await client.get(
-                f"{self.endpoint}/media/download",
-                params={"chat": chat, "id": message_id},
-                headers=self._headers(),
-            )
+        return await self._client().get(
+            f"{self.endpoint}/media/download",
+            params={"chat": chat, "id": message_id},
+            headers=self._headers(),
+        )
 
     async def send_media(
         self,
@@ -399,13 +404,12 @@ class WabotClient:
         if filename:
             data["filename"] = filename
         with media_path.open("rb") as f:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                resp = await client.post(
-                    f"{self.endpoint}/send-media",
-                    data=data,
-                    files={"file": (media_path.name, f, "application/octet-stream")},
-                    headers=self._headers(),
-                )
+            resp = await self._client().post(
+                f"{self.endpoint}/send-media",
+                data=data,
+                files={"file": (media_path.name, f, "application/octet-stream")},
+                headers=self._headers(),
+            )
         return self._handle_response(resp)
 
     async def send_image(self, to: str, path: str, caption: str | None = None) -> dict[str, Any]:
@@ -416,13 +420,12 @@ class WabotClient:
         if caption:
             data["caption"] = caption
         with image_path.open("rb") as f:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
-                resp = await client.post(
-                    f"{self.endpoint}/send-image",
-                    data=data,
-                    files={"file": (image_path.name, f, "application/octet-stream")},
-                    headers=self._headers(),
-                )
+            resp = await self._client().post(
+                f"{self.endpoint}/send-image",
+                data=data,
+                files={"file": (image_path.name, f, "application/octet-stream")},
+                headers=self._headers(),
+            )
         return self._handle_response(resp)
 
     def _handle_response(self, resp: httpx.Response) -> dict[str, Any]:

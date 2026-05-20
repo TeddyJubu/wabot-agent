@@ -388,6 +388,23 @@ async def add_turn(
     )
 
 
+def _mem0_search_query(prompt: str, *, max_len: int = 512) -> str:
+    for line in reversed(prompt.splitlines()):
+        stripped = line.strip()
+        if stripped.lower().startswith("- text:"):
+            value = stripped.split(":", 1)[-1].strip()
+            if value:
+                return value[:max_len]
+        if stripped.lower().startswith("text:"):
+            value = stripped.split(":", 1)[-1].strip()
+            if value:
+                return value[:max_len]
+    tail = prompt.strip()
+    if len(tail) <= max_len:
+        return tail
+    return tail[-max_len:]
+
+
 async def inject_mem0_context(
     settings: Settings,
     prompt: str,
@@ -396,12 +413,22 @@ async def inject_mem0_context(
 ) -> str:
     if not settings.mem0_inject_on_run:
         return prompt
+    query = _mem0_search_query(prompt)
+    active_ids = [user_id.strip() for user_id in user_ids if user_id.strip()]
+    if not active_ids:
+        return prompt
+    searched_list = await asyncio.gather(
+        *[
+            search_memories(settings, user_id=user_id, query=query)
+            for user_id in active_ids
+        ],
+        return_exceptions=True,
+    )
     merged: list[dict[str, str]] = []
     seen: set[str] = set()
-    for user_id in user_ids:
-        if not user_id.strip():
+    for searched in searched_list:
+        if isinstance(searched, BaseException):
             continue
-        searched = await search_memories(settings, user_id=user_id, query=prompt)
         if not searched.get("ok"):
             continue
         for row in searched.get("results") or []:

@@ -241,7 +241,7 @@ def shrink_item_for_context(item: Any, max_chars: int) -> Any:
     if not isinstance(item, dict):
         return cap_turn_prompt(str(item), max_chars)
 
-    shrunk = copy.deepcopy(item)
+    shrunk = dict(item)
     content = shrunk.get("content")
     if isinstance(content, str):
         shrunk["content"] = cap_turn_prompt(content, max_chars)

@@ -4,7 +4,7 @@ import re
 
 from .config import Settings
 from .file_processing import process_file_at_path
-from .media_download import download_inbound_media
+from .media_download import MediaDownloadResult, download_inbound_media
 from .memory import InboundMessage
 from .recipients import is_owner_inbound
 from .vision_input import inbound_is_image
@@ -28,6 +28,7 @@ async def build_inbound_file_context(
     *,
     settings: Settings,
     wabot: WabotClient,
+    downloaded: MediaDownloadResult | None = None,
 ) -> str:
     """Download and process inbound attachments on the VPS; return prompt context."""
     if inbound is None or not inbound.has_media or not settings.file_process_inbound:
@@ -35,7 +36,8 @@ async def build_inbound_file_context(
     if inbound.is_group and not settings.group_process_media:
         return ""
 
-    downloaded = await download_inbound_media(wabot, inbound, settings)
+    if downloaded is None:
+        downloaded = await download_inbound_media(wabot, inbound, settings)
     if not downloaded.ok or downloaded.path is None:
         return (
             "\n\n[Inbound attachment could not be downloaded from wabot cache. "
