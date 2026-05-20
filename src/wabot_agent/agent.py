@@ -128,8 +128,8 @@ INSTRUCTIONS_TOOLS = """## Tools (use them proactively)
   for lead-gen briefs.
 - Groups: list_whatsapp_groups, create_whatsapp_group, get_whatsapp_group,
   update_whatsapp_group (name/topic/announce/locked), update_whatsapp_group_participants
-  (add/remove/promote/demote), get_whatsapp_group_invite, join_whatsapp_group,
-  leave_whatsapp_group — when the task requires them.
+  (add/remove/promote/demote), set_whatsapp_group_picture (JPEG path or remove=true),
+  get_whatsapp_group_invite, join_whatsapp_group, leave_whatsapp_group — when the task requires them.
 - Reactions, edits, mutes, archives — when the task requires them.
 
 ## Policy & safety

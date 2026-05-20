@@ -35,7 +35,8 @@ Use this skill before changing WhatsApp state, sending messages, or handling inb
 - Create groups with `create_whatsapp_group`; inspect via `get_whatsapp_group`;
   rename or change settings with `update_whatsapp_group` (name, topic/description,
   announce-only, admin-only edits); add/remove/promote/demote members with
-  `update_whatsapp_group_participants`; invite links via `get_whatsapp_group_invite`;
+  `update_whatsapp_group_participants`; group icon JPEG via `set_whatsapp_group_picture`
+  (`image_path` under media dir, or `remove=true`); invite links via `get_whatsapp_group_invite`;
   join via `join_whatsapp_group`; leave with `leave_whatsapp_group`.
 - Mute, archive, or pin chats with `mute_whatsapp_chat`, `archive_whatsapp_chat`,
   `pin_whatsapp_chat` (syncs via WhatsApp app state).

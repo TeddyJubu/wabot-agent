@@ -196,6 +196,27 @@ class WabotClient:
     async def leave_group(self, jid: str) -> dict[str, Any]:
         return await self._post_json(f"/groups/{quote(jid, safe='')}/leave", {})
 
+    async def set_group_picture(self, jid: str, path: str) -> dict[str, Any]:
+        image_path = Path(path)
+        if not image_path.exists():
+            raise WabotError(f"Image file does not exist: {image_path}")
+        with image_path.open("rb") as f:
+            async with httpx.AsyncClient(timeout=self.timeout) as client:
+                resp = await client.post(
+                    f"{self.endpoint}/groups/{quote(jid, safe='')}/picture",
+                    files={"file": (image_path.name, f, "image/jpeg")},
+                    headers=self._headers(),
+                )
+        return self._handle_response(resp)
+
+    async def remove_group_picture(self, jid: str) -> dict[str, Any]:
+        async with httpx.AsyncClient(timeout=self.timeout) as client:
+            resp = await client.delete(
+                f"{self.endpoint}/groups/{quote(jid, safe='')}/picture",
+                headers=self._headers(),
+            )
+        return self._handle_response(resp)
+
     async def mark_read(
         self,
         chat: str,
@@ -573,6 +594,12 @@ class FakeWabotClient(WabotClient):
 
     async def leave_group(self, jid: str) -> dict[str, Any]:
         return {"ok": True, "jid": jid, "left": True}
+
+    async def set_group_picture(self, jid: str, path: str) -> dict[str, Any]:
+        return {"ok": True, "jid": jid, "picture_id": "fake-picture"}
+
+    async def remove_group_picture(self, jid: str) -> dict[str, Any]:
+        return {"ok": True, "jid": jid, "removed": True}
 
     async def send_text(self, to: str, text: str) -> dict[str, Any]:
         payload = {"id": f"fake-{len(self.sent) + 1}", "to": to, "text": text}

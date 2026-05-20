@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 
 import qrcode
 import uvicorn
-from fastapi import Depends, FastAPI, Form, Header, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -814,6 +814,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 event_log=event_log,
                 hub=hub,
             )
+        if not (inbound.text or "").strip() and not inbound.has_media:
+            if not memory.claim_message(inbound.id, inbound.sender):
+                return {"accepted": True, "duplicate": True, "message_id": inbound.id}
+            memory.complete_message(inbound.id, "skipped-empty")
+            return {
+                "accepted": True,
+                "skipped": True,
+                "reason": "empty_text_no_media",
+                "message_id": inbound.id,
+            }
         if not memory.claim_message(inbound.id, inbound.sender):
             return {"accepted": True, "duplicate": True, "message_id": inbound.id}
         event_log.write(
@@ -1334,6 +1344,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def leave_whatsapp_group_api(group_jid: str) -> dict[str, Any]:
         try:
             return redact(await wabot.leave_group(group_jid))
+        except WabotError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.post(
+        "/api/whatsapp/groups/{group_jid}/picture",
+        dependencies=[human_dependency],
+    )
+    async def set_whatsapp_group_picture_api(
+        group_jid: str, file: UploadFile = File(...)
+    ) -> dict[str, Any]:
+        suffix = Path(file.filename or "group.jpg").suffix or ".jpg"
+        tmp = settings.media_dir / f"group-picture-upload-{secrets.token_hex(8)}{suffix}"
+        try:
+            data = await file.read()
+            if not data:
+                raise HTTPException(status_code=400, detail="empty file")
+            tmp.write_bytes(data)
+            return redact(await wabot.set_group_picture(group_jid, str(tmp)))
+        except WabotError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        finally:
+            tmp.unlink(missing_ok=True)
+
+    @app.delete(
+        "/api/whatsapp/groups/{group_jid}/picture",
+        dependencies=[human_dependency],
+    )
+    async def remove_whatsapp_group_picture_api(group_jid: str) -> dict[str, Any]:
+        try:
+            return redact(await wabot.remove_group_picture(group_jid))
         except WabotError as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 

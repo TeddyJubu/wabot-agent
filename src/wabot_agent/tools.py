@@ -943,6 +943,49 @@ async def leave_whatsapp_group(
 
 
 @function_tool
+async def set_whatsapp_group_picture(
+    ctx: RunContextWrapper[RuntimeContext],
+    group_jid: str,
+    image_path: str | None = None,
+    remove: bool = False,
+) -> dict[str, Any]:
+    """Set or remove a WhatsApp group profile photo (JPEG in WABOT_AGENT_MEDIA_DIR)."""
+    if blocked := await _dry_run_block(ctx, "set_whatsapp_group_picture"):
+        return blocked
+    blocked = await _wabot_ready_or_block(ctx, "set_whatsapp_group_picture")
+    if blocked is not None:
+        return blocked
+    if remove:
+        try:
+            payload = await ctx.context.wabot.remove_group_picture(group_jid)
+            payload = {"ok": True, "result": redact(payload)}
+        except Exception as exc:
+            payload = {"ok": False, "detail": str(exc)}
+        ctx.context.memory.record_tool_event(
+            ctx.context.run_id, "set_whatsapp_group_picture", payload
+        )
+        return payload
+    if not image_path:
+        return {"ok": False, "detail": "image_path is required unless remove=true"}
+    path_allowed, safe_path, path_reason = _media_path_allowed(ctx.context.settings, image_path)
+    if not path_allowed or safe_path is None:
+        payload = {"ok": False, "reason": "media_path_not_allowed", "detail": path_reason}
+        ctx.context.memory.record_tool_event(
+            ctx.context.run_id, "set_whatsapp_group_picture.blocked", payload
+        )
+        return payload
+    try:
+        payload = await ctx.context.wabot.set_group_picture(group_jid, str(safe_path))
+        payload = {"ok": True, "result": redact(payload)}
+    except Exception as exc:
+        payload = {"ok": False, "detail": str(exc)}
+    ctx.context.memory.record_tool_event(
+        ctx.context.run_id, "set_whatsapp_group_picture", payload
+    )
+    return payload
+
+
+@function_tool
 async def get_whatsapp_user_info(
     ctx: RunContextWrapper[RuntimeContext], jid: str
 ) -> dict[str, Any]:
@@ -1715,6 +1758,7 @@ def core_tools() -> list[Any]:
         update_whatsapp_group,
         update_whatsapp_group_participants,
         leave_whatsapp_group,
+        set_whatsapp_group_picture,
         mute_whatsapp_chat,
         archive_whatsapp_chat,
         pin_whatsapp_chat,

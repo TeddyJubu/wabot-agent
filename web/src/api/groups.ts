@@ -121,3 +121,25 @@ export async function leaveGroup(jid: string): Promise<Record<string, unknown>> 
   });
   return parseJson(res);
 }
+
+export async function setGroupPicture(
+  jid: string,
+  file: File,
+): Promise<Record<string, unknown>> {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`/api/whatsapp/groups/${encodeURIComponent(jid)}/picture`, {
+    method: "POST",
+    credentials: "include",
+    body: form,
+  });
+  return parseJson(res);
+}
+
+export async function removeGroupPicture(jid: string): Promise<Record<string, unknown>> {
+  const res = await fetch(`/api/whatsapp/groups/${encodeURIComponent(jid)}/picture`, {
+    method: "DELETE",
+    credentials: "include",
+  });
+  return parseJson(res);
+}

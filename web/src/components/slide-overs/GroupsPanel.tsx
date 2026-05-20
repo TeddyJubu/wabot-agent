@@ -6,6 +6,8 @@ import {
   fetchGroups,
   joinGroup,
   leaveGroup,
+  removeGroupPicture,
+  setGroupPicture,
   updateGroup,
   updateGroupParticipants,
   type GroupDetail,
@@ -254,7 +256,37 @@ export default function GroupsPanel() {
               </button>
             ))}
           </div>
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="rounded-pill border border-border px-3 py-1 text-xs cursor-pointer">
+              Set group photo
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp"
+                className="hidden"
+                disabled={busy}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (!file) return;
+                  void run(async () => {
+                    await setGroupPicture(selected, file);
+                  });
+                }}
+              />
+            </label>
+            <button
+              type="button"
+              disabled={busy}
+              className="rounded-pill border border-border px-3 py-1 text-xs"
+              onClick={() =>
+                void run(async () => {
+                  if (!confirm("Remove this group's profile photo?")) return;
+                  await removeGroupPicture(selected);
+                })
+              }
+            >
+              Remove photo
+            </button>
             <button
               type="button"
               disabled={busy}
