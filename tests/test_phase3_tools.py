@@ -10,9 +10,9 @@ from wabot_agent.tools import (
     create_whatsapp_group,
     get_whatsapp_group,
     leave_whatsapp_group,
-    set_whatsapp_group_picture,
     react_whatsapp_message,
     revoke_whatsapp_message,
+    set_whatsapp_group_picture,
     update_whatsapp_group,
     update_whatsapp_group_participants,
 )

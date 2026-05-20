@@ -11,6 +11,9 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+    "@blocknote/core": "^0.29.1",
+    "@blocknote/mantine": "^0.29.1",
+    "@blocknote/react": "^0.29.1",
     "@clerk/clerk-react": "^5.61.6",
     "@clerk/react": "^6.6.4",
     "clsx": "^2.1.0",

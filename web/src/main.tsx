@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { ClerkProvider } from "@clerk/clerk-react";
 import App from "./App";
 import PairView from "./components/PairView";
+import KnowledgePage from "./pages/KnowledgePage";
 import "./styles.css";
 
 const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
@@ -26,6 +27,7 @@ if (!clerkPublishableKey && import.meta.env.DEV) {
 function selectRoot() {
   const path = window.location.pathname.replace(/\/+$/, "");
   if (path === "/pair") return <PairView />;
+  if (path === "/knowledge") return <KnowledgePage />;
   return <App />;
 }
 

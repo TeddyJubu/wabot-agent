@@ -126,6 +126,33 @@ class Settings(BaseSettings):
         default=Path("./skills"),
         validation_alias=AliasChoices("WABOT_AGENT_SKILLS_DIR", "VIGNESH_SKILLS_DIR"),
     )
+    knowledge_dir: Path = Field(
+        default=Path("./data/knowledge"),
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_KNOWLEDGE_DIR", "VIGNESH_KNOWLEDGE_DIR"
+        ),
+    )
+    knowledge_instructions_max_chars: int = Field(
+        default=6000,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_KNOWLEDGE_INSTRUCTIONS_MAX_CHARS",
+            "VIGNESH_KNOWLEDGE_INSTRUCTIONS_MAX_CHARS",
+        ),
+    )
+    knowledge_memory_max_chars: int = Field(
+        default=4000,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_KNOWLEDGE_MEMORY_MAX_CHARS",
+            "VIGNESH_KNOWLEDGE_MEMORY_MAX_CHARS",
+        ),
+    )
+    knowledge_contact_max_chars: int = Field(
+        default=2000,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_KNOWLEDGE_CONTACT_MAX_CHARS",
+            "VIGNESH_KNOWLEDGE_CONTACT_MAX_CHARS",
+        ),
+    )
     runtime_overrides_path: Path = Field(
         default=Path("./data/runtime_overrides.json"),
         validation_alias=AliasChoices(
@@ -718,6 +745,7 @@ class Settings(BaseSettings):
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self.mem0_path.mkdir(parents=True, exist_ok=True)
+        self.knowledge_dir.mkdir(parents=True, exist_ok=True)
 
 
 @lru_cache
