@@ -29,6 +29,11 @@ from .context_management import (
 from .events import EventLog
 from .inbound_media import build_inbound_file_context, voice_transcript_from_context
 from .mcp import connected_mcp_servers
+from .knowledge_store import (
+    format_contact_facts,
+    load_global_memory,
+    load_instructions,
+)
 from .mem0_store import capture_turn_mem0, inject_mem0_context, mem0_enabled
 from .memory import (
     InboundMessage,
@@ -220,11 +225,21 @@ def build_agent_instructions(settings: Settings, skill_summary: str) -> str:
             f"{INSTRUCTIONS_TOOLS_COMPOSIO}- lookup_whatsapp_contacts",
             1,
         )
-    return (
-        f"{INSTRUCTIONS}{memory_block}{tools_block}{INSTRUCTIONS_MULTI_STEP}"
-        f"{INSTRUCTIONS_INBOUND}\n\n"
-        f"Installed local skills:\n{skill_summary}\n"
-    )
+    parts = [
+        INSTRUCTIONS,
+        memory_block,
+        tools_block,
+        INSTRUCTIONS_MULTI_STEP,
+        INSTRUCTIONS_INBOUND,
+        f"\nInstalled local skills:\n{skill_summary}\n",
+    ]
+    custom = load_instructions(settings)
+    global_mem = load_global_memory(settings)
+    if custom:
+        parts.append(f"\n## Client instructions\n{custom}\n")
+    if global_mem:
+        parts.append(f"\n## Operator knowledge\n{global_mem}\n")
+    return "".join(parts)
 
 
 def build_agent(
@@ -335,6 +350,13 @@ async def run_agent(
             f"\"{transcript}\"]\n\n"
             + augmented
         )
+    if person_memory_id:
+        facts = memory.recall_contact(person_memory_id)
+        block = format_contact_facts(
+            facts, max_chars=settings.knowledge_contact_max_chars
+        )
+        if block:
+            augmented = f"Known facts about this contact:\n{block}\n\n{augmented}"
     if mem0_enabled(settings):
         augmented = await inject_mem0_context(
             settings, augmented, user_ids=memory_user_ids
@@ -500,6 +522,13 @@ async def run_agent_streamed(
             f"\"{transcript}\"]\n\n"
             + augmented
         )
+    if person_memory_id:
+        facts = memory.recall_contact(person_memory_id)
+        block = format_contact_facts(
+            facts, max_chars=settings.knowledge_contact_max_chars
+        )
+        if block:
+            augmented = f"Known facts about this contact:\n{block}\n\n{augmented}"
     if mem0_enabled(settings):
         augmented = await inject_mem0_context(
             settings, augmented, user_ids=memory_user_ids

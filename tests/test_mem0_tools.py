@@ -166,3 +166,27 @@ def test_build_agent_instructions_omit_mem0_when_disabled() -> None:
     text_on = build_agent_instructions(enabled, "")
     assert "Memory (mandatory" in text_on
     assert "search_mem0_memories" in text_on
+
+
+def test_build_agent_instructions_include_client_knowledge(tmp_path) -> None:
+    knowledge_dir = tmp_path / "knowledge"
+    knowledge_dir.mkdir(parents=True)
+    (knowledge_dir / "instructions.md").write_text(
+        "Always use the company name Acme Corp.",
+        encoding="utf-8",
+    )
+    (knowledge_dir / "memory.md").write_text(
+        "Operator timezone: US/Pacific.",
+        encoding="utf-8",
+    )
+    settings = Settings(
+        mem0_enabled=False,
+        openrouter_api_key="sk-test",
+        offline_mode=False,
+        knowledge_dir=knowledge_dir,
+    )
+    text = build_agent_instructions(settings, "")
+    assert "## Client instructions" in text
+    assert "Acme Corp" in text
+    assert "## Operator knowledge" in text
+    assert "US/Pacific" in text

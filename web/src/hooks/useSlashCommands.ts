@@ -27,6 +27,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     expand: () => "__open_slide_over__:settings",
   },
   {
+    name: "/knowledge",
+    description: "Open knowledge editor",
+    expand: () => "__open_knowledge__",
+  },
+  {
     name: "/policy",
     description: "Show current send policy",
     expand: () => "what is the current send policy and allowed recipients?",

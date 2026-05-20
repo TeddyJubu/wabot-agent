@@ -344,6 +344,38 @@ class MemoryStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def delete_contact_fact(self, contact: str, key: str) -> dict[str, Any]:
+        with self.connect() as conn:
+            cur = conn.execute(
+                "delete from contact_facts where contact = ? and key = ?",
+                (contact, key),
+            )
+        return {"deleted": cur.rowcount == 1, "contact": contact, "key": key}
+
+    def delete_agent_note(self, key: str) -> dict[str, Any]:
+        with self.connect() as conn:
+            cur = conn.execute("delete from agent_notes where key = ?", (key,))
+        return {"deleted": cur.rowcount == 1, "key": key}
+
+    def list_contacts_with_facts(self) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = conn.execute(
+                """
+                select contact, count(*) as fact_count, max(updated_at) as updated_at
+                from contact_facts
+                group by contact
+                order by updated_at desc
+                """
+            ).fetchall()
+        return [
+            {
+                "contact": row["contact"],
+                "fact_count": int(row["fact_count"]),
+                "updated_at": row["updated_at"],
+            }
+            for row in rows
+        ]
+
     def bulk_record_inbound(self, messages: list[InboundMessage]) -> dict[str, Any]:
         """Persist history-sync rows without marking them processed for auto-reply."""
         stored = 0

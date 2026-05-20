@@ -44,6 +44,14 @@ from .auto_reply import (
     inbound_session_id,
 )
 from .config import Settings, get_settings
+from .knowledge_store import (
+    ensure_knowledge_files,
+    list_knowledge_docs,
+    read_global_memory_raw,
+    read_instructions_raw,
+    save_global_memory,
+    save_instructions,
+)
 from .context_management import maybe_prune_audit_tables
 from .events import EventHub, EventLog
 from .llm_provider import active_model_id, llm_provider_label
@@ -76,6 +84,15 @@ class ChatResponse(BaseModel):
     session_id: str
     output: str
     live_model: bool
+
+
+class KnowledgeContentBody(BaseModel):
+    content: str = ""
+
+
+class MemoryFactBody(BaseModel):
+    key: str = Field(min_length=1)
+    value: str = Field(min_length=1)
 
 
 class InboundPayload(BaseModel):
@@ -535,6 +552,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         # call_soon_threadsafe. Then drive pairing state through the hub so
         # the dashboard can rely on `pairing_changed` for live updates.
         hub.bind_loop(asyncio.get_running_loop())
+        ensure_knowledge_files(settings)
         maybe_prune_audit_tables(memory, settings, force=True)
         pairing_state["task"] = asyncio.create_task(_pairing_poll_loop())
         scheduler_state["task"] = asyncio.create_task(_scheduler_loop())
@@ -640,6 +658,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         """
         if identity is None:
             return RedirectResponse(url="/login?next=/pair", status_code=302)
+        file_response = _dashboard_file(static_dir)
+        file_response.headers["Cache-Control"] = "no-store"
+        maybe_mint_operator_cookie(file_response, request, settings)
+        return file_response
+
+    @app.get("/knowledge")
+    async def knowledge_page(
+        request: Request,
+        identity: AuthIdentity | None = Depends(resolve_human),  # noqa: B008
+    ) -> Response:
+        """Knowledge management dashboard (BlockNote editors + contact facts)."""
+        if identity is None:
+            return RedirectResponse(url="/login?next=/knowledge", status_code=302)
         file_response = _dashboard_file(static_dir)
         file_response.headers["Cache-Control"] = "no-store"
         maybe_mint_operator_cookie(file_response, request, settings)
@@ -1003,9 +1034,71 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return {"accepted": True, **result}
 
+    @app.get("/api/memory/agent-notes", dependencies=[human_dependency])
+    async def list_agent_notes() -> dict[str, Any]:
+        # Top-level keys must not contain SECRET_KEYS substrings (e.g. "notes" → "key").
+        return {"items": memory.agent_notes()}
+
+    @app.put("/api/memory/agent-notes", dependencies=[human_dependency])
+    async def upsert_agent_note(body: MemoryFactBody) -> dict[str, Any]:
+        result = memory.remember_agent_note(body.key, body.value)
+        return redact(result)
+
+    @app.delete("/api/memory/agent-notes/{key}", dependencies=[human_dependency])
+    async def delete_agent_note_route(key: str) -> dict[str, Any]:
+        return redact(memory.delete_agent_note(key))
+
     @app.get("/api/memory/{contact}", dependencies=[human_dependency])
     async def contact_memory(contact: str) -> dict[str, Any]:
         return redact(memory.recall_contact(contact))
+
+    @app.get("/api/knowledge", dependencies=[human_dependency])
+    async def knowledge_index() -> dict[str, Any]:
+        return {
+            "docs": list_knowledge_docs(settings),
+            "budgets": {
+                "instructions": settings.knowledge_instructions_max_chars,
+                "memory": settings.knowledge_memory_max_chars,
+                "contact": settings.knowledge_contact_max_chars,
+            },
+        }
+
+    @app.get("/api/knowledge/instructions", dependencies=[human_dependency])
+    async def knowledge_instructions_get() -> dict[str, Any]:
+        docs = list_knowledge_docs(settings)
+        meta = docs[0] if docs else {}
+        return {"content": read_instructions_raw(settings), **meta}
+
+    @app.put("/api/knowledge/instructions", dependencies=[human_dependency])
+    async def knowledge_instructions_put(body: KnowledgeContentBody) -> dict[str, Any]:
+        meta = save_instructions(settings, body.content)
+        return {"ok": True, **meta}
+
+    @app.get("/api/knowledge/memory", dependencies=[human_dependency])
+    async def knowledge_memory_get() -> dict[str, Any]:
+        docs = list_knowledge_docs(settings)
+        meta = docs[1] if len(docs) > 1 else {}
+        return {"content": read_global_memory_raw(settings), **meta}
+
+    @app.put("/api/knowledge/memory", dependencies=[human_dependency])
+    async def knowledge_memory_put(body: KnowledgeContentBody) -> dict[str, Any]:
+        meta = save_global_memory(settings, body.content)
+        return {"ok": True, **meta}
+
+    @app.get("/api/knowledge/contacts", dependencies=[human_dependency])
+    async def knowledge_contacts() -> dict[str, Any]:
+        return {"contacts": memory.list_contacts_with_facts()}
+
+    @app.put("/api/memory/{contact}/facts", dependencies=[human_dependency])
+    async def upsert_contact_fact(contact: str, body: MemoryFactBody) -> dict[str, Any]:
+        result = memory.remember_contact_fact(
+            contact, body.key, body.value, source="dashboard"
+        )
+        return redact(result)
+
+    @app.delete("/api/memory/{contact}/facts/{key}", dependencies=[human_dependency])
+    async def delete_contact_fact_route(contact: str, key: str) -> dict[str, Any]:
+        return redact(memory.delete_contact_fact(contact, key))
 
     @app.get("/api/runs", dependencies=[human_dependency])
     async def recent_runs(limit: int = Query(default=20, ge=0, le=100)) -> list[dict[str, Any]]:
