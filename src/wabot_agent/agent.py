@@ -34,8 +34,8 @@ from .knowledge_store import (
     load_global_memory,
     load_instructions,
 )
-from .media_download import download_inbound_media
 from .mcp import connected_mcp_servers
+from .media_download import download_inbound_media
 from .mem0_store import capture_turn_mem0, inject_mem0_context, mem0_enabled
 from .memory import (
     InboundMessage,
