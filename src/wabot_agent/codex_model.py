@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncIterator
 from dataclasses import replace
 from typing import Any
@@ -25,6 +26,9 @@ from openai.types.responses import Response, ResponseCompletedEvent
 
 from .context_management import sanitize_codex_session_history
 
+logger = logging.getLogger(__name__)
+_CODEX_EMPTY_RETRIES = 4
+
 
 def _is_nonreplayable_output_item(item: Any) -> bool:
     """Reasoning items break the next Codex request when store=false."""
@@ -44,6 +48,36 @@ def _filter_completed_response(response: Response) -> Response:
     if len(filtered) == len(response.output):
         return response
     return response.model_copy(update={"output": filtered})
+
+
+def _message_from_text_parts(response: Response, text_parts: list[str]) -> list[Any]:
+    if not text_parts:
+        return []
+    return [
+        ResponseOutputMessage(
+            id=response.id,
+            role="assistant",
+            status="completed",
+            type="message",
+            content=[
+                ResponseOutputText(
+                    type="output_text",
+                    text="".join(text_parts),
+                    annotations=[],
+                )
+            ],
+        )
+    ]
+
+
+def _resolve_codex_output(
+    response: Response, text_parts: list[str]
+) -> list[Any]:
+    """Prefer replay-safe output items; fall back to streamed text deltas."""
+    output = _filter_codex_response_output(list(response.output))
+    if output:
+        return output
+    return _message_from_text_parts(response, text_parts)
 
 
 def _sanitize_codex_input(
@@ -76,22 +110,20 @@ class CodexSubscriptionModel(Model):
             return replace(resolved, reasoning=None)
         return resolved
 
-    async def get_response(
+    async def _consume_response_stream(
         self,
         system_instructions: str | None,
-        input: str | list[TResponseInputItem],
-        model_settings: ModelSettings,
+        safe_input: str | list[TResponseInputItem],
+        resolved: ModelSettings,
         tools: list[Tool],
         output_schema: AgentOutputSchemaBase | None,
         handoffs: list[Handoff],
         tracing: ModelTracing,
         *,
-        previous_response_id: str | None = None,
-        conversation_id: str | None = None,
-        prompt: Any | None = None,
-    ) -> ModelResponse:
-        resolved = self._model_settings(model_settings)
-        safe_input = _sanitize_codex_input(input)
+        previous_response_id: str | None,
+        conversation_id: str | None,
+        prompt: Any | None,
+    ) -> tuple[Response, list[str]]:
         final_response: Response | None = None
         text_parts: list[str] = []
         async for chunk in self._inner.stream_response(
@@ -116,23 +148,49 @@ class CodexSubscriptionModel(Model):
             raise ModelBehaviorError(
                 "Codex subscription response ended without response.completed"
             )
-        output = _filter_codex_response_output(list(final_response.output))
-        if not output and text_parts:
-            output = [
-                ResponseOutputMessage(
-                    id=final_response.id,
-                    role="assistant",
-                    status="completed",
-                    type="message",
-                    content=[
-                        ResponseOutputText(
-                            type="output_text",
-                            text="".join(text_parts),
-                            annotations=[],
-                        )
-                    ],
-                )
-            ]
+        return final_response, text_parts
+
+    async def get_response(
+        self,
+        system_instructions: str | None,
+        input: str | list[TResponseInputItem],
+        model_settings: ModelSettings,
+        tools: list[Tool],
+        output_schema: AgentOutputSchemaBase | None,
+        handoffs: list[Handoff],
+        tracing: ModelTracing,
+        *,
+        previous_response_id: str | None = None,
+        conversation_id: str | None = None,
+        prompt: Any | None = None,
+    ) -> ModelResponse:
+        resolved = self._model_settings(model_settings)
+        safe_input = _sanitize_codex_input(input)
+        output: list[Any] = []
+        final_response: Response | None = None
+        for attempt in range(_CODEX_EMPTY_RETRIES):
+            final_response, text_parts = await self._consume_response_stream(
+                system_instructions,
+                safe_input,
+                resolved,
+                tools,
+                output_schema,
+                handoffs,
+                tracing,
+                previous_response_id=previous_response_id,
+                conversation_id=conversation_id,
+                prompt=prompt,
+            )
+            output = _resolve_codex_output(final_response, text_parts)
+            if output:
+                break
+            logger.warning(
+                "Codex returned empty output after filtering (attempt %s/%s)",
+                attempt + 1,
+                _CODEX_EMPTY_RETRIES,
+            )
+        if final_response is None:
+            raise ModelBehaviorError("Codex subscription response missing")
         usage = (
             Usage(
                 requests=1,
@@ -169,6 +227,7 @@ class CodexSubscriptionModel(Model):
         """Dashboard streaming uses this path — must filter reasoning like get_response."""
         resolved = self._model_settings(model_settings)
         safe_input = _sanitize_codex_input(input)
+        text_parts: list[str] = []
         async for chunk in self._inner.stream_response(
             system_instructions,
             safe_input,
@@ -181,8 +240,15 @@ class CodexSubscriptionModel(Model):
             conversation_id=conversation_id,
             prompt=prompt,
         ):
+            if getattr(chunk, "type", None) == "response.output_text.delta":
+                delta = getattr(chunk, "delta", None)
+                if isinstance(delta, str):
+                    text_parts.append(delta)
             if isinstance(chunk, ResponseCompletedEvent):
                 filtered = _filter_completed_response(chunk.response)
+                output = _resolve_codex_output(filtered, text_parts)
+                if output != list(filtered.output):
+                    filtered = filtered.model_copy(update={"output": output})
                 if filtered is not chunk.response:
                     yield ResponseCompletedEvent(
                         type=chunk.type,

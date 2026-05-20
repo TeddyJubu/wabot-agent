@@ -20,6 +20,9 @@ def composio_enabled(settings: Settings) -> bool:
 
 
 def _ensure_composio_api_key(settings: Settings) -> None:
+    cache_dir = settings.data_dir / "composio"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("COMPOSIO_CACHE_DIR", str(cache_dir.resolve()))
     if settings.composio_api_key:
         os.environ.setdefault("COMPOSIO_API_KEY", settings.composio_api_key)
 

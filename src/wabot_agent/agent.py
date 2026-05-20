@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
-from agents import Agent, Runner
+from agents import Agent, RunConfig, Runner
 from agents.tracing import set_tracing_disabled
 
 from .composio_tools import composio_enabled, load_composio_tools
@@ -240,6 +240,48 @@ def _mcp_skip_names(settings: Settings) -> frozenset[str]:
     return frozenset()
 
 
+_CODEX_LIGHTWEIGHT_INSTRUCTIONS = (
+    "You are a helpful WhatsApp assistant. Reply in plain text only. "
+    "Be concise and useful. Do not call tools."
+)
+
+
+async def _run_codex_lightweight_reply(
+    settings: Settings,
+    runner_input: str | list[Any],
+    context: RuntimeContext,
+) -> str:
+    """Codex often returns empty with the full tool graph; a tiny agent is more reliable."""
+    agent = Agent[RuntimeContext](
+        name="wabot-agent-light-reply",
+        instructions=_CODEX_LIGHTWEIGHT_INSTRUCTIONS,
+        model=build_model(settings),
+        model_settings=model_settings(settings),
+        tools=[],
+    )
+    light_config = RunConfig(tracing_disabled=True, workflow_name="wabot-agent-light")
+    for attempt in range(3):
+        try:
+            result = await Runner.run(
+                agent,
+                runner_input,
+                context=context,
+                max_turns=2,
+                run_config=light_config,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Codex lightweight fallback failed (attempt %s/3): %s",
+                attempt + 1,
+                exc,
+            )
+            continue
+        text = strip_model_thinking(str(result.final_output or ""))
+        if text.strip():
+            return text
+    return ""
+
+
 async def run_agent(
     prompt: str,
     settings: Settings,
@@ -316,30 +358,45 @@ async def run_agent(
             )
 
     result: Any | None = None
-    for attempt in range(2):
+    final_output = ""
+    for attempt in range(5):
         try:
             result = await _execute_run()
-            break
         except Exception as exc:
             if (
-                attempt == 0
+                attempt < 4
                 and settings.model_provider == "codex"
                 and is_recoverable_codex_session_error(exc)
             ):
                 clear_agent_session(settings.db_path, session_key)
                 continue
             raise
+        final_output = strip_model_thinking(str(result.final_output))
+        if final_output.strip():
+            break
+        if settings.model_provider == "codex":
+            logger.warning(
+                "Codex run returned empty output (attempt %s/5, session=%s)",
+                attempt + 1,
+                session_key,
+            )
+            clear_agent_session(settings.db_path, session_key)
+            continue
+        break
     assert result is not None
+
+    if not final_output.strip() and settings.model_provider == "codex":
+        fallback = await _run_codex_lightweight_reply(settings, runner_input, context)
+        if fallback.strip():
+            logger.info(
+                "Codex lightweight fallback produced a reply (session=%s)",
+                session_key,
+            )
+            final_output = fallback
 
     await prune_session_storage(settings, session_key, memory)
     maybe_prune_codex_session_storage(settings, session_key)
     maybe_prune_audit_tables(memory, settings)
-
-    final_output = strip_model_thinking(str(result.final_output))
-    if settings.model_provider == "codex" and not final_output.strip():
-        if clear_agent_session(settings.db_path, session_key) > 0:
-            result = await _execute_run()
-            final_output = strip_model_thinking(str(result.final_output))
     memory.record_run(run_id, inbound.sender if inbound else None, prompt, final_output)
     if mem0_enabled(settings):
         try:
@@ -453,7 +510,7 @@ async def run_agent_streamed(
     errored: Exception | None = None
     streamed_events: list[dict[str, Any]] = []
 
-    for attempt in range(2):
+    for attempt in range(5):
         final_output = ""
         errored = None
         streamed_events = []
@@ -517,7 +574,7 @@ async def run_agent_streamed(
 
         if errored is not None:
             if (
-                attempt == 0
+                attempt < 4
                 and settings.model_provider == "codex"
                 and is_recoverable_codex_session_error(errored)
             ):
@@ -525,9 +582,16 @@ async def run_agent_streamed(
                 continue
             break
 
-        if settings.model_provider == "codex" and not final_output.strip():
-            if clear_agent_session(settings.db_path, session_key) > 0:
-                continue
+        if final_output.strip():
+            break
+        if settings.model_provider == "codex":
+            logger.warning(
+                "Codex streamed run returned empty output (attempt %s/5, session=%s)",
+                attempt + 1,
+                session_key,
+            )
+            clear_agent_session(settings.db_path, session_key)
+            continue
         break
 
     for payload in streamed_events:
@@ -738,66 +802,19 @@ def _augment_prompt(
     if inbound is None:
         return prompt
     memory_user = inbound_memory_contact_id(inbound)
-    mem0_ids = inbound_memory_user_ids(inbound)
-    mem0_on = mem0_enabled(settings)
-    if mem0_on:
-        recall_step = (
-            f"2) Recall memory for sender={memory_user} (includes facts from other chats "
-            f"with this person): call search_mem0_memories (query the topic; optional "
-            f"user_id one of {mem0_ids}) and recall_contact_memory (contact={memory_user}).\n"
-        )
-        persist_step = (
-            f"7) If they shared anything important (preferences, names, deadlines, passcodes, "
-            f"standing requests, or said remember/don't forget), call add_mem0_memory "
-            f"(user_id={memory_user}) and/or remember_contact_fact (contact={memory_user}) "
-            "BEFORE your final reply.\n"
-        )
-    else:
-        recall_step = (
-            f"2) Recall memory: call recall_contact_memory (contact={memory_user}) when "
-            "prior context may matter.\n"
-        )
-        persist_step = (
-            f"7) If they shared anything important, call remember_contact_fact "
-            f"(contact={memory_user}) BEFORE your final reply.\n"
-        )
-    steps = (
-        "Before you answer this inbound WhatsApp message:\n"
-        "1) Decide what they need.\n"
-        + recall_step
-        + "3) If you need thread context, call get_last_whatsapp_inbound_message or "
-        "list_whatsapp_inbound_messages.\n"
-        "4) For requests to find/download/send files from the internet, use search_images or "
-        "search_web, then fetch_url_to_media, then send_whatsapp_file to the sender. "
-        "5) Inbound attachments are downloaded and processed on the VPS automatically; "
-        "voice notes include voice_transcript / [transcript] — reply using that text directly "
-        "(do not claim you cannot hear audio when a transcript is present). PDFs include "
-        "extracted or OCR text in the VPS file processing block — summarize that content; do not "
-        "claim you cannot read a PDF when an excerpt is present. Photos also attach for vision. "
-        "Use process_whatsapp_attachment only if processing failed or you need a refresh.\n"
-        "6) If WhatsApp status is unclear, call wabot_health.\n"
-        + persist_step
-        + "8) Then write your final reply (plain text only — it is sent automatically).\n\n"
-    )
+    # System instructions already cover memory/tools/inbound policy — only attach
+    # per-message metadata here to keep Codex requests smaller and more reliable.
     group_note = ""
     if inbound.is_group:
         group_note = (
-            "Group chat: reply to the group using send_whatsapp_text(to=chat, ...) when you need "
-            "an extra message; auto-reply posts to chat. Long-term memory is keyed to sender "
-            f"({memory_user}), not only this group — recall works across their other chats. "
-            "Add the group JID to WABOT_AGENT_ALLOWED_RECIPIENTS when send_policy=allowlist.\n"
+            f"Group chat (memory contact={memory_user}; auto-reply posts to chat JID).\n"
         )
     multi_step_note = ""
     if looks_like_multi_step_task(inbound.text):
-        multi_step_note = (
-            "Multi-step task detected: call send_task_plan with your steps BEFORE "
-            "heavy work, then report_task_step_complete after each step. Use "
-            "send_task_progress if a step runs silently for more than a minute.\n\n"
-        )
+        multi_step_note = "Multi-step task — use send_task_plan / report_task_step_complete.\n"
     return (
-        steps
+        group_note
         + multi_step_note
-        + group_note
         + "Inbound WhatsApp message:\n"
         f"- message_id: {inbound.id}\n"
         f"- sender: {inbound.sender}\n"

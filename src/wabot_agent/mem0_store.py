@@ -213,6 +213,11 @@ def get_mem0_memory(settings: Settings) -> Any:
     if not mem0_enabled(settings):
         raise Mem0UnavailableError("mem0 is disabled or missing credentials")
 
+    # Mem0 defaults to ~/.mem0; on VPS HOME is the app dir which may not be writable.
+    mem0_home = settings.data_dir / "mem0"
+    mem0_home.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("MEM0_DIR", str(mem0_home.resolve()))
+
     key = _config_cache_key(settings)
     with _memory_lock:
         if _memory_instance is not None and _memory_config_key == key:
