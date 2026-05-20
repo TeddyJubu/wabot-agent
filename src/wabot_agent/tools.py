@@ -1251,6 +1251,10 @@ async def remember_agent_note(
     ctx: RunContextWrapper[RuntimeContext], key: str, value: str
 ) -> dict[str, Any]:
     """Store a durable, non-secret operating note for this agent."""
+    if not _is_owner_session(ctx.context.settings, ctx.context.inbound):
+        payload = {"ok": False, "reason": "owner_session_required"}
+        ctx.context.memory.record_tool_event(ctx.context.run_id, "remember_agent_note", payload)
+        return redact(payload)
     payload = ctx.context.memory.remember_agent_note(key=key, value=value)
     ctx.context.memory.record_tool_event(ctx.context.run_id, "remember_agent_note", payload)
     return redact(payload)

@@ -90,6 +90,15 @@ export default function BlockNoteEditor({
     }, 300);
   }, [editor, onDirtyChange, scheduleSave]);
 
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (markdownDebounceRef.current) clearTimeout(markdownDebounceRef.current);
+      debounceRef.current = null;
+      markdownDebounceRef.current = null;
+    };
+  }, []);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
