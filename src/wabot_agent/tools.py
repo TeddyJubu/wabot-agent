@@ -24,7 +24,7 @@ from .memory import (
     inbound_memory_contact_id,
     inbound_memory_user_ids,
 )
-from .recipients import is_listed_recipient, recipients_match
+from .recipients import is_listed_recipient, is_owner_inbound, recipients_match
 from .redaction import looks_sensitive, mask_phone, redact
 from .skills import list_skills, read_skill
 from .task_progress import (
@@ -63,7 +63,11 @@ def _is_owner_session(settings: Settings, inbound: InboundMessage | None) -> boo
     """Dashboard operator, or an inbound WhatsApp message from a configured owner."""
     if inbound is None:
         return True
-    return is_listed_recipient(inbound.sender, settings.owner_numbers)
+    return is_owner_inbound(settings, inbound)
+
+
+def _owner_progress_allowed(ctx: RuntimeContext) -> bool:
+    return _is_owner_session(ctx.settings, ctx.inbound)
 
 
 def _is_send_allowed(
@@ -323,6 +327,12 @@ async def _send_progress_whatsapp(
     to: str | None = None,
     event_kind: str,
 ) -> dict[str, Any]:
+    if not _owner_progress_allowed(ctx):
+        payload = {"sent": False, "reason": "owner_progress_only"}
+        ctx.memory.record_tool_event(ctx.run_id, event_kind, payload)
+        ctx.event_log.write("task_progress_skipped", payload)
+        return payload
+
     destination, dest_reason = _resolve_progress_destination(ctx, to)
     if destination is None:
         payload = {"sent": False, "reason": dest_reason}
@@ -382,6 +392,8 @@ async def maybe_send_task_started_ack(
         return None
     if ctx.inbound is None:
         return None
+    if not _owner_progress_allowed(ctx):
+        return None
     if not looks_like_multi_step_task(prompt):
         return None
     return await _send_progress_whatsapp(
@@ -398,10 +410,12 @@ async def send_task_plan(
     title: str = "Plan",
     to: str | None = None,
 ) -> dict[str, Any]:
-    """Post a numbered plan to WhatsApp before starting multi-step work.
+    """Post a numbered plan to WhatsApp before starting multi-step owner work.
 
-    Call this at the start of any task that needs 3+ tool calls or several minutes.
-    `to` defaults to the inbound chat (or sender). On the dashboard, pass `to` explicitly.
+    Owner/dashboard only. Call this at the start of an owner task that needs 3+ tool calls
+    or several minutes. For non-owner inbound chats, do not send step-by-step progress;
+    answer naturally in the final reply. `to` defaults to the inbound chat (or sender).
+    On the dashboard, pass `to` explicitly.
     """
     if not steps:
         return {"sent": False, "reason": "empty_steps"}
@@ -425,9 +439,10 @@ async def report_task_step_complete(
     total_steps: int | None = None,
     to: str | None = None,
 ) -> dict[str, Any]:
-    """Notify the user on WhatsApp that one plan step finished.
+    """Notify the owner on WhatsApp that one plan step finished.
 
-    Call after each step in a multi-step task, before starting the next step.
+    Owner/dashboard only. Call after each step in a multi-step owner task, before
+    starting the next step. For non-owner inbound chats, do not send progress pings.
     """
     body = format_step_complete(
         step_number,
@@ -449,10 +464,11 @@ async def send_task_progress(
     message: str,
     to: str | None = None,
 ) -> dict[str, Any]:
-    """Send a short in-progress update on WhatsApp during long-running work.
+    """Send a short owner-only in-progress update on WhatsApp during long-running work.
 
-    Use when a single step will take a while and you have no other tool output yet
-    (e.g. "Still scraping page 3 of 10…").
+    Use for owner/dashboard tasks when a single step will take a while and you have no
+    other tool output yet (e.g. "Still scraping page 3 of 10…"). For non-owner inbound
+    chats, do not send progress pings; reply naturally at the end.
     """
     text = message.strip()
     if not text:

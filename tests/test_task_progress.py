@@ -54,6 +54,7 @@ async def test_send_task_plan_does_not_block_final_auto_reply(
         update={
             "send_policy": "allow_all",
             "task_progress_updates_enabled": True,
+            "owner_numbers": {"+15550009999@s.whatsapp.net"},
         }
     )
     inbound = InboundMessage(
@@ -85,7 +86,12 @@ async def test_maybe_send_task_started_ack_for_complex_inbound(
     event_log: EventLog,
     fake_wabot: FakeWabotClient,
 ) -> None:
-    live = settings.model_copy(update={"send_policy": "allow_all"})
+    live = settings.model_copy(
+        update={
+            "send_policy": "allow_all",
+            "owner_numbers": {"+15550009999@s.whatsapp.net"},
+        }
+    )
     inbound = InboundMessage(
         id="m2",
         sender="+15550009999@s.whatsapp.net",
@@ -104,13 +110,47 @@ async def test_maybe_send_task_started_ack_for_complex_inbound(
     assert len(fake_wabot.sent) == 1
 
 
+async def test_maybe_send_task_started_ack_skips_non_owner_inbound(
+    settings: Settings,
+    memory: MemoryStore,
+    event_log: EventLog,
+    fake_wabot: FakeWabotClient,
+) -> None:
+    live = settings.model_copy(
+        update={
+            "send_policy": "allow_all",
+            "owner_numbers": {"+15550001111@s.whatsapp.net"},
+        }
+    )
+    inbound = InboundMessage(
+        id="m2b",
+        sender="+15550009999@s.whatsapp.net",
+        chat="+15550009999@s.whatsapp.net",
+        text=(
+            "First find ten articles about AI agents, then summarize each one, "
+            "and then email me a bullet list with links."
+        ),
+    )
+    runtime = RuntimeContext(
+        live, memory, fake_wabot, event_log, run_id="run-ack-non-owner", inbound=inbound
+    )
+    sent = await maybe_send_task_started_ack(runtime, inbound.text)
+    assert sent is None
+    assert fake_wabot.sent == []
+
+
 async def test_report_task_step_complete(
     settings: Settings,
     memory: MemoryStore,
     event_log: EventLog,
     fake_wabot: FakeWabotClient,
 ) -> None:
-    live = settings.model_copy(update={"send_policy": "allow_all"})
+    live = settings.model_copy(
+        update={
+            "send_policy": "allow_all",
+            "owner_numbers": {"+15550009999@s.whatsapp.net"},
+        }
+    )
     inbound = InboundMessage(
         id="m3",
         sender="+15550009999@s.whatsapp.net",
@@ -129,3 +169,43 @@ async def test_report_task_step_complete(
     )
     assert result["sent"] is True
     assert "Step 1/3" in fake_wabot.sent[-1]["text"]
+
+
+async def test_report_task_step_complete_skips_non_owner_inbound(
+    settings: Settings,
+    memory: MemoryStore,
+    event_log: EventLog,
+    fake_wabot: FakeWabotClient,
+) -> None:
+    live = settings.model_copy(
+        update={
+            "send_policy": "allow_all",
+            "owner_numbers": {"+15550001111@s.whatsapp.net"},
+        }
+    )
+    inbound = InboundMessage(
+        id="m4",
+        sender="+15550009999@s.whatsapp.net",
+        chat="+15550009999@s.whatsapp.net",
+        text="task",
+    )
+    ctx = ToolContext(
+        RuntimeContext(
+            live,
+            memory,
+            fake_wabot,
+            event_log,
+            run_id="run-step-non-owner",
+            inbound=inbound,
+        ),
+        tool_name="report_task_step_complete",
+        tool_call_id="call-step-non-owner",
+        tool_arguments="{}",
+    )
+    result = await report_task_step_complete.on_invoke_tool(
+        ctx,
+        '{"step_number":1,"step_title":"Search","status_summary":"Done","total_steps":3}',
+    )
+    assert result["sent"] is False
+    assert result["reason"] == "owner_progress_only"
+    assert fake_wabot.sent == []
