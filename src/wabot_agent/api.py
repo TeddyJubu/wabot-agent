@@ -418,6 +418,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     snapshot_cache: dict[str, Any] = {"at": 0.0, "payload": None}
     _SNAPSHOT_TTL_SEC = 2.0
     scheduler_state: dict[str, Any] = {"task": None}
+    inbound_locks: dict[str, asyncio.Lock] = {}
+    inbound_locks_guard = asyncio.Lock()
+
+    async def _inbound_session_lock(session_key: str) -> asyncio.Lock:
+        async with inbound_locks_guard:
+            lock = inbound_locks.get(session_key)
+            if lock is None:
+                lock = asyncio.Lock()
+                inbound_locks[session_key] = lock
+            return lock
 
     def _pairing_payload(p: Any) -> dict[str, Any]:
         # Same shape as GET /api/whatsapp/pairing — keep them in sync so the
@@ -854,26 +864,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
         )
 
-    @app.post("/whatsapp/inbound")
-    async def whatsapp_inbound(
-        payload: InboundPayload,
+    async def _process_whatsapp_inbound(
+        inbound: InboundMessage,
         request: Request,
-        authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
-        _verify_inbound_auth(settings, authorization)
-        inbound = InboundMessage(
-            id=payload.id,
-            sender=payload.from_,
-            chat=payload.chat,
-            text=payload.text,
-            timestamp=payload.timestamp,
-            push_name=payload.push_name,
-            is_group=payload.is_group,
-            media_kind=payload.media_kind,
-            media_mime=payload.media_mime,
-            media_filename=payload.media_filename,
-            has_media=payload.has_media,
-        )
         memory.record_inbound(inbound)
         if not is_owner_inbound(settings, inbound):
             await _handle_outbound_reply(
@@ -976,6 +970,36 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "output": result.final_output,
             "auto_reply": auto,
         }
+
+    @app.post("/whatsapp/inbound")
+    async def whatsapp_inbound(
+        payload: InboundPayload,
+        request: Request,
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        _verify_inbound_auth(settings, authorization)
+        inbound = InboundMessage(
+            id=payload.id,
+            sender=payload.from_,
+            chat=payload.chat,
+            text=payload.text,
+            timestamp=payload.timestamp,
+            push_name=payload.push_name,
+            is_group=payload.is_group,
+            media_kind=payload.media_kind,
+            media_mime=payload.media_mime,
+            media_filename=payload.media_filename,
+            has_media=payload.has_media,
+        )
+        session_key = inbound_session_id(inbound)
+        lock = await _inbound_session_lock(session_key)
+        if lock.locked():
+            event_log.write(
+                "inbound_message_queued",
+                {"message_id": inbound.id, "sender": inbound.sender, "session_id": session_key},
+            )
+        async with lock:
+            return await _process_whatsapp_inbound(inbound, request)
 
     @app.post("/whatsapp/receipt")
     async def whatsapp_receipt(

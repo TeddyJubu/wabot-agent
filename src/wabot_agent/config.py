@@ -207,7 +207,7 @@ class Settings(BaseSettings):
         ),
     )
     max_agent_turns: int = Field(
-        default=15,
+        default=30,
         validation_alias=AliasChoices("WABOT_AGENT_MAX_AGENT_TURNS", "VIGNESH_MAX_AGENT_TURNS"),
     )
     session_history_item_limit: int = Field(

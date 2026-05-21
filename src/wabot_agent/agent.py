@@ -478,6 +478,7 @@ async def run_agent(
 
     result: Any | None = None
     final_output = ""
+    partial_error: Exception | None = None
     max_attempts = (
         _CODEX_EMPTY_OUTPUT_MAX_ATTEMPTS
         if settings.model_provider == "codex"
@@ -494,6 +495,16 @@ async def run_agent(
             ):
                 clear_agent_session(settings.db_path, session_key)
                 continue
+            if context.sent_destinations:
+                partial_error = exc
+                logger.warning(
+                    "Agent run failed after sending WhatsApp output "
+                    "(run=%s, session=%s): %s",
+                    run_id,
+                    session_key,
+                    exc,
+                )
+                break
             raise
         final_output = strip_model_thinking(str(result.final_output))
         if final_output.strip():
@@ -508,9 +519,13 @@ async def run_agent(
             clear_agent_session(settings.db_path, session_key)
             continue
         break
-    assert result is not None
+    assert result is not None or partial_error is not None
 
-    if not final_output.strip() and settings.model_provider == "codex":
+    if (
+        not final_output.strip()
+        and settings.model_provider == "codex"
+        and partial_error is None
+    ):
         fallback = await _run_codex_lightweight_reply(settings, runner_input, context)
         if fallback.strip():
             logger.info(
@@ -534,20 +549,23 @@ async def run_agent(
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("mem0 capture failed: %s", exc)
-    event_log.write(
-        "agent_run_complete",
-        {
-            "run_id": run_id,
-            "session_id": session_key,
-            "live_model": settings.live_model_enabled,
-            # Carry enough for the dashboard runs panel to render without a
-            # follow-up /api/runs fetch. EventLog passes both through redact()
-            # before broadcast, so the SSE wire payload stays redacted.
-            "sender": inbound.sender if inbound else None,
-            "user_input": prompt,
-            "final_output": final_output,
-        },
-    )
+    event_payload = {
+        "run_id": run_id,
+        "session_id": session_key,
+        "live_model": settings.live_model_enabled,
+        # Carry enough for the dashboard runs panel to render without a
+        # follow-up /api/runs fetch. EventLog passes both through redact()
+        # before broadcast, so the SSE wire payload stays redacted.
+        "sender": inbound.sender if inbound else None,
+        "user_input": prompt,
+        "final_output": final_output,
+    }
+    if partial_error is not None:
+        event_payload["error"] = str(partial_error)
+        event_payload["sent_destinations"] = sorted(context.sent_destinations or ())
+        event_log.write("agent_run_partial", event_payload)
+    else:
+        event_log.write("agent_run_complete", event_payload)
     return AgentRunResult(
         run_id=run_id,
         final_output=final_output,

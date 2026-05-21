@@ -42,15 +42,15 @@ async def deliver_auto_reply(
         return {"sent": False, "reason": "no_destination"}
 
     text = strip_model_thinking(result.final_output or "")
+    if agent_already_replied_to(result, destination):
+        return {"sent": False, "reason": "already_sent_by_agent"}
+
     if not text:
         return await deliver_inbound_empty_reply(
             settings=settings,
             wabot=wabot,
             inbound=inbound,
         )
-
-    if agent_already_replied_to(result, destination):
-        return {"sent": False, "reason": "already_sent_by_agent"}
 
     allowed, policy = _is_send_allowed(settings, destination, inbound=inbound)
     if not allowed:

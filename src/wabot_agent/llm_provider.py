@@ -59,10 +59,7 @@ def vision_supported(settings: Settings) -> bool:
         return False
     model = active_model_id(settings).lower()
     if settings.model_provider == "codex":
-        return any(
-            token in model
-            for token in ("gpt-4o", "gpt-4.1", "gpt-5", "vision", "codex")
-        )
+        return any(token in model for token in ("gpt-4o", "gpt-4.1", "vision"))
     if settings.model_provider == "openrouter":
         return any(
             token in model

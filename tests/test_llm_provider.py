@@ -5,6 +5,7 @@ from wabot_agent.llm_provider import (
     active_model_id,
     resolved_llm_api_key,
     resolved_llm_base_url,
+    vision_supported,
 )
 
 
@@ -50,6 +51,18 @@ def test_codex_reasoning_default_omits_block() -> None:
         _env_file=None,
     )
     assert reasoning_for_model(settings) is None
+
+
+def test_codex_spark_is_not_marked_vision_capable() -> None:
+    settings = Settings(
+        model_provider="codex",
+        codex_model="gpt-5.3-codex-spark",
+        codex_access_token="test-token",
+        offline_mode=False,
+        _env_file=None,
+    )
+
+    assert not vision_supported(settings)
 
 
 def test_openrouter_live_requires_key() -> None:

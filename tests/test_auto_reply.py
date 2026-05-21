@@ -91,6 +91,35 @@ async def test_deliver_auto_reply_skips_when_agent_already_sent(tmp_path: Path) 
     assert wabot.sent == []
 
 
+@pytest.mark.asyncio
+async def test_deliver_auto_reply_skips_empty_output_when_agent_already_sent(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    wabot = FakeWabotClient()
+    inbound = InboundMessage(
+        id="m2-empty",
+        sender="+15550001111",
+        text="hello",
+        chat="+15550001111",
+    )
+    result = AgentRunResult(
+        run_id="run-2-empty",
+        final_output="",
+        session_id="+15550001111",
+        live_model=True,
+        sent_destinations=frozenset({"+15550001111"}),
+    )
+
+    auto = await deliver_auto_reply(
+        settings=settings, wabot=wabot, inbound=inbound, result=result
+    )
+
+    assert auto["sent"] is False
+    assert auto["reason"] == "already_sent_by_agent"
+    assert wabot.sent == []
+
+
 def test_inbound_webhook_wires_auto_reply(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     calls: list[dict[str, object]] = []
 
