@@ -206,6 +206,12 @@ class SettingsPatch(BaseModel):
     confirm_allow_all: bool = False
 
 
+class OpenRouterTestRequest(BaseModel):
+    api_key: str | None = None
+    base_url: str | None = None
+    model: str | None = None
+
+
 def _reminder_target_jid(reminder: dict[str, Any]) -> str:
     return str(reminder.get("target_jid") or reminder.get("requester_jid") or "").strip()
 
@@ -1375,8 +1381,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return _settings_view(settings)
 
     @app.post("/api/settings/test/openrouter", dependencies=[human_dependency])
-    async def test_openrouter() -> dict[str, Any]:
-        return await _test_llm_endpoint(settings)
+    async def test_openrouter(payload: OpenRouterTestRequest | None = None) -> dict[str, Any]:
+        return await _test_openrouter_endpoint(settings, payload or OpenRouterTestRequest())
 
     @app.post("/api/settings/test/llm", dependencies=[human_dependency])
     async def test_llm() -> dict[str, Any]:
@@ -1706,6 +1712,62 @@ async def _test_llm_endpoint(settings: Settings) -> dict[str, Any]:
     return {
         "ok": False,
         "detail": f"{label} returned HTTP {resp.status_code}: {resp.text[:200]}",
+    }
+
+
+async def _test_openrouter_endpoint(
+    settings: Settings, payload: OpenRouterTestRequest
+) -> dict[str, Any]:
+    from openai import AsyncOpenAI
+
+    from .llm_provider import llm_default_headers
+
+    snapshot = settings.model_copy(deep=True)
+    snapshot.model_provider = "openrouter"
+    snapshot.offline_mode = False
+
+    if payload.base_url is not None:
+        base_url = payload.base_url.strip()
+        if base_url:
+            _require_safe_openrouter_url("openrouter_base_url", base_url)
+            snapshot.openrouter_base_url = base_url
+    if payload.model is not None:
+        model = payload.model.strip()
+        if model:
+            snapshot.openrouter_model = model
+    if payload.api_key is not None:
+        api_key = payload.api_key.strip()
+        if api_key:
+            snapshot.openrouter_api_key = api_key
+
+    if not snapshot.openrouter_api_key:
+        return {"ok": False, "detail": "OPENROUTER_API_KEY is not configured."}
+
+    model = active_model_id(snapshot)
+    client = AsyncOpenAI(
+        api_key=snapshot.openrouter_api_key,
+        base_url=snapshot.openrouter_base_url.rstrip("/"),
+        default_headers=llm_default_headers(snapshot),
+    )
+    try:
+        completion = await client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": "Reply with exactly: ok"}],
+            max_tokens=8,
+            temperature=0,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "detail": f"OpenRouter connection failed: {exc}"}
+
+    text = (completion.choices[0].message.content or "").strip() if completion.choices else ""
+    if text.lower().strip(".") == "ok":
+        return {
+            "ok": True,
+            "detail": f"OpenRouter chat completions reachable. Active model: {model}",
+        }
+    return {
+        "ok": True,
+        "detail": f"OpenRouter reachable. Active model: {model}; probe replied: {text[:80]}",
     }
 
 

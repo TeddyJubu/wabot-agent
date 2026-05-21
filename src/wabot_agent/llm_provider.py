@@ -49,7 +49,7 @@ def llm_default_headers(settings: Settings) -> dict[str, str]:
         return {}
     return {
         "HTTP-Referer": settings.openrouter_site_url,
-        "X-Title": settings.openrouter_app_title,
+        "X-OpenRouter-Title": settings.openrouter_app_title,
     }
 
 

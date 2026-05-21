@@ -9,6 +9,7 @@ import {
 import {
   fetchSettings,
   patchSettings,
+  testOpenRouter,
   type ModelProvider,
   type SettingsView,
 } from "@/api/settings";
@@ -32,6 +33,7 @@ export default function SettingsPanel() {
   const [status, setStatus] = useState("");
   const [codexLogin, setCodexLogin] = useState<CodexLoginView | null>(null);
   const [codexBusy, setCodexBusy] = useState(false);
+  const [openRouterBusy, setOpenRouterBusy] = useState(false);
   const codexPollRef = useRef<number | null>(null);
 
   const refreshCodexLogin = useCallback(async () => {
@@ -347,6 +349,39 @@ export default function SettingsPanel() {
           <legend className="text-xs font-medium uppercase tracking-wider text-fg-muted">
             OpenRouter
           </legend>
+          <div className="rounded-card border border-border bg-bg-card/60 p-3 text-xs">
+            <p className={view.openrouter.live ? "text-emerald-400/90" : "text-fg-muted"}>
+              {view.openrouter.live
+                ? "OpenRouter is the active dashboard chat provider."
+                : "Paste an OpenRouter key, save, and dashboard chat will use OpenRouter."}
+            </p>
+            <p className="mt-1 text-fg-muted">
+              The key is stored server-side; the browser only sends it to this dashboard backend.
+            </p>
+            <button
+              type="button"
+              disabled={openRouterBusy}
+              className="mt-3 rounded-pill border border-border px-2.5 py-1 text-xs transition hover:border-accent disabled:opacity-50"
+              onClick={async () => {
+                setOpenRouterBusy(true);
+                setStatus("Testing OpenRouter…");
+                try {
+                  const result = await testOpenRouter({
+                    api_key: draft.openrouter_api_key || undefined,
+                    base_url: draft.openrouter_base_url ?? view.openrouter.base_url,
+                    model: draft.openrouter_model ?? view.openrouter.model,
+                  });
+                  setStatus(result.ok ? result.detail : `OpenRouter test failed: ${result.detail}`);
+                } catch (err) {
+                  setStatus(`OpenRouter test error: ${String(err)}`);
+                } finally {
+                  setOpenRouterBusy(false);
+                }
+              }}
+            >
+              Test OpenRouter
+            </button>
+          </div>
           <Field
             label="API key"
             type="password"

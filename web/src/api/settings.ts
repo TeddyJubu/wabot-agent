@@ -53,6 +53,11 @@ export interface SettingsView {
   };
 }
 
+export interface SettingsTestResult {
+  ok: boolean;
+  detail: string;
+}
+
 export async function fetchSettings(): Promise<SettingsView> {
   const res = await fetch("/api/settings", { credentials: "include" });
   if (!res.ok) throw new Error(`settings: ${res.status}`);
@@ -70,4 +75,23 @@ export async function patchSettings(body: Record<string, unknown>): Promise<void
     const text = await res.text().catch(() => "");
     throw new Error(text || `settings PATCH failed: ${res.status}`);
   }
+}
+
+export async function testOpenRouter(body: {
+  api_key?: string;
+  base_url?: string;
+  model?: string;
+}): Promise<SettingsTestResult> {
+  const res = await fetch("/api/settings/test/openrouter", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  const data = (await res.json().catch(() => null)) as SettingsTestResult | null;
+  if (!res.ok) {
+    throw new Error(data?.detail || `openrouter test failed: ${res.status}`);
+  }
+  if (!data) throw new Error("openrouter test returned no body");
+  return data;
 }
