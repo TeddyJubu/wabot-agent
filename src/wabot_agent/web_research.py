@@ -65,6 +65,23 @@ def _preview_text(content: str, *, limit: int = 1200) -> str:
     return f"{text[:limit]}\n… ({len(text)} chars total)"
 
 
+def _step_count(value: Any) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, list | tuple):
+        return len(value)
+    if isinstance(value, dict):
+        return len(value)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
 async def execute_web_research_job(
     job: dict[str, Any],
     *,
@@ -155,7 +172,7 @@ async def execute_web_research_job(
         result_path=str(result_path),
         preview=preview,
         duration_ms=payload.get("durationMs"),
-        steps=payload.get("steps"),
+        steps=_step_count(payload.get("steps")),
     )
     event_log.write(
         "web_research_completed",
@@ -169,7 +186,8 @@ async def execute_web_research_job(
 
     summary = (
         f"Research complete ({title or job_id[:8]}).\n"
-        f"Steps: {payload.get('steps', '?')}, duration: {payload.get('durationMs', '?')}ms.\n\n"
+        f"Steps: {_step_count(payload.get('steps')) or '?'}, "
+        f"duration: {payload.get('durationMs', '?')}ms.\n\n"
         f"{preview}"
     )
     await _notify_web_research_done(

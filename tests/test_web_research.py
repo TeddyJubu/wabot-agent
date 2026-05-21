@@ -7,7 +7,12 @@ import pytest
 from wabot_agent.config import Settings
 from wabot_agent.memory import MemoryStore
 from wabot_agent.web_agent import web_agent_health
-from wabot_agent.web_research import _extract_result_text, _pick_extension, execute_web_research_job
+from wabot_agent.web_research import (
+    _extract_result_text,
+    _pick_extension,
+    _step_count,
+    execute_web_research_job,
+)
 
 
 @pytest.fixture
@@ -21,6 +26,13 @@ def test_extract_result_text_prefers_data_string() -> None:
 
 def test_pick_extension_csv() -> None:
     assert _pick_extension("csv", "businessName,phone\nAcme,123") == ".csv"
+
+
+def test_step_count_accepts_web_agent_step_lists() -> None:
+    assert _step_count([{"text": "scrape"}, {"text": "format"}]) == 2
+    assert _step_count(3) == 3
+    assert _step_count("4") == 4
+    assert _step_count("unknown") is None
 
 
 @pytest.mark.asyncio
@@ -85,7 +97,7 @@ async def test_execute_web_research_job_saves_and_completes(tmp_path) -> None:
     mock_payload = {
         "text": "businessName,phone\nClinic A,123",
         "durationMs": 500,
-        "steps": 3,
+        "steps": [{"text": "scrape"}, {"text": "format"}, {"text": "final"}],
     }
 
     with patch(
@@ -109,6 +121,7 @@ async def test_execute_web_research_job_saves_and_completes(tmp_path) -> None:
     row = memory.get_web_research_job(str(claimed["id"]))
     assert row is not None
     assert row["status"] == "completed"
+    assert row["steps"] == 3
     assert row["result_path"]
     wabot.send_text.assert_called_once()
     wabot.send_media.assert_called_once()
