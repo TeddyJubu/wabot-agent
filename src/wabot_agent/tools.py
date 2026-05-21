@@ -15,6 +15,7 @@ from .media_paths import media_path_allowed, workspace_path_allowed
 from .mem0_store import (
     add_memory_sync,
     mem0_enabled,
+    mem0_health,
     search_memories_sync,
 )
 from .memory import (
@@ -1652,17 +1653,9 @@ async def cancel_web_research(
 async def mem0_status(ctx: RunContextWrapper[RuntimeContext]) -> dict[str, Any]:
     """Report whether Mem0 long-term memory is enabled and configured."""
     settings = ctx.context.settings
-    payload = {
-        "enabled": mem0_enabled(settings),
-        "configured": settings.mem0_enabled,
-        "use_platform": settings.mem0_use_platform,
-        "path": str(settings.mem0_path),
-        "collection": settings.mem0_collection,
-        "auto_capture": settings.mem0_auto_capture,
-        "inject_on_run": settings.mem0_inject_on_run,
-    }
+    payload = mem0_health(settings)
     ctx.context.memory.record_tool_event(ctx.context.run_id, "mem0_status", payload)
-    return payload
+    return redact(payload)
 
 
 @function_tool
@@ -1674,7 +1667,11 @@ async def search_mem0_memories(
 ) -> dict[str, Any]:
     """Search Mem0 memories. Defaults to sender (searches person + group ids in groups)."""
     if not mem0_enabled(ctx.context.settings):
-        payload = {"ok": False, "reason": "mem0_disabled", "results": []}
+        health = mem0_health(ctx.context.settings)
+        reason = health.get("reason") or "mem0_disabled"
+        if reason == "mem0_config_disabled":
+            reason = "mem0_disabled"
+        payload = {"ok": False, "reason": reason, "results": []}
     else:
         ids = [user_id.strip()] if user_id and user_id.strip() else _mem0_user_ids(ctx)
         if not ids:
@@ -1709,7 +1706,11 @@ async def add_mem0_memory(
 ) -> dict[str, Any]:
     """Store a durable fact in Mem0 before final reply when something important was said."""
     if not mem0_enabled(ctx.context.settings):
-        payload = {"ok": False, "reason": "mem0_disabled"}
+        health = mem0_health(ctx.context.settings)
+        reason = health.get("reason") or "mem0_disabled"
+        if reason == "mem0_config_disabled":
+            reason = "mem0_disabled"
+        payload = {"ok": False, "reason": reason}
     else:
         uid = (user_id or _mem0_user_id(ctx) or "").strip()
         if not uid:

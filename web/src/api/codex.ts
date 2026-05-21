@@ -39,3 +39,15 @@ export async function cancelCodexDeviceLogin(): Promise<CodexLoginView> {
   if (!res.ok) throw new Error(`codex login cancel: ${res.status}`);
   return res.json();
 }
+
+export async function disconnectCodexLogin(): Promise<CodexLoginView> {
+  const res = await fetch("/api/codex/login/disconnect", {
+    method: "POST",
+    credentials: "include",
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `codex disconnect: ${res.status}`);
+  }
+  return res.json();
+}

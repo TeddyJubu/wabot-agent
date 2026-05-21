@@ -4,6 +4,7 @@ import asyncio
 import os
 import signal
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -86,6 +87,39 @@ def _http_addr_from_endpoint(endpoint: str) -> str:
     host = parsed.hostname or "127.0.0.1"
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     return f"{host}:{port}"
+
+
+def rotate_wabot_store_files(settings: Settings) -> list[Path]:
+    """Move wabot's linked-device store files aside so a new phone can pair.
+
+    `store.db` is the WhatsApp linked-device identity. We rotate it in-place
+    rather than deleting it outright so an operator has a short rollback path if
+    they disconnected the wrong account.
+    """
+    if settings.wabot_home is None:
+        raise WabotRestartError(
+            "Set WABOT_AGENT_WABOT_HOME to your wabot install directory before "
+            "disconnecting WhatsApp."
+        )
+
+    home = settings.wabot_home.expanduser().resolve()
+    if not home.is_dir():
+        raise WabotRestartError(f"wabot home not found: {home}")
+
+    stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    backups: list[Path] = []
+    for name in ("store.db", "store.db-wal", "store.db-shm"):
+        path = home / name
+        if not path.exists():
+            continue
+        backup = path.with_name(f"{path.name}.disconnected-{stamp}")
+        index = 1
+        while backup.exists():
+            backup = path.with_name(f"{path.name}.disconnected-{stamp}-{index}")
+            index += 1
+        path.replace(backup)
+        backups.append(backup)
+    return backups
 
 
 async def _start_from_home(home: Path, settings: Settings | None = None) -> None:

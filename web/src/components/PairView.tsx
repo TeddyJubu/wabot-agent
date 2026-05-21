@@ -3,7 +3,12 @@ import { useStore } from "@/store";
 import { usePairingStream } from "@/hooks/usePairingStream";
 import { ClerkNavAuth } from "@/components/ClerkNavAuth";
 import PairingQrCard from "@/components/tool-cards/PairingQrCard";
-import { fetchPairing, requestNewPairingQr, type PairingState } from "@/api/pairing";
+import {
+  disconnectWhatsappConnection,
+  fetchPairing,
+  requestNewPairingQr,
+  type PairingState,
+} from "@/api/pairing";
 
 function statusText(p: PairingState | null): string {
   if (!p) return "Checking…";
@@ -33,6 +38,7 @@ export default function PairView() {
   const setPairing = useStore((s) => s.setPairing);
   const [refreshing, setRefreshing] = useState(false);
   const [requestingQr, setRequestingQr] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -54,12 +60,41 @@ export default function PairView() {
       </header>
 
       <div>
-        {pairing?.logged_in && pairing.connected ? (
+        {pairing?.logged_in ? (
           <div className="rounded-card border border-border bg-bg-card p-6 text-center shadow-sm">
             <div aria-hidden className="mb-2 text-3xl">✓</div>
             <p className="text-sm text-fg-muted">
               Your WhatsApp is linked to this bot.
             </p>
+            <button
+              type="button"
+              disabled={disconnecting}
+              className="mt-4 inline-flex items-center gap-1.5 rounded-pill border border-red-400/40 px-2.5 py-1 text-xs text-red-300 hover:bg-red-500/10 disabled:opacity-50"
+              onClick={() => {
+                if (
+                  !window.confirm(
+                    "Disconnect this WhatsApp account from the bot? You will need to scan a new QR before it can send or reply again.",
+                  )
+                ) {
+                  return;
+                }
+                setDisconnecting(true);
+                setError(null);
+                void disconnectWhatsappConnection()
+                  .then((state) => {
+                    setPairing(state);
+                    if (!state.qr_available) {
+                      setError("WhatsApp was disconnected. A new QR should appear within a minute.");
+                    }
+                  })
+                  .catch((err) =>
+                    setError(err instanceof Error ? err.message : "Could not disconnect WhatsApp."),
+                  )
+                  .finally(() => setDisconnecting(false));
+              }}
+            >
+              {disconnecting ? "Disconnecting…" : "Disconnect WhatsApp"}
+            </button>
           </div>
         ) : (
           <PairingQrCard

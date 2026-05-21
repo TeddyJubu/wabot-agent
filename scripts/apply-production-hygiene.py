@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Apply local/VPS production hygiene defaults (idempotent).
 
-- send_policy: allow_all by default (override with WABOT_AGENT_SEND_POLICY)
+- send_policy: owner if owner numbers exist, allowlist if recipients exist, else dry_run
 - allowed_recipients: union of .env + inbound_messages DB
 - operator token: generate if missing in .env
 - secret file modes: 0o600
@@ -80,6 +80,17 @@ def _contacts_from_db(db_path: Path) -> set[str]:
     return {x for x in out if x}
 
 
+def _choose_send_policy(env: dict[str, str], owners: set[str], recipients: set[str]) -> str:
+    explicit = env.get("WABOT_AGENT_SEND_POLICY") or env.get("VIGNESH_SEND_POLICY")
+    if explicit:
+        return explicit
+    if owners:
+        return "owner"
+    if recipients:
+        return "allowlist"
+    return "dry_run"
+
+
 def _default_wabot_env() -> Path:
     candidates = [
         ROOT.parent / "wabot" / "wabot.env",  # /opt/wabot-agent -> /opt/wabot
@@ -107,11 +118,14 @@ def main() -> int:
     owner_raw = env.get("WABOT_AGENT_OWNER_NUMBERS") or env.get("VIGNESH_OWNER_NUMBERS") or ""
     owners |= {p.strip() for p in owner_raw.replace(",", " ").split() if p.strip()}
 
-    send_policy = (
-        env.get("WABOT_AGENT_SEND_POLICY")
-        or env.get("VIGNESH_SEND_POLICY")
-        or "allow_all"
-    )
+    send_policy = _choose_send_policy(env, owners, recipients)
+    if send_policy == "allow_all":
+        print(
+            "error: send_policy=allow_all is not a production hygiene default; "
+            "set owner/allowlist/dry_run instead",
+            file=sys.stderr,
+        )
+        return 1
     if send_policy == "allowlist" and not recipients:
         print(
             "warning: allowlist policy but no allowed_recipients — sends blocked until "
@@ -120,8 +134,6 @@ def main() -> int:
         )
     if send_policy == "owner" and not owners:
         print("warning: owner policy selected but no owner_numbers configured", file=sys.stderr)
-    if send_policy == "allow_all":
-        print("note: send_policy=allow_all — agent may message any recipient", file=sys.stderr)
 
     # Bootstrap .env for VPS (immutable source of truth).
     _write_env_key(env_path, "WABOT_AGENT_SEND_POLICY", send_policy)

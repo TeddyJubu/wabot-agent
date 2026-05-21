@@ -4,8 +4,9 @@ import asyncio
 import logging
 import os
 import threading
+import time
 from contextlib import contextmanager
-from typing import Any
+from typing import Any, Literal
 
 from .config import Settings
 from .llm_provider import active_model_id
@@ -16,29 +17,103 @@ logger = logging.getLogger(__name__)
 _memory_lock = threading.Lock()
 _memory_instance: Any | None = None
 _memory_config_key: str | None = None
+_degraded_lock = threading.Lock()
+_degraded_until = 0.0
+_degraded_reason: str | None = None
+_DEGRADED_BACKOFF_SEC = 15 * 60
 
 
 class Mem0UnavailableError(RuntimeError):
     pass
 
 
-def mem0_enabled(settings: Settings) -> bool:
+Mem0LlmProvider = Literal["openrouter", "ollama", "ollama_cloud"]
+
+
+def _effective_mem0_llm_provider(settings: Settings) -> Mem0LlmProvider | None:
+    if settings.mem0_llm_provider:
+        return settings.mem0_llm_provider
+    if settings.model_provider == "codex":
+        return None
+    if settings.model_provider in ("openrouter", "ollama", "ollama_cloud"):
+        return settings.model_provider
+    return None
+
+
+def _current_degraded_reason() -> str | None:
+    global _degraded_reason, _degraded_until
+    with _degraded_lock:
+        if _degraded_reason and time.monotonic() < _degraded_until:
+            return _degraded_reason
+        _degraded_reason = None
+        _degraded_until = 0.0
+    return None
+
+
+def _mark_degraded(reason: str) -> None:
+    global _degraded_reason, _degraded_until
+    with _degraded_lock:
+        _degraded_reason = redact(reason)
+        _degraded_until = time.monotonic() + _DEGRADED_BACKOFF_SEC
+
+
+def _maybe_degrade_from_exception(exc: Exception) -> None:
+    text = str(exc)
+    lowered = text.lower()
+    if "403" in text and (
+        "key limit" in lowered
+        or "quota" in lowered
+        or "rate limit" in lowered
+        or "insufficient" in lowered
+    ):
+        _mark_degraded(text)
+
+
+def mem0_health(settings: Settings) -> dict[str, Any]:
+    """Return a redacted, operator-facing Mem0 health summary."""
+    provider = _effective_mem0_llm_provider(settings)
+    degraded_reason = _current_degraded_reason()
+    reason: str | None = None
     if not settings.mem0_enabled:
-        return False
-    if settings.offline_mode:
+        reason = "mem0_config_disabled"
+    elif settings.offline_mode:
+        reason = "offline_mode"
+    elif degraded_reason:
+        reason = f"degraded: {degraded_reason}"
+    elif settings.mem0_use_platform and not settings.mem0_api_key:
+        reason = "mem0_platform_api_key_missing"
+    elif not settings.mem0_use_platform and provider is None:
+        reason = "mem0_llm_provider_required_for_codex"
+    elif provider == "openrouter" and not settings.openrouter_api_key:
+        reason = "openrouter_api_key_missing"
+    elif provider == "ollama_cloud" and not settings.ollama_api_key:
+        reason = "ollama_api_key_missing"
+
+    return {
+        "configured": settings.mem0_enabled,
+        "enabled": reason is None,
+        "degraded": degraded_reason is not None,
+        "reason": reason,
+        "use_platform": settings.mem0_use_platform,
+        "llm_provider": provider,
+        "llm_model": settings.mem0_llm_model,
+        "embed_model": _mem0_fastembed_model(settings),
+        "path": str(settings.mem0_path),
+        "collection": settings.mem0_collection,
+        "auto_capture": settings.mem0_auto_capture,
+        "inject_on_run": settings.mem0_inject_on_run,
+    }
+
+
+def mem0_enabled(settings: Settings) -> bool:
+    if not mem0_health(settings)["enabled"]:
         return False
     if settings.mem0_use_platform:
-        return bool(settings.mem0_api_key)
-    if settings.model_provider == "codex":
-        # Mem0 uses Chat Completions; keep it on OpenRouter when configured.
-        if settings.openrouter_api_key:
-            return True
-        from .codex_auth import load_codex_credentials
-
-        return load_codex_credentials(settings) is not None
-    if settings.model_provider == "openrouter":
+        return True
+    provider = _effective_mem0_llm_provider(settings)
+    if provider == "openrouter":
         return bool(settings.openrouter_api_key)
-    if settings.model_provider == "ollama_cloud":
+    if provider == "ollama_cloud":
         return bool(settings.ollama_api_key)
     return True
 
@@ -46,14 +121,10 @@ def mem0_enabled(settings: Settings) -> bool:
 def _llm_api_key(settings: Settings) -> str | None:
     if settings.mem0_use_platform:
         return settings.mem0_api_key
-    if settings.model_provider == "codex":
-        from .codex_auth import load_codex_credentials
-
-        creds = load_codex_credentials(settings)
-        return creds.access_token if creds else None
-    if settings.model_provider == "openrouter":
+    provider = _effective_mem0_llm_provider(settings)
+    if provider == "openrouter":
         return settings.openrouter_api_key
-    if settings.model_provider == "ollama_cloud":
+    if provider == "ollama_cloud":
         return settings.ollama_api_key
     return settings.ollama_api_key or "ollama"
 
@@ -69,47 +140,33 @@ def _config_cache_key(settings: Settings) -> str:
             str(settings.mem0_llm_model or llm_model),
             embed_model,
             base_url,
-            settings.model_provider,
+            str(_effective_mem0_llm_provider(settings)),
         ]
     )
 
 
 def _mem0_openai_llm(settings: Settings) -> tuple[str, str, str]:
     """API key, OpenAI-compatible base URL, and model for Mem0 fact extraction."""
-    if settings.model_provider == "codex":
-        if settings.openrouter_api_key:
-            return (
-                settings.openrouter_api_key,
-                settings.openrouter_base_url,
-                settings.mem0_llm_model or settings.openrouter_model,
-            )
-        from .codex_auth import load_codex_credentials
-
-        creds = load_codex_credentials(settings)
-        return (
-            creds.access_token if creds else "",
-            settings.codex_base_url,
-            settings.mem0_llm_model or settings.codex_model,
+    provider = _effective_mem0_llm_provider(settings)
+    if provider is None:
+        raise Mem0UnavailableError(
+            "mem0 LLM provider required for codex; set WABOT_AGENT_MEM0_LLM_PROVIDER"
         )
-    if settings.model_provider == "openrouter":
+    if provider == "openrouter":
         return (
             settings.openrouter_api_key or "",
             settings.openrouter_base_url,
             settings.mem0_llm_model or settings.openrouter_model,
         )
-    if settings.model_provider in ("ollama", "ollama_cloud"):
+    if provider in ("ollama", "ollama_cloud"):
         return (
             settings.ollama_api_key or "ollama",
             settings.ollama_cloud_base_url
-            if settings.model_provider == "ollama_cloud"
+            if provider == "ollama_cloud"
             else settings.ollama_base_url,
             settings.mem0_llm_model or active_model_id(settings),
         )
-    return (
-        settings.ollama_api_key or "ollama",
-        settings.ollama_base_url,
-        settings.mem0_llm_model or settings.ollama_model,
-    )
+    raise Mem0UnavailableError(f"unsupported mem0 LLM provider: {provider}")
 
 
 def _mem0_fastembed_model(settings: Settings) -> str:
@@ -133,13 +190,14 @@ def _mem0_embedding_dims(settings: Settings) -> int:
 
 
 def _mem0_use_fastembed(settings: Settings) -> bool:
-    return settings.model_provider in ("codex", "ollama", "ollama_cloud")
+    provider = _effective_mem0_llm_provider(settings)
+    return provider in (None, "ollama", "ollama_cloud")
 
 
 @contextmanager
 def _mem0_llm_env(settings: Settings):
     """Mem0's OpenAI LLM uses OpenRouter whenever OPENROUTER_API_KEY is set."""
-    if settings.model_provider in ("codex", "openrouter"):
+    if _effective_mem0_llm_provider(settings) == "openrouter":
         yield
         return
     saved = {
@@ -162,7 +220,7 @@ def build_mem0_config(settings: Settings) -> dict[str, Any]:
         return {"api_key": api_key}
 
     api_key, base_url, llm_model = _mem0_openai_llm(settings)
-    if not api_key and settings.model_provider != "ollama":
+    if not api_key and _effective_mem0_llm_provider(settings) != "ollama":
         raise Mem0UnavailableError("no API key for mem0 LLM")
 
     settings.mem0_path.mkdir(parents=True, exist_ok=True)
@@ -236,10 +294,13 @@ def get_mem0_memory(settings: Settings) -> Any:
 
 
 def reset_mem0_memory_for_tests() -> None:
-    global _memory_instance, _memory_config_key
+    global _memory_instance, _memory_config_key, _degraded_reason, _degraded_until
     with _memory_lock:
         _memory_instance = None
         _memory_config_key = None
+    with _degraded_lock:
+        _degraded_reason = None
+        _degraded_until = 0.0
 
 
 def _normalize_user_id(user_id: str) -> str:
@@ -276,6 +337,7 @@ def search_memories_sync(
     try:
         memory = get_mem0_memory(settings)
     except (Mem0UnavailableError, Exception) as exc:  # noqa: BLE001
+        _maybe_degrade_from_exception(exc)
         logger.warning("mem0 init/search unavailable: %s", exc)
         return {"ok": False, "reason": redact(str(exc)), "results": []}
 
@@ -287,6 +349,7 @@ def search_memories_sync(
             top_k=limit,
         )
     except Exception as exc:  # noqa: BLE001
+        _maybe_degrade_from_exception(exc)
         logger.warning("mem0 search failed: %s", exc)
         return {"ok": False, "reason": redact(str(exc)), "results": []}
 
@@ -307,6 +370,7 @@ def add_memory_sync(
     try:
         memory = get_mem0_memory(settings)
     except (Mem0UnavailableError, Exception) as exc:  # noqa: BLE001
+        _maybe_degrade_from_exception(exc)
         logger.warning("mem0 init/add unavailable: %s", exc)
         return {"ok": False, "reason": redact(str(exc))}
 
@@ -317,6 +381,7 @@ def add_memory_sync(
             metadata=metadata or {},
         )
     except Exception as exc:  # noqa: BLE001
+        _maybe_degrade_from_exception(exc)
         logger.warning("mem0 add failed: %s", exc)
         return {"ok": False, "reason": redact(str(exc))}
 

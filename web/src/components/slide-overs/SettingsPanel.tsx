@@ -1,6 +1,7 @@
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import {
   cancelCodexDeviceLogin,
+  disconnectCodexLogin,
   fetchCodexLogin,
   startCodexDeviceLogin,
   type CodexLoginView,
@@ -25,7 +26,7 @@ export default function SettingsPanel() {
   const [view, setView] = useState<SettingsView | null>(null);
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [provider, setProvider] = useState<ModelProvider>("codex");
-  const [policy, setPolicy] = useState<Policy>("allow_all");
+  const [policy, setPolicy] = useState<Policy>("dry_run");
   const [recipients, setRecipients] = useState("");
   const [owners, setOwners] = useState("");
   const [status, setStatus] = useState("");
@@ -264,6 +265,39 @@ export default function SettingsPanel() {
                         }}
                       >
                         Cancel
+                      </button>
+                    )}
+                    {signedIn && (
+                      <button
+                        type="button"
+                        disabled={codexBusy}
+                        className="rounded-pill border border-red-400/40 px-2.5 py-1 text-xs text-red-300 transition hover:bg-red-500/10 disabled:opacity-50"
+                        onClick={async () => {
+                          if (
+                            !window.confirm(
+                              "Disconnect this ChatGPT subscription from the bot? You can sign in again with a different account afterward.",
+                            )
+                          ) {
+                            return;
+                          }
+                          setCodexBusy(true);
+                          setStatus("Disconnecting ChatGPT…");
+                          try {
+                            const next = await disconnectCodexLogin();
+                            setCodexLogin(next);
+                            if (codexPollRef.current) window.clearInterval(codexPollRef.current);
+                            codexPollRef.current = null;
+                            const settings = await fetchSettings();
+                            setView(settings);
+                            setStatus("ChatGPT disconnected.");
+                          } catch (err) {
+                            setStatus(`Disconnect error: ${String(err)}`);
+                          } finally {
+                            setCodexBusy(false);
+                          }
+                        }}
+                      >
+                        Disconnect ChatGPT
                       </button>
                     )}
                   </div>

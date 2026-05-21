@@ -24,7 +24,7 @@ This keeps the stack on one VPS and avoids premature full SaaS complexity.
 | **VPS stack** | `wabot` @ loopback `:7777`, `wabot-agent` @ `:8787`, Caddy HTTPS |
 | **Primary operator UX** | WhatsApp chat to the linked bot number |
 | **Web surface** | Keep minimal: pairing + admin/ops only (no primary chat control) |
-| **Send policy** | `allowlist` + `scripts/apply-production-hygiene.py` |
+| **Send policy** | `owner` on the Vignesh VPS; stricter installs can use `allowlist` |
 | **History** | `WABOT_HISTORY_*` webhooks → `inbound_messages` backfill |
 | **Repos** | [wabot-agent](https://github.com/TeddyJubu/wabot-agent), [wabot](https://github.com/TeddyJubu/wabot) |
 
@@ -46,7 +46,7 @@ The dashboard remains available for now, but no longer drives roadmap priorities
 ### P0 — WhatsApp-first reliability (do first)
 
 - [ ] Set `WABOT_AGENT_WABOT_HOME=/opt/wabot` on VPS (ensures reliable QR restart path)
-- [ ] Ensure `OPENROUTER_API_KEY` in `.env` (not only `runtime_overrides.json`)
+- [ ] Set `WABOT_AGENT_MEM0_LLM_PROVIDER` only when Mem0 should use a live extraction provider
 - [ ] Enforce operator command guardrails in WhatsApp flows (confirmation for risky actions, explicit deny paths)
 - [ ] Keep inbound durable when model/tools fail (store inbound, retry strategy, clear failure messages)
 - [ ] Add audit events for command source (`sender`, tool invoked, allow/deny reason)
@@ -129,5 +129,6 @@ Use `./scripts/build-web.sh` only when changing web ops pages.
 
 - wabot and webhooks stay on `127.0.0.1`.
 - `/whatsapp/inbound` continues to rely on `WABOT_INBOUND_TOKEN` and must not be internet-exposed directly.
-- Keep production send policy on `allowlist` unless explicitly justified.
+- Keep production send policy on `owner` for the Vignesh VPS or `allowlist` for stricter installs;
+  never leave production on `allow_all`.
 - Do not commit `data/`, `.env`, or WhatsApp `store.db`.

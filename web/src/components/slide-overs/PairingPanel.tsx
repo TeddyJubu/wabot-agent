@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import PairingQrCard from "../tool-cards/PairingQrCard";
-import { fetchPairing, requestNewPairingQr, type PairingState } from "@/api/pairing";
+import {
+  disconnectWhatsappConnection,
+  fetchPairing,
+  requestNewPairingQr,
+  type PairingState,
+} from "@/api/pairing";
 import { useStore } from "@/store";
 
 function describe(state: PairingState | null): string {
@@ -12,7 +17,7 @@ function describe(state: PairingState | null): string {
 }
 
 function isLinked(state: PairingState | null): boolean {
-  return Boolean(state?.logged_in && state.connected);
+  return Boolean(state?.logged_in);
 }
 
 export default function PairingPanel() {
@@ -20,6 +25,7 @@ export default function PairingPanel() {
   const setPairing = useStore((s) => s.setPairing);
   const [refreshing, setRefreshing] = useState(false);
   const [requestingQr, setRequestingQr] = useState(false);
+  const [disconnecting, setDisconnecting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -64,6 +70,29 @@ export default function PairingPanel() {
     }
   }
 
+  async function disconnectWhatsapp() {
+    if (
+      !window.confirm(
+        "Disconnect this WhatsApp account from the bot? You will need to scan a new QR before it can send or reply again.",
+      )
+    ) {
+      return;
+    }
+    setDisconnecting(true);
+    setError(null);
+    try {
+      const next = await disconnectWhatsappConnection();
+      setPairing(next);
+      if (!next.qr_available) {
+        setError("WhatsApp was disconnected. A new QR should appear within a minute.");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not disconnect WhatsApp.");
+    } finally {
+      setDisconnecting(false);
+    }
+  }
+
   const status = describe(state);
   const linked = isLinked(state);
   return (
@@ -81,6 +110,14 @@ export default function PairingPanel() {
             className="mt-4 inline-flex items-center gap-1.5 rounded-pill border border-border px-2.5 py-1 text-xs hover:bg-bg-app"
           >
             {refreshing ? "Refreshing…" : "Refresh status"}
+          </button>
+          <button
+            type="button"
+            onClick={() => void disconnectWhatsapp()}
+            disabled={disconnecting}
+            className="ml-2 mt-4 inline-flex items-center gap-1.5 rounded-pill border border-red-400/40 px-2.5 py-1 text-xs text-red-300 hover:bg-red-500/10 disabled:opacity-50"
+          >
+            {disconnecting ? "Disconnecting…" : "Disconnect WhatsApp"}
           </button>
         </div>
       ) : (

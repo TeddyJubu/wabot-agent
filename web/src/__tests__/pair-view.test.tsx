@@ -1,9 +1,21 @@
-import { describe, expect, it, beforeEach } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { describe, expect, it, beforeEach, vi } from "vitest";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
 import PairingPanel from "@/components/slide-overs/PairingPanel";
 import PairView from "@/components/PairView";
 import { useStore } from "@/store";
+import { disconnectWhatsappConnection } from "@/api/pairing";
+
+vi.mock("@/api/pairing", () => ({
+  fetchPairing: vi.fn().mockRejectedValue(new Error("not mocked")),
+  requestNewPairingQr: vi.fn(),
+  disconnectWhatsappConnection: vi.fn(),
+  subscribePairing: vi.fn(() => ({ close: vi.fn() })),
+}));
+
+vi.mock("@/components/ClerkNavAuth", () => ({
+  ClerkNavAuth: () => <div data-testid="clerk-nav-auth" />,
+}));
 
 beforeEach(() => {
   // Mock EventSource — jsdom doesn't ship one and PairView mounts a
@@ -15,6 +27,7 @@ beforeEach(() => {
     close(): void {}
   };
   useStore.setState({ pairing: null });
+  vi.clearAllMocks();
 });
 
 describe("PairingPanel (slide-over)", () => {
@@ -36,6 +49,48 @@ describe("PairingPanel (slide-over)", () => {
     });
     render(<PairingPanel />);
     expect(screen.getByText(/linked & connected/i)).toBeInTheDocument();
+  });
+
+  it("can disconnect the linked WhatsApp account", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(disconnectWhatsappConnection).mockResolvedValue({
+      qr_available: true,
+      logged_in: false,
+      connected: true,
+      reachable: true,
+    });
+    act(() => {
+      useStore.setState({
+        pairing: {
+          qr_available: false,
+          logged_in: true,
+          connected: true,
+          reachable: true,
+        },
+      });
+    });
+    render(<PairingPanel />);
+
+    fireEvent.click(screen.getByRole("button", { name: /disconnect whatsapp/i }));
+
+    await waitFor(() => expect(disconnectWhatsappConnection).toHaveBeenCalledTimes(1));
+    expect(useStore.getState().pairing?.qr_available).toBe(true);
+  });
+
+  it("shows the disconnect action even when a linked WhatsApp account is offline", () => {
+    act(() => {
+      useStore.setState({
+        pairing: {
+          qr_available: false,
+          logged_in: true,
+          connected: false,
+          reachable: true,
+        },
+      });
+    });
+    render(<PairingPanel />);
+
+    expect(screen.getByRole("button", { name: /disconnect whatsapp/i })).toBeInTheDocument();
   });
 
   it("renders 'wabot unreachable' when pairing.reachable is false", () => {

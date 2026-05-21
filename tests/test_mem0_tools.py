@@ -162,7 +162,12 @@ def test_build_agent_instructions_omit_mem0_when_disabled() -> None:
     assert "search_mem0_memories" not in text
     assert "recall_contact_memory" in text
 
-    enabled = Settings(mem0_enabled=True, openrouter_api_key="sk-test", offline_mode=False)
+    enabled = Settings(
+        model_provider="openrouter",
+        mem0_enabled=True,
+        openrouter_api_key="sk-test",
+        offline_mode=False,
+    )
     text_on = build_agent_instructions(enabled, "")
     assert "Memory (mandatory" in text_on
     assert "search_mem0_memories" in text_on

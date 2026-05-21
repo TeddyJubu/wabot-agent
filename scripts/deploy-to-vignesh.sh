@@ -25,10 +25,11 @@ export PATH="$HOME/.local/bin:$HOME/.cargo/bin:/home/linuxbrew/.linuxbrew/bin:$P
 cd -- "$1"
 uv sync --all-extras
 mkdir -p "$1/data/codex" "$1/data/mem0" "$1/data/composio"
-sudo chown -R wabotagent:wabotagent "$1/data" 2>/dev/null || true
-# App root may be owned by the deploy user; ensure the service account can write caches.
-sudo chown wabotagent:wabotagent "$1" 2>/dev/null || true
+sudo chown -R root:root "$1" 2>/dev/null || true
+sudo chown -R wabotagent:wabotagent "$1/data" "$1/.uv-cache" "$1/.venv" 2>/dev/null || true
+sudo chown wabotagent:wabotagent "$1/.env" 2>/dev/null || true
+sudo chmod 700 "$1/data" 2>/dev/null || true
+sudo chmod 600 "$1/.env" "$1/data/runtime_overrides.json" 2>/dev/null || true
 sudo systemctl restart wabot-agent
 sudo systemctl status wabot-agent --no-pager
 REMOTE
-

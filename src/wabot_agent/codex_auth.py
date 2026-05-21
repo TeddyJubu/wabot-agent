@@ -126,6 +126,38 @@ def load_codex_credentials(settings: Settings) -> CodexCredentials | None:
     return _credentials_from_override(settings)
 
 
+def disconnect_codex_credentials(settings: Settings) -> dict[str, Any]:
+    """Remove the active ChatGPT/Codex auth material for this app instance.
+
+    A bootstrap token from `.env` cannot be edited safely from the dashboard, so
+    persist explicit `None` runtime overrides to mask it across restarts. A later
+    successful device-code login clears those mask overrides.
+    """
+    from .runtime_overrides import load_overrides, save_overrides
+
+    path = codex_auth_path(settings)
+    auth_file_removed = False
+    try:
+        path.unlink()
+        auth_file_removed = True
+    except FileNotFoundError:
+        pass
+
+    merged = load_overrides(settings.runtime_overrides_path)
+    merged["codex_access_token"] = None
+    merged["codex_account_id"] = None
+    save_overrides(settings.runtime_overrides_path, merged)
+
+    settings.codex_access_token = None
+    settings.codex_account_id = None
+
+    return {
+        "auth_file_removed": auth_file_removed,
+        "auth_path": str(path),
+        "token_override_masked": True,
+    }
+
+
 def auth_file_mtime(settings: Settings) -> float | None:
     path = codex_auth_path(settings)
     if not path.is_file():

@@ -337,7 +337,8 @@ Legacy: `https://your-host/?token=<operator-token>` once.
 ## Send policy
 
 ```dotenv
-WABOT_AGENT_SEND_POLICY=allowlist   # dry_run | allowlist | allow_all | owner
+WABOT_AGENT_SEND_POLICY=dry_run     # dry_run | owner | allowlist | allow_all
+WABOT_AGENT_OWNER_NUMBERS=+15551234567
 WABOT_AGENT_ALLOWED_RECIPIENTS=1234567890@lid
 ```
 
@@ -356,7 +357,11 @@ uv run python scripts/apply-production-hygiene.py
 2. **Configure:** `/opt/wabot-agent/.env` and `/opt/wabot/wabot.env`
 3. **Deploy:** `SSH_HOST=your-host APP_DIR=/opt/wabot-agent ./scripts/deploy-to-vignesh.sh`
 4. **HTTPS:** Caddy or Cloudflare → `127.0.0.1:8787` only (not wabot `:7777`)
-5. **Pairing:** `/login` → `/pair` → add JIDs to allowlist
+5. **Pairing:** `/login` → `/pair` → add owner numbers or JIDs before enabling live sends
+
+`deploy-to-vignesh.sh` rsyncs code into `/opt/wabot-agent`; the VPS directory is not a git
+checkout and deploys intentionally do not overwrite `.env` or `data/`. After deploy, verify
+`systemctl is-active wabot-agent wabot`, authenticated `/ready`, and the reported send policy.
 
 Optional: [Cloudflare Tunnel + Access](docs/superpowers/specs/2026-05-15-public-pairing-website-design.md) via `scripts/setup-cloudflared.sh`.
 

@@ -118,7 +118,8 @@ uv run python scripts/apply-production-hygiene.py
 ## Security checklist for recipients
 
 - Do **not** ship `.env`, `data/*.db`, `runtime_overrides.json` with secrets, or wabot `store.db`.
-- Start with `WABOT_AGENT_SEND_POLICY=allowlist` or `dry_run`, not `allow_all`.
+- Start with `WABOT_AGENT_SEND_POLICY=dry_run`; use `owner` for the single-VPS owner workflow
+  or `allowlist` for stricter installs, never `allow_all` by default.
 - Set `WABOT_AGENT_DASHBOARD_PASSWORD` or `WABOT_AGENT_OPERATOR_TOKEN` before exposing the dashboard.
 - Rotate `WABOT_INBOUND_TOKEN` if the tarball or logs may have leaked.
 
@@ -127,6 +128,10 @@ uv run python scripts/apply-production-hygiene.py
 **Tarball installs:** unpack a new version over `APP_DIR` (keep `.env` and `data/`), run `./scripts/install-from-release.sh`, restart the service.
 
 **Git installs:** `git pull && ./scripts/install-from-release.sh && sudo systemctl restart wabot-agent`
+
+For the `vignesh` rsync deploy, `/opt/wabot-agent` is not a git checkout. Treat `.env` and
+`data/runtime_overrides.json` as live server state, not files replaced by deploy. Verify `/ready`
+after every deploy and confirm the expected `send_policy`.
 
 ## Version
 

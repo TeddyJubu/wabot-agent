@@ -189,7 +189,7 @@ class Settings(BaseSettings):
     )
 
     send_policy: Literal["dry_run", "allowlist", "allow_all", "owner"] = Field(
-        default="allow_all",
+        default="dry_run",
         validation_alias=AliasChoices("WABOT_AGENT_SEND_POLICY", "VIGNESH_SEND_POLICY"),
     )
     # NoDecode disables pydantic-settings' JSON pre-pass on env values so the
@@ -621,6 +621,12 @@ class Settings(BaseSettings):
         default=4000,
         validation_alias=AliasChoices(
             "WABOT_AGENT_MEM0_PROMPT_MAX_CHARS", "VIGNESH_MEM0_PROMPT_MAX_CHARS"
+        ),
+    )
+    mem0_llm_provider: Literal["openrouter", "ollama", "ollama_cloud"] | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_MEM0_LLM_PROVIDER", "VIGNESH_MEM0_LLM_PROVIDER"
         ),
     )
     mem0_llm_model: str | None = Field(

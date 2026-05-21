@@ -70,7 +70,12 @@ from .runtime_overrides import (
 from .tools import _is_send_allowed
 from .typing_indicator import inbound_typing_indicator
 from .wabot import WabotClient, WabotError
-from .wabot_process import WabotRestartError, restart_wabot_daemon, wait_for_fresh_pairing
+from .wabot_process import (
+    WabotRestartError,
+    restart_wabot_daemon,
+    rotate_wabot_store_files,
+    wait_for_fresh_pairing,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -748,6 +753,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         hub.publish("pairing_changed", payload)
         return payload
 
+    @app.post("/api/whatsapp/pairing/disconnect", dependencies=[human_dependency])
+    async def whatsapp_pairing_disconnect() -> dict[str, Any]:
+        try:
+            backups = rotate_wabot_store_files(settings)
+            await restart_wabot_daemon(settings)
+        except (OSError, WabotRestartError) as exc:
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        pairing = await wait_for_fresh_pairing(wabot.pairing_qr)
+        payload = redact(_pairing_payload(pairing))
+        payload.update(
+            {
+                "disconnected": True,
+                "store_backups": [path.name for path in backups],
+            }
+        )
+        pairing_state["last"] = payload
+        hub.publish("pairing_changed", payload)
+        event_log.write(
+            "whatsapp_disconnected",
+            {"store_backups": [path.name for path in backups]},
+        )
+        return payload
+
     @app.post("/api/chat", response_model=ChatResponse, dependencies=[human_dependency])
     async def chat(payload: ChatRequest) -> ChatResponse:
         result = await run_agent(
@@ -1374,6 +1403,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         await cancel_device_login()
         return device_login_view(settings)
+
+    @app.post("/api/codex/login/disconnect", dependencies=[human_dependency])
+    async def codex_login_disconnect() -> dict[str, Any]:
+        from .codex_auth import disconnect_codex_credentials
+        from .codex_device_login import cancel_device_login, device_login_view
+
+        await cancel_device_login()
+        try:
+            result = disconnect_codex_credentials(settings)
+        except OSError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Could not remove Codex credentials: {exc}",
+            ) from exc
+
+        view = device_login_view(settings)
+        event_log.write(
+            "codex_disconnected",
+            {
+                "auth_file_removed": result["auth_file_removed"],
+                "token_override_masked": result["token_override_masked"],
+            },
+        )
+        return {**view, "disconnected": True, **result}
 
     @app.post("/api/settings/test/wabot", dependencies=[human_dependency])
     async def test_wabot() -> dict[str, Any]:

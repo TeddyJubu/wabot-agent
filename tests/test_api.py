@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 from wabot_agent.api import _qr_svg, create_app
 from wabot_agent.config import Settings
 from wabot_agent.memory import MemoryStore
+from wabot_agent.runtime_overrides import load_overrides, save_overrides
 
 
 def make_settings(tmp_path: Path) -> Settings:
@@ -97,6 +98,65 @@ def test_pairing_restart_returns_fresh_qr(tmp_path: Path, monkeypatch) -> None:
     assert resp.json()["qr_available"] is True
 
 
+def test_pairing_disconnect_requires_wabot_home(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("WABOT_AGENT_WABOT_HOME", raising=False)
+    monkeypatch.delenv("WABOT_AGENT_WABOT_RESTART_COMMAND", raising=False)
+    settings = make_settings(tmp_path).model_copy(
+        update={"wabot_home": None, "wabot_restart_command": None}
+    )
+    client = TestClient(create_app(settings))
+
+    resp = client.post("/api/whatsapp/pairing/disconnect")
+
+    assert resp.status_code == 503
+    assert "WABOT_AGENT_WABOT_HOME" in resp.json()["detail"]
+
+
+def test_pairing_disconnect_moves_store_and_returns_fresh_qr(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from wabot_agent.wabot import WabotPairingQR
+
+    wabot_home = tmp_path / "wabot"
+    wabot_home.mkdir()
+    (wabot_home / "store.db").write_text("linked-session", encoding="utf-8")
+    (wabot_home / "store.db-wal").write_text("wal", encoding="utf-8")
+    settings = make_settings(tmp_path).model_copy(update={"wabot_home": wabot_home})
+    client = TestClient(create_app(settings))
+
+    async def fake_restart(_settings) -> None:
+        return None
+
+    async def fake_pairing_qr():
+        return WabotPairingQR(
+            supported=True,
+            reachable=True,
+            logged_in=False,
+            connected=True,
+            qr="fresh-code",
+            event="code",
+        )
+
+    from wabot_agent import api
+
+    monkeypatch.setattr(api, "restart_wabot_daemon", fake_restart)
+
+    app = client.app
+    wabot = app.state.wabot
+    wabot.pairing_qr = fake_pairing_qr  # type: ignore[method-assign]
+
+    resp = client.post("/api/whatsapp/pairing/disconnect")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["disconnected"] is True
+    assert body["qr_available"] is True
+    assert not (wabot_home / "store.db").exists()
+    assert not (wabot_home / "store.db-wal").exists()
+    assert body["store_backups"]
+    assert list(wabot_home.glob("store.db.disconnected-*"))
+
+
 def test_pairing_endpoint_reports_missing_token(tmp_path: Path) -> None:
     client = TestClient(create_app(make_settings(tmp_path)))
 
@@ -107,6 +167,47 @@ def test_pairing_endpoint_reports_missing_token(tmp_path: Path) -> None:
     assert pairing.json()["supported"] is True
     assert pairing.json()["qr_available"] is False
     assert svg.status_code == 404
+
+
+def test_codex_disconnect_removes_auth_file_and_masks_bootstrap_token(
+    tmp_path: Path,
+) -> None:
+    from wabot_agent.codex_auth import load_codex_credentials
+
+    auth_path = tmp_path / "codex" / "auth.json"
+    auth_path.parent.mkdir()
+    auth_path.write_text(
+        '{"auth_mode":"chatgpt","tokens":{"access_token":"file-token"}}',
+        encoding="utf-8",
+    )
+    overrides_path = tmp_path / "runtime_overrides.json"
+    save_overrides(
+        overrides_path,
+        {"codex_access_token": "override-token", "codex_account_id": "acct-1"},
+    )
+    settings = make_settings(tmp_path).model_copy(
+        update={
+            "model_provider": "codex",
+            "codex_auth_path": auth_path,
+            "codex_access_token": "bootstrap-token",
+            "codex_account_id": "bootstrap-acct",
+            "runtime_overrides_path": overrides_path,
+        }
+    )
+    client = TestClient(create_app(settings))
+
+    resp = client.post("/api/codex/login/disconnect")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["logged_in"] is False
+    assert body["disconnected"] is True
+    assert body["auth_file_removed"] is True
+    assert not auth_path.exists()
+    overrides = load_overrides(overrides_path)
+    assert overrides["codex_access_token"] is None
+    assert overrides["codex_account_id"] is None
+    assert load_codex_credentials(settings) is None
 
 
 def test_qr_svg_renderer() -> None:

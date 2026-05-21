@@ -19,13 +19,15 @@ Agent conversation history stays **per chat thread** (group JID vs DM); only lon
 
 ## Enable (OSS, recommended for VPS)
 
-Uses local **Qdrant** on disk, your active chat provider for Mem0 **fact extraction**, and **FastEmbed** (local ONNX) for embeddings.
+Uses local **Qdrant** on disk, an explicit Chat Completions-compatible provider for Mem0
+**fact extraction**, and **FastEmbed** (local ONNX) for embeddings.
 
 | Chat provider | Mem0 LLM (extraction) | Mem0 embeddings |
 |---------------|----------------------|-----------------|
 | `ollama_cloud` | Ollama Cloud `/v1` + `OLLAMA_API_KEY` | FastEmbed (no API key) |
 | `ollama` (local) | Local Ollama `/v1` | FastEmbed |
 | `openrouter` | OpenRouter `/v1` | OpenRouter embeddings API |
+| `codex` | Disabled unless `WABOT_AGENT_MEM0_LLM_PROVIDER` is set | FastEmbed |
 
 Ollama Cloud does not expose `/v1/embeddings`, so embeddings are always local FastEmbed when using Ollama.
 
@@ -41,13 +43,19 @@ WABOT_AGENT_MEM0_PATH=./data/mem0_qdrant
 WABOT_AGENT_MEM0_TOP_K=5
 WABOT_AGENT_MEM0_AUTO_CAPTURE=true
 WABOT_AGENT_MEM0_INJECT_ON_RUN=true
+# Required when WABOT_AGENT_MODEL_PROVIDER=codex and you still want Mem0 extraction.
+# This prevents Mem0 from silently burning an unrelated OpenRouter key.
+# WABOT_AGENT_MEM0_LLM_PROVIDER=openrouter
+# WABOT_AGENT_MEM0_LLM_MODEL=openai/gpt-4.1-mini
 # FastEmbed model (default BAAI/bge-small-en-v1.5 when unset or text-embedding-3-small)
 # WABOT_AGENT_MEM0_EMBED_MODEL=BAAI/bge-small-en-v1.5
 ```
 
 Restart `wabot-agent`. Data persists under `WABOT_AGENT_MEM0_PATH`.
 
-**Note:** Mem0’s upstream OpenAI client prefers OpenRouter when `OPENROUTER_API_KEY` is set in the environment, even if chat uses Ollama. wabot-agent clears that variable while initializing Mem0 unless `WABOT_AGENT_MODEL_PROVIDER=openrouter`. Remove unused `OPENROUTER_*` from `.env` when you have fully migrated to Ollama.
+**Note:** Mem0’s upstream OpenAI client may prefer OpenRouter when `OPENROUTER_API_KEY`
+is set in the environment. wabot-agent clears that variable while initializing Mem0 unless
+the explicit Mem0 LLM provider is `openrouter`.
 
 ## Mem0 Cloud (optional)
 
@@ -66,5 +74,7 @@ MEM0_API_KEY=m0-...
 ## Notes
 
 - Disabled when `WABOT_AGENT_OFFLINE_MODE=true` or `WABOT_AGENT_MEM0_ENABLED=false`.
+- Under `WABOT_AGENT_MODEL_PROVIDER=codex`, disabled until `WABOT_AGENT_MEM0_LLM_PROVIDER`
+  is configured.
 - Do not store secrets; `looks_sensitive` blocks obvious credential patterns.
 - With `openrouter`, the embedding model must be supported on OpenRouter (default `text-embedding-3-small`). With Ollama providers, embeddings use FastEmbed and do not call OpenRouter.

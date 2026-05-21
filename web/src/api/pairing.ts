@@ -34,6 +34,18 @@ export async function requestNewPairingQr(): Promise<PairingState> {
   return body;
 }
 
+export async function disconnectWhatsappConnection(): Promise<PairingState> {
+  const res = await fetch("/api/whatsapp/pairing/disconnect", {
+    method: "POST",
+    credentials: "include",
+  });
+  const body = (await res.json().catch(() => ({}))) as PairingState & { detail?: string };
+  if (!res.ok) {
+    throw new Error(body.detail ?? `Could not disconnect WhatsApp (${res.status})`);
+  }
+  return body;
+}
+
 export interface PairingSubscription {
   close: () => void;
 }
