@@ -90,10 +90,26 @@ def test_build_agent_instructions_mention_composio_when_enabled() -> None:
     assert "COMPOSIO_MANAGE_CONNECTIONS" in text
     assert "Never hallucinate" in text
     assert "composio-gmail-calendar" in text
+    assert "verify the owner's availability" in text
+    assert "attendee's availability" in text
+
+
+def test_build_agent_instructions_include_basic_appointment_booking_workflow() -> None:
+    settings = Settings(
+        composio_enabled=False,
+        offline_mode=False,
+        _env_file=None,
+    )
+    text = build_agent_instructions(settings, "")
+    assert "Appointment booking" in text
+    assert "contact the attendee" in text
+    assert "only create a calendar" in text
 
 
 def test_build_composio_prompt_context_only_when_tools_loaded() -> None:
     assert build_composio_prompt_context(tools_loaded=False) == ""
     loaded = build_composio_prompt_context(tools_loaded=True)
     assert "COMPOSIO_SEARCH_TOOLS" in loaded
+    assert "appointment" in loaded
+    assert "booking" in loaded
     assert "never invent" in loaded.lower()

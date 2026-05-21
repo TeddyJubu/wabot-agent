@@ -56,6 +56,9 @@ Use this skill before changing WhatsApp state, sending messages, or handling inb
 - **Outreach follow-up:** after messaging someone for the owner, use `track_outbound_conversation`
   (or rely on auto-track on `send_whatsapp_text`). The owner gets a WhatsApp update when the
   target replies. Use `list_outbound_tasks` / `get_outbound_task_status` for status checks.
+- **Appointment booking:** when the owner asks you to book with someone, check or ask for the
+  owner's available windows, message the attendee with a few concrete options, track the
+  outbound conversation, and confirm only after the attendee replies with availability.
 - Never send credentials, one-time codes, tokens, cookies, or session data.
 - Keep outbound messages clear and human-readable; be concise but answer the question fully.
 - Respect the configured send policy. If a recipient is blocked, explain the operator action needed.
@@ -71,4 +74,3 @@ Use this skill before changing WhatsApp state, sending messages, or handling inb
 - `429`: rate limited; wait for the operator or retry later.
 - `503`: WhatsApp is not connected or linked; ask the operator to repair the device session.
 - Network timeout: check the VPS service and `wabot` daemon health.
-

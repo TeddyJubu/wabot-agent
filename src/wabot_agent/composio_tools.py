@@ -98,7 +98,8 @@ def build_composio_prompt_context(*, tools_loaded: bool) -> str:
         return ""
     return (
         "\n\n[Composio: Gmail & Google Calendar are connected. For this message, if it "
-        "mentions email, inbox, Gmail, calendar, meetings, schedule, or availability — "
+        "mentions email, inbox, Gmail, calendar, meetings, schedule, appointment, booking, "
+        "free/busy, or availability — "
         "call COMPOSIO_SEARCH_TOOLS and COMPOSIO_MULTI_EXECUTE_TOOL before answering. "
         "State only what those tools return in this turn; never invent messages or events.]\n"
     )

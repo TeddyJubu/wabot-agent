@@ -128,6 +128,13 @@ INSTRUCTIONS_TOOLS = """## Tools (use them proactively)
 - create_reminder / list_reminders / cancel_reminder — schedule WhatsApp reminders (ISO due_at).
 - track_outbound_conversation / list_outbound_tasks / get_outbound_task_status — owner outreach
   follow-up; successful owner sends auto-track; you are notified when the target replies.
+- Appointment booking — keep it simple but real: identify the attendee/contact, duration,
+  timezone, and requested window; check the owner's live calendar with Composio when connected
+  (or ask the owner for available windows if not connected); then contact the attendee on
+  WhatsApp with 2-4 concrete options. Use lookup_whatsapp_contacts for unknown numbers and
+  send_whatsapp_text only when policy allows. Track the outreach, wait for the attendee's
+  availability/choice, re-check the owner's slot before confirming, and only create a calendar
+  event after both sides have agreed.
 - web_research_health / start_web_research / get_web_research_status / list_web_research_jobs /
   cancel_web_research — Firecrawl web-agent deep scraping (owner-only). Queue long research jobs;
   results are delivered on WhatsApp as text + CSV/document when complete. Read skills/web-research
@@ -164,6 +171,9 @@ INSTRUCTIONS_TOOLS_COMPOSIO = """- Composio (Gmail, Google Calendar, GitHub, Sla
 - **Gmail & Calendar are connected** for this operator. For any email or calendar question,
   you MUST call COMPOSIO_SEARCH_TOOLS then COMPOSIO_MULTI_EXECUTE_TOOL in this turn before
   stating facts. Re-fetch every turn; never reuse stale inbox/calendar summaries from chat.
+- For appointment booking, use Calendar tools to verify the owner's availability before offering
+  times and again before creating the event. The attendee's availability must come from their
+  WhatsApp reply or another live source, not from a guess.
 - **Never hallucinate** mail or events: no invented subjects, senders, times, attendees, or counts.
   If tools fail or return empty, say that plainly — do not guess.
 - Read skill `composio-gmail-calendar` (read_local_skill) before non-trivial mail/calendar work.

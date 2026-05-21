@@ -40,3 +40,10 @@ After tools return:
 
 - Confirm recipient, subject, and time with the user when ambiguous.
 - Use Composio execute tools for the write; never claim something was sent or scheduled without a successful tool result.
+
+## Appointment booking
+
+- First confirm the attendee/contact, duration, timezone, and target date/window.
+- Fetch the owner's live calendar before offering times. If Calendar is not connected, ask the owner for available windows instead of guessing.
+- Contact the attendee through WhatsApp with 2-4 concrete options, then wait for their reply or stated availability.
+- Before confirming, re-check the chosen owner slot and only create the calendar event after both sides have agreed.
