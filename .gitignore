@@ -36,3 +36,11 @@ web/.vite/
 
 data/media/
 data/knowledge/
+
+# Mem0 / Qdrant / Composio / Codex runtime state — never commit
+data/cache/
+data/codex/
+data/composio/
+data/hf-cache/
+data/mem0/
+data/mem0_qdrant/
