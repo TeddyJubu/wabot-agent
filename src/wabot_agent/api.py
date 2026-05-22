@@ -8,7 +8,7 @@ import logging
 import secrets
 import shutil
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
@@ -43,6 +43,13 @@ from .auto_reply import (
     deliver_auto_reply,
     deliver_inbound_error_reply,
     inbound_session_id,
+)
+from .codex_auth import disconnect_codex_credentials
+from .codex_device_login import (
+    cancel_device_login,
+    device_login_view,
+    poll_device_login,
+    start_device_login,
 )
 from .config import Settings, get_settings
 from .context_management import maybe_prune_audit_tables
@@ -113,6 +120,22 @@ class InboundPayload(BaseModel):
     media_mime: str | None = None
     media_filename: str | None = None
     has_media: bool = False
+
+    def to_inbound_message(self) -> InboundMessage:
+        """Convert the wire payload into the internal ``InboundMessage`` shape."""
+        return InboundMessage(
+            id=self.id,
+            sender=self.from_,
+            chat=self.chat,
+            text=self.text,
+            timestamp=self.timestamp,
+            push_name=self.push_name,
+            is_group=self.is_group,
+            media_kind=self.media_kind,
+            media_mime=self.media_mime,
+            media_filename=self.media_filename,
+            has_media=self.has_media,
+        )
 
 
 class ReceiptPayload(BaseModel):
@@ -621,6 +644,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     resolve_human = resolve_human_factory(settings)
     human_dependency = Depends(verify_human)
 
+    async def _verify_inbound_auth_dep(
+        authorization: str | None = Header(default=None),
+    ) -> None:
+        """FastAPI dependency wrapper for ``_verify_inbound_auth``.
+
+        Centralising this on every ``/whatsapp/*`` route means the WABOT_INBOUND_TOKEN
+        check happens consistently before any handler body runs (CLAUDE.md / MASTER §3).
+        """
+        _verify_inbound_auth(settings, authorization)
+
+    inbound_auth_dependency = Depends(_verify_inbound_auth_dep)
+
     def _safe_next_path(next_path: str) -> str:
         if next_path.startswith("/") and not next_path.startswith("//"):
             return next_path
@@ -976,26 +1011,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "auto_reply": auto,
         }
 
-    @app.post("/whatsapp/inbound")
+    @app.post("/whatsapp/inbound", dependencies=[inbound_auth_dependency])
     async def whatsapp_inbound(
         payload: InboundPayload,
         request: Request,
-        authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
-        _verify_inbound_auth(settings, authorization)
-        inbound = InboundMessage(
-            id=payload.id,
-            sender=payload.from_,
-            chat=payload.chat,
-            text=payload.text,
-            timestamp=payload.timestamp,
-            push_name=payload.push_name,
-            is_group=payload.is_group,
-            media_kind=payload.media_kind,
-            media_mime=payload.media_mime,
-            media_filename=payload.media_filename,
-            has_media=payload.has_media,
-        )
+        inbound = payload.to_inbound_message()
         session_key = inbound_session_id(inbound)
         lock = await _inbound_session_lock(session_key)
         if lock.locked():
@@ -1006,12 +1027,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         async with lock:
             return await _process_whatsapp_inbound(inbound, request)
 
-    @app.post("/whatsapp/receipt")
-    async def whatsapp_receipt(
-        payload: ReceiptPayload,
-        authorization: str | None = Header(default=None),
-    ) -> dict[str, Any]:
-        _verify_inbound_auth(settings, authorization)
+    @app.post("/whatsapp/receipt", dependencies=[inbound_auth_dependency])
+    async def whatsapp_receipt(payload: ReceiptPayload) -> dict[str, Any]:
         body = payload.model_dump()
         hub.publish("whatsapp_receipt", body)
         event_log.write(
@@ -1024,12 +1041,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return {"accepted": True}
 
-    @app.post("/whatsapp/presence")
-    async def whatsapp_presence(
-        payload: PresencePayload,
-        authorization: str | None = Header(default=None),
-    ) -> dict[str, Any]:
-        _verify_inbound_auth(settings, authorization)
+    @app.post("/whatsapp/presence", dependencies=[inbound_auth_dependency])
+    async def whatsapp_presence(payload: PresencePayload) -> dict[str, Any]:
         body = payload.model_dump()
         hub.publish("whatsapp_presence", body)
         event_log.write(
@@ -1038,12 +1051,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return {"accepted": True}
 
-    @app.post("/whatsapp/history-sync")
+    @app.post("/whatsapp/history-sync", dependencies=[inbound_auth_dependency])
     async def whatsapp_history_sync(
         payload: HistorySyncSummaryPayload,
-        authorization: str | None = Header(default=None),
     ) -> dict[str, Any]:
-        _verify_inbound_auth(settings, authorization)
         body = payload.model_dump()
         hub.publish("whatsapp_history_sync", body)
         event_log.write(
@@ -1058,29 +1069,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return {"accepted": True}
 
-    @app.post("/whatsapp/history")
-    async def whatsapp_history(
-        payload: HistoryBatchPayload,
-        authorization: str | None = Header(default=None),
-    ) -> dict[str, Any]:
+    @app.post("/whatsapp/history", dependencies=[inbound_auth_dependency])
+    async def whatsapp_history(payload: HistoryBatchPayload) -> dict[str, Any]:
         """Backfill inbound_messages from wabot history sync (no agent auto-reply)."""
-        _verify_inbound_auth(settings, authorization)
-        inbounds = [
-            InboundMessage(
-                id=msg.id,
-                sender=msg.from_,
-                chat=msg.chat,
-                text=msg.text,
-                timestamp=msg.timestamp,
-                push_name=msg.push_name,
-                is_group=msg.is_group,
-                media_kind=msg.media_kind,
-                media_mime=msg.media_mime,
-                media_filename=msg.media_filename,
-                has_media=msg.has_media,
-            )
-            for msg in payload.messages
-        ]
+        inbounds = [msg.to_inbound_message() for msg in payload.messages]
         result = memory.bulk_record_inbound(inbounds)
         hub.publish(
             "whatsapp_history_batch",
@@ -1419,31 +1411,22 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/codex/login", dependencies=[human_dependency])
     async def codex_login_status() -> dict[str, Any]:
-        from .codex_device_login import device_login_view, poll_device_login
-
         await poll_device_login(settings)
         return device_login_view(settings)
 
     @app.post("/api/codex/login/device", dependencies=[human_dependency])
     async def codex_login_device_start() -> dict[str, Any]:
-        from .codex_device_login import device_login_view, poll_device_login, start_device_login
-
         await start_device_login(settings)
         await poll_device_login(settings, wait_seconds=8)
         return device_login_view(settings)
 
     @app.post("/api/codex/login/device/cancel", dependencies=[human_dependency])
     async def codex_login_device_cancel() -> dict[str, Any]:
-        from .codex_device_login import cancel_device_login, device_login_view
-
         await cancel_device_login()
         return device_login_view(settings)
 
     @app.post("/api/codex/login/disconnect", dependencies=[human_dependency])
     async def codex_login_disconnect() -> dict[str, Any]:
-        from .codex_auth import disconnect_codex_credentials
-        from .codex_device_login import cancel_device_login, device_login_view
-
         await cancel_device_login()
         try:
             result = disconnect_codex_credentials(settings)
@@ -1480,24 +1463,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/api/whatsapp/groups", dependencies=[human_dependency])
     async def list_whatsapp_groups_api() -> dict[str, Any]:
-        try:
-            return redact(await wabot.list_groups())
-        except WabotError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return await _wabot_call(wabot.list_groups())
 
     @app.post("/api/whatsapp/groups", dependencies=[human_dependency])
     async def create_whatsapp_group_api(body: GroupCreateRequest) -> dict[str, Any]:
-        try:
-            return redact(await wabot.create_group(body.name, body.participants))
-        except WabotError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return await _wabot_call(wabot.create_group(body.name, body.participants))
 
     @app.get("/api/whatsapp/groups/{group_jid}", dependencies=[human_dependency])
     async def get_whatsapp_group_api(group_jid: str) -> dict[str, Any]:
-        try:
-            return redact(await wabot.get_group(group_jid))
-        except WabotError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return await _wabot_call(wabot.get_group(group_jid))
 
     @app.patch("/api/whatsapp/groups/{group_jid}", dependencies=[human_dependency])
     async def update_whatsapp_group_api(
@@ -1513,18 +1487,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 status_code=400,
                 detail="provide at least one of name, topic, announce, locked",
             )
-        try:
-            return redact(
-                await wabot.update_group(
-                    group_jid,
-                    name=body.name,
-                    topic=body.topic,
-                    announce=body.announce,
-                    locked=body.locked,
-                )
+        return await _wabot_call(
+            wabot.update_group(
+                group_jid,
+                name=body.name,
+                topic=body.topic,
+                announce=body.announce,
+                locked=body.locked,
             )
-        except WabotError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        )
 
     @app.post(
         "/api/whatsapp/groups/{group_jid}/participants",
@@ -1533,21 +1504,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def update_whatsapp_group_participants_api(
         group_jid: str, body: GroupParticipantsRequest
     ) -> dict[str, Any]:
-        try:
-            return redact(
-                await wabot.update_group_participants(
-                    group_jid, body.participants, action=body.action
-                )
+        return await _wabot_call(
+            wabot.update_group_participants(
+                group_jid, body.participants, action=body.action
             )
-        except WabotError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        )
 
     @app.post("/api/whatsapp/groups/{group_jid}/leave", dependencies=[human_dependency])
     async def leave_whatsapp_group_api(group_jid: str) -> dict[str, Any]:
-        try:
-            return redact(await wabot.leave_group(group_jid))
-        except WabotError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return await _wabot_call(wabot.leave_group(group_jid))
 
     @app.post(
         "/api/whatsapp/groups/{group_jid}/picture",
@@ -1564,9 +1529,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             if not data:
                 raise HTTPException(status_code=400, detail="empty file")
             tmp.write_bytes(data)
-            return redact(await wabot.set_group_picture(group_jid, str(tmp)))
-        except WabotError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+            return await _wabot_call(wabot.set_group_picture(group_jid, str(tmp)))
         finally:
             tmp.unlink(missing_ok=True)
 
@@ -1575,10 +1538,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         dependencies=[human_dependency],
     )
     async def remove_whatsapp_group_picture_api(group_jid: str) -> dict[str, Any]:
-        try:
-            return redact(await wabot.remove_group_picture(group_jid))
-        except WabotError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return await _wabot_call(wabot.remove_group_picture(group_jid))
 
     @app.post(
         "/api/whatsapp/groups/{group_jid}/invite",
@@ -1587,17 +1547,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def get_whatsapp_group_invite_api(
         group_jid: str, body: GroupInviteRequest
     ) -> dict[str, Any]:
-        try:
-            return redact(await wabot.get_group_invite(group_jid, reset=body.reset))
-        except WabotError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return await _wabot_call(wabot.get_group_invite(group_jid, reset=body.reset))
 
     @app.post("/api/whatsapp/groups/join", dependencies=[human_dependency])
     async def join_whatsapp_group_api(body: GroupJoinRequest) -> dict[str, Any]:
-        try:
-            return redact(await wabot.join_group(body.invite_link))
-        except WabotError as exc:
-            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        return await _wabot_call(wabot.join_group(body.invite_link))
 
     return app
 
@@ -1889,6 +1843,20 @@ def _qr_svg(payload: str) -> bytes:
     out = io.BytesIO()
     image.save(out)
     return out.getvalue()
+
+
+async def _wabot_call(coro: Awaitable[Any]) -> Any:
+    """Run a ``wabot.*`` coroutine, redact the response, and map ``WabotError`` to HTTP 502.
+
+    Hand-rolled 5-line try/except blocks for every group/admin handler are easy to
+    drift over time (different status codes, missing redact, swallowed errors).
+    Funnelling through this single helper keeps the 502 mapping uniform and the
+    redaction unmissable.
+    """
+    try:
+        return redact(await coro)
+    except WabotError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
 def _verify_inbound_auth(settings: Settings, authorization: str | None) -> None:
