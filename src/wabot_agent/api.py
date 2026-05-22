@@ -868,7 +868,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         inbound: InboundMessage,
         request: Request,
     ) -> dict[str, Any]:
-        memory.record_inbound(inbound)
+        # SAFETY: claim the dedup id BEFORE persisting the message body so a
+        # replayed webhook with the same message_id but a mutated text cannot
+        # overwrite the stored body via record_inbound's INSERT ... ON CONFLICT
+        # DO UPDATE path. See MASTER-architecture-debt-testing.md (Part I §3).
         if not is_owner_inbound(settings, inbound):
             await _handle_outbound_reply(
                 inbound,
@@ -881,6 +884,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not (inbound.text or "").strip() and not inbound.has_media:
             if not memory.claim_message(inbound.id, inbound.sender):
                 return {"accepted": True, "duplicate": True, "message_id": inbound.id}
+            memory.record_inbound(inbound)
             memory.complete_message(inbound.id, "skipped-empty")
             return {
                 "accepted": True,
@@ -890,6 +894,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             }
         if not memory.claim_message(inbound.id, inbound.sender):
             return {"accepted": True, "duplicate": True, "message_id": inbound.id}
+        memory.record_inbound(inbound)
         event_log.write(
             "inbound_message",
             {"message_id": inbound.id, "sender": inbound.sender, "path": str(request.url.path)},
