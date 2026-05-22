@@ -431,6 +431,81 @@ async def _run_codex_lightweight_reply(
     return ""
 
 
+def _codex_max_attempts(settings: Settings) -> int:
+    """Number of codex run attempts (1 for non-codex providers)."""
+    return _CODEX_EMPTY_OUTPUT_MAX_ATTEMPTS if settings.model_provider == "codex" else 1
+
+
+def _should_retry_codex_session_error(
+    exc: Exception, attempt: int, max_attempts: int, settings: Settings
+) -> bool:
+    """True when the codex retry loop should swallow ``exc`` and try again.
+
+    Both ``run_agent`` and ``run_agent_streamed`` use the same predicate so a
+    future change to "what counts as recoverable" only needs one edit.
+    """
+    return (
+        attempt < max_attempts - 1
+        and settings.model_provider == "codex"
+        and is_recoverable_codex_session_error(exc)
+    )
+
+
+def _log_codex_empty_attempt(
+    attempt: int, max_attempts: int, session_key: str, *, streamed: bool = False
+) -> None:
+    """One-liner used by both run paths to log a codex empty-output retry."""
+    label = "Codex streamed run" if streamed else "Codex run"
+    logger.warning(
+        "%s returned empty output (attempt %s/%s, session=%s)",
+        label,
+        attempt + 1,
+        max_attempts,
+        session_key,
+    )
+
+
+async def _finalize_turn_state(
+    *,
+    settings: Settings,
+    memory: MemoryStore,
+    session_key: str,
+    run_id: str,
+    prompt: str,
+    final_output: str,
+    person_memory_id: str | None,
+    inbound: InboundMessage | None,
+) -> None:
+    """Post-run bookkeeping shared by ``run_agent`` and ``run_agent_streamed``.
+
+    Runs the cleanup + audit sequence in this fixed order:
+      1. ``prune_session_storage`` — agent SDK session table.
+      2. ``maybe_prune_codex_session_storage`` — codex per-session sqlite.
+      3. ``maybe_prune_audit_tables`` — runs / tool_events / session_summaries.
+      4. ``memory.record_run`` — persist the run row.
+      5. Best-effort ``capture_turn_mem0`` — never blocks the turn on mem0 errors.
+
+    Callers do their own ``event_log.write`` afterwards (the streamed and
+    non-streamed paths emit different event shapes intentionally) and their
+    own return / yield. This helper does not write to ``event_log``.
+    """
+    await prune_session_storage(settings, session_key, memory)
+    maybe_prune_codex_session_storage(settings, session_key)
+    maybe_prune_audit_tables(memory, settings)
+    memory.record_run(run_id, inbound.sender if inbound else None, prompt, final_output)
+    if mem0_enabled(settings):
+        try:
+            await capture_turn_mem0(
+                settings,
+                user_id=person_memory_id,
+                user_text=prompt,
+                assistant_text=final_output,
+                run_id=run_id,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("mem0 capture failed: %s", exc)
+
+
 async def run_agent(
     prompt: str,
     settings: Settings,
@@ -479,20 +554,12 @@ async def run_agent(
     result: Any | None = None
     final_output = ""
     partial_error: Exception | None = None
-    max_attempts = (
-        _CODEX_EMPTY_OUTPUT_MAX_ATTEMPTS
-        if settings.model_provider == "codex"
-        else 1
-    )
+    max_attempts = _codex_max_attempts(settings)
     for attempt in range(max_attempts):
         try:
             result = await _execute_run()
         except Exception as exc:
-            if (
-                attempt < max_attempts - 1
-                and settings.model_provider == "codex"
-                and is_recoverable_codex_session_error(exc)
-            ):
+            if _should_retry_codex_session_error(exc, attempt, max_attempts, settings):
                 clear_agent_session(settings.db_path, session_key)
                 continue
             if context.sent_destinations:
@@ -510,12 +577,7 @@ async def run_agent(
         if final_output.strip():
             break
         if settings.model_provider == "codex":
-            logger.warning(
-                "Codex run returned empty output (attempt %s/%s, session=%s)",
-                attempt + 1,
-                max_attempts,
-                session_key,
-            )
+            _log_codex_empty_attempt(attempt, max_attempts, session_key)
             clear_agent_session(settings.db_path, session_key)
             continue
         break
@@ -534,21 +596,16 @@ async def run_agent(
             )
             final_output = fallback
 
-    await prune_session_storage(settings, session_key, memory)
-    maybe_prune_codex_session_storage(settings, session_key)
-    maybe_prune_audit_tables(memory, settings)
-    memory.record_run(run_id, inbound.sender if inbound else None, prompt, final_output)
-    if mem0_enabled(settings):
-        try:
-            await capture_turn_mem0(
-                settings,
-                user_id=person_memory_id,
-                user_text=prompt,
-                assistant_text=final_output,
-                run_id=run_id,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("mem0 capture failed: %s", exc)
+    await _finalize_turn_state(
+        settings=settings,
+        memory=memory,
+        session_key=session_key,
+        run_id=run_id,
+        prompt=prompt,
+        final_output=final_output,
+        person_memory_id=person_memory_id,
+        inbound=inbound,
+    )
     event_payload = {
         "run_id": run_id,
         "session_id": session_key,
@@ -618,11 +675,7 @@ async def run_agent_streamed(
 
     final_output = ""
     errored: Exception | None = None
-    max_attempts = (
-        _CODEX_EMPTY_OUTPUT_MAX_ATTEMPTS
-        if settings.model_provider == "codex"
-        else 1
-    )
+    max_attempts = _codex_max_attempts(settings)
 
     for attempt in range(max_attempts):
         final_output = ""
@@ -689,10 +742,8 @@ async def run_agent_streamed(
         maybe_prune_codex_session_storage(settings, session_key)
 
         if errored is not None:
-            if (
-                attempt < max_attempts - 1
-                and settings.model_provider == "codex"
-                and is_recoverable_codex_session_error(errored)
+            if _should_retry_codex_session_error(
+                errored, attempt, max_attempts, settings
             ):
                 clear_agent_session(settings.db_path, session_key)
                 continue
@@ -701,12 +752,7 @@ async def run_agent_streamed(
         if final_output.strip():
             break
         if settings.model_provider == "codex":
-            logger.warning(
-                "Codex streamed run returned empty output (attempt %s/%s, session=%s)",
-                attempt + 1,
-                max_attempts,
-                session_key,
-            )
+            _log_codex_empty_attempt(attempt, max_attempts, session_key, streamed=True)
             clear_agent_session(settings.db_path, session_key)
             if attempt + 1 >= max_attempts:
                 fallback = await _run_codex_lightweight_reply(
@@ -727,22 +773,16 @@ async def run_agent_streamed(
         yield {"type": "error", "message": message}
         return
 
-    await prune_session_storage(settings, session_key, memory)
-    maybe_prune_codex_session_storage(settings, session_key)
-    maybe_prune_audit_tables(memory, settings)
-
-    memory.record_run(run_id, inbound.sender if inbound else None, prompt, final_output)
-    if mem0_enabled(settings):
-        try:
-            await capture_turn_mem0(
-                settings,
-                user_id=person_memory_id,
-                user_text=prompt,
-                assistant_text=final_output,
-                run_id=run_id,
-            )
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("mem0 capture failed: %s", exc)
+    await _finalize_turn_state(
+        settings=settings,
+        memory=memory,
+        session_key=session_key,
+        run_id=run_id,
+        prompt=prompt,
+        final_output=final_output,
+        person_memory_id=person_memory_id,
+        inbound=inbound,
+    )
     event_log.write(
         "agent_run_complete",
         {
