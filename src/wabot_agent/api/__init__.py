@@ -6,13 +6,11 @@ import io
 import json
 import logging
 import secrets
-import shutil
 import time
-from collections.abc import AsyncIterator, Awaitable
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
-from urllib.parse import urlparse
 
 import qrcode
 import uvicorn
@@ -26,11 +24,10 @@ from fastapi.responses import (
     StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
 from qrcode.image.svg import SvgFillImage
 
-from .agent import run_agent, run_agent_streamed
-from .auth import (
+from ..agent import run_agent, run_agent_streamed
+from ..auth import (
     AuthIdentity,
     maybe_mint_operator_cookie,
     mint_operator_session_cookie,
@@ -39,22 +36,22 @@ from .auth import (
     resolve_human_factory,
     verify_human_factory,
 )
-from .auto_reply import (
+from ..auto_reply import (
     deliver_auto_reply,
     deliver_inbound_error_reply,
     inbound_session_id,
 )
-from .codex_auth import disconnect_codex_credentials
-from .codex_device_login import (
+from ..codex_auth import disconnect_codex_credentials
+from ..codex_device_login import (
     cancel_device_login,
     device_login_view,
     poll_device_login,
     start_device_login,
 )
-from .config import Settings, get_settings
-from .context_management import maybe_prune_audit_tables
-from .events import EventHub, EventLog
-from .knowledge_store import (
+from ..config import Settings, get_settings
+from ..context_management import maybe_prune_audit_tables
+from ..events import EventHub, EventLog
+from ..knowledge_store import (
     ensure_knowledge_files,
     list_knowledge_docs,
     read_global_memory_raw,
@@ -62,177 +59,57 @@ from .knowledge_store import (
     save_global_memory,
     save_instructions,
 )
-from .llm_provider import active_model_id, llm_provider_label
-from .memory import InboundMessage, MemoryStore
-from .recipients import is_owner_inbound
-from .redaction import redact
-from .runtime_overrides import (
+from ..llm_provider import active_model_id
+from ..memory import InboundMessage, MemoryStore
+from ..recipients import is_owner_inbound
+from ..redaction import redact
+from ..runtime_overrides import (
     MUTABLE_FIELDS,
     SECRET_FIELDS,
     apply_overrides,
     load_overrides,
-    mask_secret,
     save_overrides,
 )
-from .tools import _is_send_allowed
-from .typing_indicator import inbound_typing_indicator
-from .wabot import WabotClient, WabotError
-from .wabot_process import (
+from ..tools import _is_send_allowed
+from ..typing_indicator import inbound_typing_indicator
+from ..wabot import WabotClient, WabotError
+from ..wabot_process import (
     WabotRestartError,
     restart_wabot_daemon,
     rotate_wabot_store_files,
     wait_for_fresh_pairing,
 )
+from .dependencies import (
+    _LOOPBACK_HOSTS,  # noqa: F401  (re-export — used by external callers and tests)
+    _require_loopback_url,
+    _require_safe_ollama_cloud_url,
+    _require_safe_ollama_local_url,
+    _require_safe_openrouter_url,
+    _safe_next_path,
+    _verify_inbound_auth,
+    _wabot_call,
+)
+from .llm_tests import _settings_view, _test_llm_endpoint, _test_openrouter_endpoint
+from .schemas import (
+    ChatRequest,
+    ChatResponse,
+    GroupCreateRequest,
+    GroupInviteRequest,
+    GroupJoinRequest,
+    GroupParticipantsRequest,
+    GroupUpdateRequest,
+    HistoryBatchPayload,
+    HistorySyncSummaryPayload,
+    InboundPayload,
+    KnowledgeContentBody,
+    MemoryFactBody,
+    OpenRouterTestRequest,
+    PresencePayload,
+    ReceiptPayload,
+    SettingsPatch,
+)
 
 logger = logging.getLogger(__name__)
-
-
-class ChatRequest(BaseModel):
-    message: str = Field(min_length=1)
-    session_id: str | None = None
-
-
-class ChatResponse(BaseModel):
-    run_id: str
-    session_id: str
-    output: str
-    live_model: bool
-
-
-class KnowledgeContentBody(BaseModel):
-    content: str = ""
-
-
-class MemoryFactBody(BaseModel):
-    key: str = Field(min_length=1)
-    value: str = Field(min_length=1)
-
-
-class InboundPayload(BaseModel):
-    id: str
-    timestamp: str | None = None
-    from_: str = Field(alias="from")
-    chat: str | None = None
-    is_group: bool = False
-    push_name: str | None = None
-    text: str = ""
-    media_kind: str | None = None
-    media_mime: str | None = None
-    media_filename: str | None = None
-    has_media: bool = False
-
-    def to_inbound_message(self) -> InboundMessage:
-        """Convert the wire payload into the internal ``InboundMessage`` shape."""
-        return InboundMessage(
-            id=self.id,
-            sender=self.from_,
-            chat=self.chat,
-            text=self.text,
-            timestamp=self.timestamp,
-            push_name=self.push_name,
-            is_group=self.is_group,
-            media_kind=self.media_kind,
-            media_mime=self.media_mime,
-            media_filename=self.media_filename,
-            has_media=self.has_media,
-        )
-
-
-class ReceiptPayload(BaseModel):
-    type: str = "receipt"
-    chat: str
-    message_ids: list[str] = Field(default_factory=list)
-    receipt_type: str
-    timestamp: str | None = None
-    sender: str | None = None
-    message_sender: str | None = None
-
-
-class PresencePayload(BaseModel):
-    type: str = "chat_presence"
-    chat: str
-    sender: str
-    state: str
-    media: str | None = None
-
-
-class GroupCreateRequest(BaseModel):
-    name: str = Field(min_length=1)
-    participants: list[str] = Field(default_factory=list)
-
-
-class GroupUpdateRequest(BaseModel):
-    name: str | None = None
-    topic: str | None = None
-    announce: bool | None = None
-    locked: bool | None = None
-
-
-class GroupParticipantsRequest(BaseModel):
-    participants: list[str] = Field(min_length=1)
-    action: str = "add"
-
-
-class GroupInviteRequest(BaseModel):
-    reset: bool = False
-
-
-class GroupJoinRequest(BaseModel):
-    invite_link: str = Field(min_length=1)
-
-
-class HistorySyncSummaryPayload(BaseModel):
-    type: str = "history_sync"
-    sync_type: str
-    conversation_count: int = 0
-    message_count: int = 0
-    chunk_order: int | None = None
-    progress: int | None = None
-
-
-class HistoryBatchPayload(BaseModel):
-    type: str = "history_batch"
-    sync_type: str
-    messages: list[InboundPayload] = Field(default_factory=list)
-    message_count: int = 0
-    chunk_order: int | None = None
-    progress: int | None = None
-
-
-class SettingsPatch(BaseModel):
-    """Partial update to runtime-mutable settings.
-
-    Any field omitted is unchanged. To clear a secret, pass an empty string.
-    `confirm_allow_all` must be true to set send_policy='allow_all'.
-    """
-
-    model_provider: str | None = None
-    codex_model: str | None = None
-    codex_reasoning_effort: str | None = None
-    codex_base_url: str | None = None
-    codex_access_token: str | None = None
-    codex_account_id: str | None = None
-    openrouter_api_key: str | None = None
-    openrouter_base_url: str | None = None
-    openrouter_model: str | None = None
-    ollama_model: str | None = None
-    ollama_base_url: str | None = None
-    ollama_api_key: str | None = None
-    ollama_cloud_base_url: str | None = None
-    wabot_endpoint: str | None = None
-    wabot_token: str | None = None
-    send_policy: str | None = None
-    allowed_recipients: list[str] | None = None
-    owner_numbers: list[str] | None = None
-    auto_reply_enabled: bool | None = None
-    max_agent_turns: int | None = None
-    confirm_allow_all: bool = False
-
-
-class OpenRouterTestRequest(BaseModel):
-    api_key: str | None = None
-    base_url: str | None = None
-    model: str | None = None
 
 
 def _reminder_target_jid(reminder: dict[str, Any]) -> str:
@@ -517,7 +394,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 return
 
     async def _run_web_research_job(job: dict[str, Any]) -> None:
-        from .web_research import execute_web_research_job
+        from ..web_research import execute_web_research_job
 
         try:
             await execute_web_research_job(
@@ -559,7 +436,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             asyncio.create_task(_run_web_research_job(job))
 
     async def _scheduler_loop() -> None:
-        from .memory import now_iso
+        from ..memory import now_iso
 
         interval = max(5.0, float(settings.reminder_poll_interval_sec))
         while True:
@@ -629,7 +506,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.event_hub = hub
     app.state.wabot = wabot
 
-    static_dir = Path(__file__).resolve().parents[2] / "static"
+    # NOTE: api/__init__.py is one level deeper than the old api.py was,
+    # so the walk to the project root needs parents[3] (api → wabot_agent → src → root).
+    static_dir = Path(__file__).resolve().parents[3] / "static"
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
@@ -655,11 +534,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         _verify_inbound_auth(settings, authorization)
 
     inbound_auth_dependency = Depends(_verify_inbound_auth_dep)
-
-    def _safe_next_path(next_path: str) -> str:
-        if next_path.startswith("/") and not next_path.startswith("//"):
-            return next_path
-        return "/"
 
     @app.get("/login", include_in_schema=False, response_model=None)
     async def login_page(
@@ -1101,7 +975,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.put("/api/memory/agent-notes", dependencies=[human_dependency])
     async def upsert_agent_note(body: MemoryFactBody) -> dict[str, Any]:
-        from .instructions_cache import invalidate_instructions_cache
+        from ..instructions_cache import invalidate_instructions_cache
 
         result = memory.remember_agent_note(body.key, body.value)
         invalidate_instructions_cache()
@@ -1109,7 +983,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.delete("/api/memory/agent-notes/{key}", dependencies=[human_dependency])
     async def delete_agent_note_route(key: str) -> dict[str, Any]:
-        from .instructions_cache import invalidate_instructions_cache
+        from ..instructions_cache import invalidate_instructions_cache
 
         result = memory.delete_agent_note(key)
         invalidate_instructions_cache()
@@ -1353,7 +1227,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         if "codex_base_url" in proposed:
             try:
-                from .codex_auth import require_safe_codex_url
+                from ..codex_auth import require_safe_codex_url
 
                 require_safe_codex_url(proposed["codex_base_url"])
             except ValueError as exc:
@@ -1556,261 +1430,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     return app
 
 
-_LOOPBACK_HOSTS: frozenset[str] = frozenset({"localhost", "127.0.0.1", "::1"})
+# URL guards now live in api/dependencies.py; re-exported above.
 
 
-def _require_loopback_url(field: str, url: str) -> None:
-    """Reject URLs whose host is not loopback. Defends the wabot bearer token
-    from being redirected to an arbitrary host by an operator-token holder."""
-    parsed = urlparse(url)
-    host = (parsed.hostname or "").lower().strip("[]")
-    if host not in _LOOPBACK_HOSTS:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"{field} must point at loopback (localhost, 127.0.0.1, or ::1); "
-                f"got '{host or url}'."
-            ),
-        )
-
-
-def _require_safe_ollama_local_url(field: str, url: str) -> None:
-    """Ollama local must be loopback — the daemon holds cloud credentials."""
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"{field} must use http or https; got scheme '{parsed.scheme}'.",
-        )
-    host = (parsed.hostname or "").lower().strip("[]")
-    if host not in _LOOPBACK_HOSTS:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"{field} must point at the local Ollama daemon on loopback; "
-                f"got '{host or url}'."
-            ),
-        )
-
-
-def _require_safe_ollama_cloud_url(field: str, url: str) -> None:
-    parsed = urlparse(url)
-    if parsed.scheme != "https":
-        raise HTTPException(
-            status_code=400,
-            detail=f"{field} must use https; got scheme '{parsed.scheme}'.",
-        )
-    host = (parsed.hostname or "").lower().strip("[]")
-    if host not in ("ollama.com", "www.ollama.com"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"{field} must target ollama.com; got '{host or url}'.",
-        )
-
-
-def _require_safe_openrouter_url(field: str, url: str) -> None:
-    """Allow https://anywhere or http://loopback. Plain HTTP to a remote host
-    would leak the API key in cleartext."""
-    parsed = urlparse(url)
-    if parsed.scheme not in ("http", "https"):
-        raise HTTPException(
-            status_code=400,
-            detail=f"{field} must use http or https; got scheme '{parsed.scheme}'.",
-        )
-    host = (parsed.hostname or "").lower().strip("[]")
-    if parsed.scheme == "http" and host not in _LOOPBACK_HOSTS:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"{field} over plain HTTP is only allowed for loopback hosts; "
-                f"use https for '{host or url}'."
-            ),
-        )
-
-
-async def _test_llm_endpoint(settings: Settings) -> dict[str, Any]:
-    import httpx
-    from openai import AsyncOpenAI
-    from openai.types.responses import ResponseCompletedEvent
-
-    from .codex_auth import codex_request_headers, load_codex_credentials
-    from .llm_provider import resolved_llm_api_key, resolved_llm_base_url
-
-    label = llm_provider_label(settings)
-    if not settings.live_model_enabled:
-        if settings.model_provider == "codex":
-            return {
-                "ok": False,
-                "detail": (
-                    "Codex / ChatGPT credentials are not configured. "
-                    "Run `codex login` or set CODEX_ACCESS_TOKEN."
-                ),
-            }
-        if settings.model_provider == "openrouter":
-            return {"ok": False, "detail": "OPENROUTER_API_KEY is not configured."}
-        if settings.model_provider == "ollama_cloud":
-            return {"ok": False, "detail": "OLLAMA_API_KEY is not configured."}
-        return {"ok": False, "detail": "Offline mode is enabled."}
-
-    model = active_model_id(settings)
-    if settings.model_provider == "codex":
-        credentials = load_codex_credentials(settings)
-        if credentials is None:
-            return {"ok": False, "detail": "Codex credentials are missing."}
-        client = AsyncOpenAI(
-            api_key=credentials.access_token,
-            base_url=resolved_llm_base_url(settings),
-            default_headers=codex_request_headers(credentials),
-        )
-        try:
-            stream = await client.responses.create(
-                model=model,
-                instructions="You are a connectivity probe.",
-                input=[{"role": "user", "content": "Reply with exactly: ok"}],
-                store=False,
-                stream=True,
-            )
-            async for event in stream:
-                if isinstance(event, ResponseCompletedEvent):
-                    return {
-                        "ok": True,
-                        "detail": f"{label} reachable. Active model: {model}",
-                    }
-        except Exception as exc:
-            return {"ok": False, "detail": f"{label} connection failed: {exc}"}
-        return {"ok": False, "detail": f"{label} probe ended without a completed response."}
-
-    url = resolved_llm_base_url(settings) + "/models"
-    headers: dict[str, str] = {}
-    api_key = resolved_llm_api_key(settings)
-    if settings.model_provider != "ollama" and api_key:
-        headers["Authorization"] = f"Bearer {api_key}"
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(url, headers=headers)
-    except httpx.HTTPError as exc:
-        return {"ok": False, "detail": f"{label} connection failed: {exc}"}
-    if resp.status_code == 200:
-        return {"ok": True, "detail": f"{label} reachable. Active model: {model}"}
-    return {
-        "ok": False,
-        "detail": f"{label} returned HTTP {resp.status_code}: {resp.text[:200]}",
-    }
-
-
-async def _test_openrouter_endpoint(
-    settings: Settings, payload: OpenRouterTestRequest
-) -> dict[str, Any]:
-    from openai import AsyncOpenAI
-
-    from .llm_provider import llm_default_headers
-
-    snapshot = settings.model_copy(deep=True)
-    snapshot.model_provider = "openrouter"
-    snapshot.offline_mode = False
-
-    if payload.base_url is not None:
-        base_url = payload.base_url.strip()
-        if base_url:
-            _require_safe_openrouter_url("openrouter_base_url", base_url)
-            snapshot.openrouter_base_url = base_url
-    if payload.model is not None:
-        model = payload.model.strip()
-        if model:
-            snapshot.openrouter_model = model
-    if payload.api_key is not None:
-        api_key = payload.api_key.strip()
-        if api_key:
-            snapshot.openrouter_api_key = api_key
-
-    if not snapshot.openrouter_api_key:
-        return {"ok": False, "detail": "OPENROUTER_API_KEY is not configured."}
-
-    model = active_model_id(snapshot)
-    client = AsyncOpenAI(
-        api_key=snapshot.openrouter_api_key,
-        base_url=snapshot.openrouter_base_url.rstrip("/"),
-        default_headers=llm_default_headers(snapshot),
-    )
-    try:
-        completion = await client.chat.completions.create(
-            model=model,
-            messages=[{"role": "user", "content": "Reply with exactly: ok"}],
-            max_tokens=8,
-            temperature=0,
-        )
-    except Exception as exc:  # noqa: BLE001
-        return {"ok": False, "detail": f"OpenRouter connection failed: {exc}"}
-
-    text = (completion.choices[0].message.content or "").strip() if completion.choices else ""
-    if text.lower().strip(".") == "ok":
-        return {
-            "ok": True,
-            "detail": f"OpenRouter chat completions reachable. Active model: {model}",
-        }
-    return {
-        "ok": True,
-        "detail": f"OpenRouter reachable. Active model: {model}; probe replied: {text[:80]}",
-    }
-
-
-def _settings_view(settings: Settings) -> dict[str, Any]:
-    """Build the GET /api/settings response: secrets masked, source-of-truth annotated."""
-    from .codex_auth import load_codex_credentials
-    from .codex_models import (
-        CODEX_REASONING_EFFORT_CHOICES,
-        CODEX_REASONING_LABELS,
-        codex_model_choices_for_settings,
-    )
-
-    return {
-        "env_source": ".env (immutable) + data/runtime_overrides.json (operator-mutable)",
-        "send_policy": settings.send_policy,
-        "send_policy_choices": ["dry_run", "allowlist", "allow_all", "owner"],
-        "allowed_recipients": sorted(settings.allowed_recipients),
-        "owner_numbers": sorted(settings.owner_numbers),
-        "auto_reply_enabled": settings.auto_reply_enabled,
-        "max_agent_turns": settings.max_agent_turns,
-        "llm": {
-            "provider": settings.model_provider,
-            "provider_choices": ["codex", "openrouter", "ollama", "ollama_cloud"],
-            "model": active_model_id(settings),
-            "label": llm_provider_label(settings),
-            "live": settings.live_model_enabled,
-        },
-        "codex": {
-            "access_token": mask_secret(settings.codex_access_token),
-            "account_id": settings.codex_account_id,
-            "auth_path": str(settings.codex_auth_path),
-            "base_url": settings.codex_base_url,
-            "model": settings.codex_model,
-            "model_choices": codex_model_choices_for_settings(settings.codex_model),
-            "reasoning_effort": settings.codex_reasoning_effort,
-            "reasoning_effort_choices": list(CODEX_REASONING_EFFORT_CHOICES),
-            "reasoning_effort_labels": CODEX_REASONING_LABELS,
-            "live": settings.model_provider == "codex" and settings.live_model_enabled,
-            "logged_in": load_codex_credentials(settings) is not None,
-            "cli_available": shutil.which("codex") is not None,
-        },
-        "openrouter": {
-            "api_key": mask_secret(settings.openrouter_api_key),
-            "base_url": settings.openrouter_base_url,
-            "model": settings.openrouter_model,
-            "live": settings.model_provider == "openrouter" and settings.live_model_enabled,
-        },
-        "ollama": {
-            "api_key": mask_secret(settings.ollama_api_key),
-            "model": settings.ollama_model,
-            "base_url": settings.ollama_base_url,
-            "cloud_base_url": settings.ollama_cloud_base_url,
-            "live": settings.model_provider.startswith("ollama") and settings.live_model_enabled,
-        },
-        "wabot": {
-            "endpoint": settings.wabot_endpoint,
-            "token": mask_secret(settings.resolved_wabot_token),
-            "token_file": str(settings.wabot_token_file) if settings.wabot_token_file else None,
-        },
-    }
+# LLM connectivity probes + the GET /api/settings view builder now live in
+# api/llm_tests.py and are re-exported via the import block above.
 
 
 def _sse_frame(event_id: int | None, name: str, data: Any) -> str:
@@ -1845,29 +1469,7 @@ def _qr_svg(payload: str) -> bytes:
     return out.getvalue()
 
 
-async def _wabot_call(coro: Awaitable[Any]) -> Any:
-    """Run a ``wabot.*`` coroutine, redact the response, and map ``WabotError`` to HTTP 502.
-
-    Hand-rolled 5-line try/except blocks for every group/admin handler are easy to
-    drift over time (different status codes, missing redact, swallowed errors).
-    Funnelling through this single helper keeps the 502 mapping uniform and the
-    redaction unmissable.
-    """
-    try:
-        return redact(await coro)
-    except WabotError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-
-
-def _verify_inbound_auth(settings: Settings, authorization: str | None) -> None:
-    token = (settings.wabot_inbound_token or "").strip()
-    if not token:
-        if settings.requires_inbound_token():
-            raise HTTPException(status_code=401, detail="unauthorized")
-        return
-    expected = f"Bearer {token}"
-    if not authorization or not secrets.compare_digest(authorization, expected):
-        raise HTTPException(status_code=401, detail="unauthorized")
+# _wabot_call and _verify_inbound_auth now live in api/dependencies.py.
 
 
 def main() -> None:
