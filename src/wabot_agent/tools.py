@@ -481,46 +481,110 @@ async def send_task_progress(
     )
 
 
+async def _apply_send_policy_gate(
+    ctx: RunContextWrapper[RuntimeContext],
+    tool_name: str,
+    to: str,
+    *,
+    media_path: str | None = None,
+) -> tuple[Path | None, str, dict[str, Any] | None]:
+    """Single fail-closed gate for every WhatsApp send tool.
+
+    Runs the policy/health sequence in this order:
+      1. ``_media_path_allowed`` — only when ``media_path`` is supplied.
+      2. ``_is_send_allowed`` (send-policy chokepoint per CLAUDE.md / MASTER §3).
+      3. ``wabot.health()`` readiness.
+
+    Returns ``(safe_path, allow_reason, None)`` when every gate passes. The
+    caller dispatches to the appropriate ``wabot.send_*`` method and builds
+    its own success payload (text vs media payloads diverge intentionally).
+
+    Returns ``(None, "", block_payload)`` when any gate blocks. The helper has
+    already recorded the tool event (and the ``send_blocked`` log entry for
+    the text branch); the caller MUST return ``block_payload`` directly.
+
+    Centralising this boundary means new send tools cannot accidentally skip
+    a gate by copying boilerplate that drifts. See QW-3 in
+    ``MASTER-architecture-debt-testing.md``.
+    """
+    safe_path: Path | None = None
+    is_text = media_path is None
+
+    if media_path is not None:
+        path_allowed, safe_path, path_reason = _media_path_allowed(
+            ctx.context.settings, media_path
+        )
+        if not path_allowed or safe_path is None:
+            payload = {
+                "sent": False,
+                "reason": "media_path_not_allowed",
+                "detail": path_reason,
+            }
+            ctx.context.memory.record_tool_event(
+                ctx.context.run_id, f"{tool_name}.blocked", payload
+            )
+            return None, "", payload
+
+    allowed, reason = _is_send_allowed(
+        ctx.context.settings, to, inbound=ctx.context.inbound
+    )
+    if not allowed:
+        payload: dict[str, Any] = {
+            "sent": False,
+            "reason": reason,
+            "to": mask_phone(to),
+        }
+        if safe_path is not None:
+            payload["path"] = str(
+                safe_path.relative_to(ctx.context.settings.media_dir.resolve())
+            )
+        if is_text:
+            payload["operator_action"] = (
+                "Owner policy: only the configured owner (dashboard or owner WhatsApp) "
+                "may message arbitrary numbers; others may only reply to their own chat."
+            )
+        ctx.context.memory.record_tool_event(
+            ctx.context.run_id, f"{tool_name}.blocked", payload
+        )
+        if is_text:
+            ctx.context.event_log.write("send_blocked", payload)
+        return None, "", payload
+
+    health = await ctx.context.wabot.health()
+    if not health.ready:
+        if is_text:
+            payload = {
+                "sent": False,
+                "reason": "wabot_not_ready",
+                "health": {
+                    "reachable": health.reachable,
+                    "logged_in": health.logged_in,
+                    "connected": health.connected,
+                    "detail": health.detail,
+                },
+            }
+        else:
+            payload = {
+                "sent": False,
+                "reason": "wabot_not_ready",
+                "ready": health.ready,
+            }
+        ctx.context.memory.record_tool_event(
+            ctx.context.run_id, f"{tool_name}.blocked", payload
+        )
+        return None, "", payload
+
+    return safe_path, reason, None
+
+
 @function_tool
 async def send_whatsapp_text(
     ctx: RunContextWrapper[RuntimeContext], to: str, text: str
 ) -> dict[str, Any]:
     """Send a WhatsApp text message through wabot when the send policy allows it."""
-    allowed, reason = _is_send_allowed(
-        ctx.context.settings, to, inbound=ctx.context.inbound
-    )
-    if not allowed:
-        payload = {
-            "sent": False,
-            "reason": reason,
-            "to": mask_phone(to),
-            "operator_action": (
-                "Owner policy: only the configured owner (dashboard or owner WhatsApp) "
-                "may message arbitrary numbers; others may only reply to their own chat."
-            ),
-        }
-        ctx.context.memory.record_tool_event(
-            ctx.context.run_id, "send_whatsapp_text.blocked", payload
-        )
-        ctx.context.event_log.write("send_blocked", payload)
-        return payload
-
-    health = await ctx.context.wabot.health()
-    if not health.ready:
-        payload = {
-            "sent": False,
-            "reason": "wabot_not_ready",
-            "health": {
-                "reachable": health.reachable,
-                "logged_in": health.logged_in,
-                "connected": health.connected,
-                "detail": health.detail,
-            },
-        }
-        ctx.context.memory.record_tool_event(
-            ctx.context.run_id, "send_whatsapp_text.blocked", payload
-        )
-        return payload
+    _, reason, block = await _apply_send_policy_gate(ctx, "send_whatsapp_text", to)
+    if block is not None:
+        return block
 
     result = await ctx.context.wabot.send_text(to=to, text=text)
     ctx.context.record_sent(to)
@@ -536,40 +600,12 @@ async def send_whatsapp_image(
     ctx: RunContextWrapper[RuntimeContext], to: str, path: str, caption: str | None = None
 ) -> dict[str, Any]:
     """Send a WhatsApp image message through wabot when the send policy allows it."""
-    path_allowed, safe_path, path_reason = _media_path_allowed(ctx.context.settings, path)
-    if not path_allowed or safe_path is None:
-        payload = {
-            "sent": False,
-            "reason": "media_path_not_allowed",
-            "detail": path_reason,
-        }
-        ctx.context.memory.record_tool_event(
-            ctx.context.run_id, "send_whatsapp_image.blocked", payload
-        )
-        return payload
-
-    allowed, reason = _is_send_allowed(
-        ctx.context.settings, to, inbound=ctx.context.inbound
+    safe_path, reason, block = await _apply_send_policy_gate(
+        ctx, "send_whatsapp_image", to, media_path=path
     )
-    if not allowed:
-        payload = {
-            "sent": False,
-            "reason": reason,
-            "to": mask_phone(to),
-            "path": str(safe_path.relative_to(ctx.context.settings.media_dir.resolve())),
-        }
-        ctx.context.memory.record_tool_event(
-            ctx.context.run_id, "send_whatsapp_image.blocked", payload
-        )
-        return payload
-
-    health = await ctx.context.wabot.health()
-    if not health.ready:
-        payload = {"sent": False, "reason": "wabot_not_ready", "ready": health.ready}
-        ctx.context.memory.record_tool_event(
-            ctx.context.run_id, "send_whatsapp_image.blocked", payload
-        )
-        return payload
+    if block is not None:
+        return block
+    assert safe_path is not None  # gate guarantees this when block is None
 
     result = await ctx.context.wabot.send_image(to=to, path=str(safe_path), caption=caption)
     ctx.context.record_sent(to)
@@ -589,30 +625,12 @@ async def _send_whatsapp_media(
     caption: str | None = None,
     filename: str | None = None,
 ) -> dict[str, Any]:
-    path_allowed, safe_path, path_reason = _media_path_allowed(ctx.context.settings, path)
-    if not path_allowed or safe_path is None:
-        payload = {"sent": False, "reason": "media_path_not_allowed", "detail": path_reason}
-        ctx.context.memory.record_tool_event(ctx.context.run_id, f"{tool_name}.blocked", payload)
-        return payload
-
-    allowed, reason = _is_send_allowed(
-        ctx.context.settings, to, inbound=ctx.context.inbound
+    safe_path, reason, block = await _apply_send_policy_gate(
+        ctx, tool_name, to, media_path=path
     )
-    if not allowed:
-        payload = {
-            "sent": False,
-            "reason": reason,
-            "to": mask_phone(to),
-            "path": str(safe_path.relative_to(ctx.context.settings.media_dir.resolve())),
-        }
-        ctx.context.memory.record_tool_event(ctx.context.run_id, f"{tool_name}.blocked", payload)
-        return payload
-
-    health = await ctx.context.wabot.health()
-    if not health.ready:
-        payload = {"sent": False, "reason": "wabot_not_ready", "ready": health.ready}
-        ctx.context.memory.record_tool_event(ctx.context.run_id, f"{tool_name}.blocked", payload)
-        return payload
+    if block is not None:
+        return block
+    assert safe_path is not None
 
     result = await ctx.context.wabot.send_media(
         to=to,
