@@ -9,6 +9,7 @@ import {
 
 import { CodexSection } from "./settings/CodexSection";
 import { OllamaSection } from "./settings/OllamaSection";
+import { OpenAISection } from "./settings/OpenAISection";
 import { OpenRouterSection } from "./settings/OpenRouterSection";
 import { PolicySection } from "./settings/PolicySection";
 import { WabotSection } from "./settings/WabotSection";
@@ -16,6 +17,7 @@ import { WabotSection } from "./settings/WabotSection";
 type Policy = "dry_run" | "allowlist" | "allow_all" | "owner";
 
 const PROVIDER_LABELS: Record<ModelProvider, string> = {
+  openai: "OpenAI API",
   codex: "ChatGPT / Codex",
   openrouter: "OpenRouter",
   ollama: "Ollama (local)",
@@ -128,6 +130,15 @@ export default function SettingsPanel() {
           {view.llm.live ? "" : " (offline — set API key or disable offline mode)"}
         </p>
       </fieldset>
+
+      {provider === "openai" && (
+        <OpenAISection
+          view={view}
+          draft={draft}
+          setDraft={setDraft}
+          setStatus={setStatus}
+        />
+      )}
 
       {provider === "codex" && (
         <CodexSection

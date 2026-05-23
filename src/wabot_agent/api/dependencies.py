@@ -100,6 +100,30 @@ def _require_safe_ollama_cloud_url(field: str, url: str) -> None:
         )
 
 
+def _require_safe_openai_url(field: str, url: str) -> None:
+    """Allow OpenAI-compatible HTTPS endpoints or local development proxies.
+
+    Same safety rule as ``_require_safe_openrouter_url``: HTTPS to any host, or
+    plain HTTP only when the destination is loopback. Plain HTTP to a remote
+    host would leak the OpenAI API key in cleartext.
+    """
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"{field} must use http or https; got scheme '{parsed.scheme}'.",
+        )
+    host = (parsed.hostname or "").lower().strip("[]")
+    if parsed.scheme == "http" and host not in _LOOPBACK_HOSTS:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"{field} over plain HTTP is only allowed for loopback hosts; "
+                f"use https for '{host or url}'."
+            ),
+        )
+
+
 def _require_safe_openrouter_url(field: str, url: str) -> None:
     """Allow https://anywhere or http://loopback. Plain HTTP to a remote host
     would leak the API key in cleartext."""
@@ -157,6 +181,7 @@ __all__ = [
     "_require_loopback_url",
     "_require_safe_ollama_cloud_url",
     "_require_safe_ollama_local_url",
+    "_require_safe_openai_url",
     "_require_safe_openrouter_url",
     "_safe_next_path",
     "_verify_inbound_auth",

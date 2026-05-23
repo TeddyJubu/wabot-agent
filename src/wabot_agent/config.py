@@ -31,6 +31,19 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("WABOT_AGENT_OFFLINE_MODE", "VIGNESH_OFFLINE_MODE"),
     )
 
+    openai_api_key: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("OPENAI_API_KEY", "WABOT_AGENT_OPENAI_API_KEY"),
+    )
+    openai_base_url: str = Field(
+        default="https://api.openai.com/v1",
+        validation_alias=AliasChoices("OPENAI_BASE_URL", "WABOT_AGENT_OPENAI_BASE_URL"),
+    )
+    openai_model: str = Field(
+        default="gpt-4.1-mini",
+        validation_alias=AliasChoices("OPENAI_MODEL", "WABOT_AGENT_OPENAI_MODEL"),
+    )
+
     openrouter_api_key: str | None = Field(default=None, alias="OPENROUTER_API_KEY")
     openrouter_base_url: str = Field(
         default="https://openrouter.ai/api/v1", alias="OPENROUTER_BASE_URL"
@@ -41,8 +54,8 @@ class Settings(BaseSettings):
     )
     openrouter_app_title: str = Field(default="wabot-agent", alias="OPENROUTER_APP_TITLE")
 
-    model_provider: Literal["codex", "openrouter", "ollama", "ollama_cloud"] = Field(
-        default="openrouter",
+    model_provider: Literal["openai", "codex", "openrouter", "ollama", "ollama_cloud"] = Field(
+        default="openai",
         validation_alias=AliasChoices(
             "WABOT_AGENT_MODEL_PROVIDER", "VIGNESH_MODEL_PROVIDER", "LLM_PROVIDER"
         ),
@@ -121,6 +134,12 @@ class Settings(BaseSettings):
     composio_api_key: str | None = Field(
         default=None,
         validation_alias=AliasChoices("COMPOSIO_API_KEY", "WABOT_AGENT_COMPOSIO_API_KEY"),
+    )
+    composio_user_id: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_COMPOSIO_USER_ID", "VIGNESH_COMPOSIO_USER_ID"
+        ),
     )
     skills_dir: Path = Field(
         default=Path("./skills"),
@@ -623,7 +642,7 @@ class Settings(BaseSettings):
             "WABOT_AGENT_MEM0_PROMPT_MAX_CHARS", "VIGNESH_MEM0_PROMPT_MAX_CHARS"
         ),
     )
-    mem0_llm_provider: Literal["openrouter", "ollama", "ollama_cloud"] | None = Field(
+    mem0_llm_provider: Literal["openai", "openrouter", "ollama", "ollama_cloud"] | None = Field(
         default=None,
         validation_alias=AliasChoices(
             "WABOT_AGENT_MEM0_LLM_PROVIDER", "VIGNESH_MEM0_LLM_PROVIDER"
@@ -719,6 +738,8 @@ class Settings(BaseSettings):
     def live_model_enabled(self) -> bool:
         if self.offline_mode:
             return False
+        if self.model_provider == "openai":
+            return bool(self.openai_api_key)
         if self.model_provider == "codex":
             from .codex_auth import load_codex_credentials
 
@@ -763,7 +784,10 @@ def get_settings() -> Settings:
     settings = Settings()
     settings.ensure_dirs()
     overrides = load_overrides(settings.runtime_overrides_path)
-    if not model_provider_explicitly_set(overrides):
+    default_provider = Settings.model_fields["model_provider"].default
+    if settings.model_provider == default_provider and not model_provider_explicitly_set(
+        overrides
+    ):
         settings.model_provider = detect_model_provider(settings)  # type: ignore[assignment]
     if overrides:
         apply_overrides(settings, overrides)

@@ -1,4 +1,4 @@
-# Composio (Gmail, GitHub, Slack, …)
+# Composio (Gmail, Calendar, GitHub, Slack, ...)
 
 wabot-agent uses **Composio native tools** with the Python OpenAI Agents SDK (same flow as the [Composio quickstart](https://docs.composio.dev/docs/quickstart), not the TypeScript packages).
 
@@ -9,18 +9,37 @@ Your `COMPOSIO_API_KEY` (`ak_…` from [platform.composio.dev/settings](https://
 ```bash
 COMPOSIO_API_KEY=ak_your_key_here
 WABOT_AGENT_COMPOSIO_ENABLED=true
+# Optional but recommended for owner-calendar booking:
+WABOT_AGENT_COMPOSIO_USER_ID=operator
 ```
 
 Restart `wabot-agent`. On each run, the agent:
 
-1. Creates or reuses a Composio session for the WhatsApp `user_id` / group JID (stored in SQLite as `composio_session_id`).
+1. Creates or reuses a Composio session (stored in SQLite as `composio_session_id`).
 2. Attaches six meta-tools (`COMPOSIO_SEARCH_TOOLS`, `COMPOSIO_MANAGE_CONNECTIONS`, …) to the agent for that turn.
+
+If `WABOT_AGENT_COMPOSIO_USER_ID` is set, every turn reuses that one owner/admin
+Composio session. This is recommended when the bot books against the owner's
+calendar: the owner connects Google Calendar once, and clients do not need to
+connect their own Google accounts just to request a meeting.
 
 When native Composio is enabled, the **Composio MCP server** in `configs/mcp.composio.json` is skipped automatically (avoids duplicate tools and MCP 401s).
 
+## WhatsApp is not Composio
+
+WhatsApp is handled only by the native `wabot` service and the local `send_whatsapp_*`,
+`lookup_whatsapp_contacts`, group, media, and readiness tools. Do not connect WhatsApp
+inside Composio, do not ask the operator to approve a Composio WhatsApp link, and do not
+use Composio `WHATSAPP_*` tools if Composio advertises them.
+
+For appointment booking, use Composio only for Google Calendar availability/event work.
+Use native wabot tools for the attendee's WhatsApp lookup and outreach.
+
 ## OAuth in chat
 
-When a toolkit needs auth, the agent calls `COMPOSIO_MANAGE_CONNECTIONS` and should paste the **OAuth URL** in the WhatsApp reply. Open it on your phone, approve once, then ask again.
+When a non-WhatsApp toolkit needs auth, the agent calls `COMPOSIO_MANAGE_CONNECTIONS`
+and should paste the **OAuth URL** in the WhatsApp reply. Open it on your phone,
+approve once, then ask again.
 
 You can also pre-connect apps under [dashboard.composio.dev → Connect Apps](https://dashboard.composio.dev/).
 

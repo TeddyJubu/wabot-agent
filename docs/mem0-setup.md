@@ -24,6 +24,7 @@ Uses local **Qdrant** on disk, an explicit Chat Completions-compatible provider 
 
 | Chat provider | Mem0 LLM (extraction) | Mem0 embeddings |
 |---------------|----------------------|-----------------|
+| `openai` | OpenAI `/v1` + `OPENAI_API_KEY` | OpenAI embeddings API |
 | `ollama_cloud` | Ollama Cloud `/v1` + `OLLAMA_API_KEY` | FastEmbed (no API key) |
 | `ollama` (local) | Local Ollama `/v1` | FastEmbed |
 | `openrouter` | OpenRouter `/v1` | OpenRouter embeddings API |
@@ -34,9 +35,9 @@ Ollama Cloud does not expose `/v1/embeddings`, so embeddings are always local Fa
 ```bash
 # In wabot-agent/.env
 WABOT_AGENT_MEM0_ENABLED=true
-WABOT_AGENT_MODEL_PROVIDER=ollama_cloud
-OLLAMA_API_KEY=...
-OLLAMA_MODEL=gemma4:31b-cloud
+WABOT_AGENT_MODEL_PROVIDER=openai
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-4.1-mini
 
 # Optional
 WABOT_AGENT_MEM0_PATH=./data/mem0_qdrant
@@ -45,8 +46,8 @@ WABOT_AGENT_MEM0_AUTO_CAPTURE=true
 WABOT_AGENT_MEM0_INJECT_ON_RUN=true
 # Required when WABOT_AGENT_MODEL_PROVIDER=codex and you still want Mem0 extraction.
 # This prevents Mem0 from silently burning an unrelated OpenRouter key.
-# WABOT_AGENT_MEM0_LLM_PROVIDER=openrouter
-# WABOT_AGENT_MEM0_LLM_MODEL=openai/gpt-4.1-mini
+# WABOT_AGENT_MEM0_LLM_PROVIDER=openai
+# WABOT_AGENT_MEM0_LLM_MODEL=gpt-4.1-mini
 # FastEmbed model (default BAAI/bge-small-en-v1.5 when unset or text-embedding-3-small)
 # WABOT_AGENT_MEM0_EMBED_MODEL=BAAI/bge-small-en-v1.5
 ```
@@ -77,4 +78,4 @@ MEM0_API_KEY=m0-...
 - Under `WABOT_AGENT_MODEL_PROVIDER=codex`, disabled until `WABOT_AGENT_MEM0_LLM_PROVIDER`
   is configured.
 - Do not store secrets; `looks_sensitive` blocks obvious credential patterns.
-- With `openrouter`, the embedding model must be supported on OpenRouter (default `text-embedding-3-small`). With Ollama providers, embeddings use FastEmbed and do not call OpenRouter.
+- With `openai` or `openrouter`, the embedding model must be supported by that provider (default `text-embedding-3-small`). With Ollama providers, embeddings use FastEmbed and do not call a hosted embeddings API.

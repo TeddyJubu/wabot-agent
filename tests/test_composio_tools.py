@@ -6,6 +6,7 @@ from wabot_agent.agent import build_agent_instructions
 from wabot_agent.composio_tools import (
     build_composio_prompt_context,
     composio_enabled,
+    composio_session_user_id,
     load_composio_tools,
     reset_composio_client_for_tests,
 )
@@ -77,6 +78,35 @@ def test_load_composio_tools_caches_per_user(tmp_path) -> None:
 
     assert first is second
     mock_session.tools.assert_called_once()
+
+
+def test_load_composio_tools_can_reuse_configured_owner_session(tmp_path) -> None:
+    reset_composio_client_for_tests()
+    memory = MemoryStore(tmp_path / "db-owner.sqlite3")
+    memory.remember_contact_fact(
+        "owner-calendar",
+        "composio_session_id",
+        "trs_owner",
+        source="test",
+    )
+    settings = Settings(
+        composio_enabled=True,
+        composio_api_key="ak_test",
+        composio_user_id="owner-calendar",
+        offline_mode=False,
+        _env_file=None,
+    )
+    mock_session = MagicMock()
+    mock_session.tools.return_value = [MagicMock(name="COMPOSIO_SEARCH_TOOLS")]
+    mock_composio = MagicMock()
+    mock_composio.use.return_value = mock_session
+
+    with patch("wabot_agent.composio_tools._get_composio_client", return_value=mock_composio):
+        load_composio_tools(settings, user_id="stranger-contact", memory=memory)
+
+    mock_composio.use.assert_called_once_with("trs_owner")
+    mock_composio.create.assert_not_called()
+    assert composio_session_user_id(settings, "stranger-contact") == "owner-calendar"
 
 
 def test_build_agent_instructions_mention_composio_when_enabled() -> None:

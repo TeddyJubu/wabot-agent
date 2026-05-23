@@ -95,6 +95,7 @@ from .dependencies import (
     _require_loopback_url,
     _require_safe_ollama_cloud_url,
     _require_safe_ollama_local_url,
+    _require_safe_openai_url,
     _require_safe_openrouter_url,
     _safe_next_path,
     _verify_inbound_auth,
@@ -104,6 +105,7 @@ from .deps import AppDeps, PairingState, SchedulerState, SnapshotCache
 from .llm_tests import (
     _settings_view,
     _test_llm_endpoint,
+    _test_openai_endpoint,
     _test_openrouter_endpoint,
 )
 from .routes.health import register_health_routes
@@ -120,6 +122,7 @@ from .schemas import (
     InboundPayload,
     KnowledgeContentBody,
     MemoryFactBody,
+    OpenAITestRequest,
     OpenRouterTestRequest,
     PresencePayload,
     ReceiptPayload,
@@ -1197,6 +1200,23 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if "wabot_endpoint" in proposed:
             _require_loopback_url("wabot_endpoint", proposed["wabot_endpoint"])
 
+        # openai_base_url must be HTTPS or loopback HTTP. AND if the base URL changes,
+        # require a new API key in the same patch — otherwise the next /api/chat or
+        # /api/settings/test/openai would send the existing stored key to the new endpoint.
+        if "openai_base_url" in proposed:
+            _require_safe_openai_url("openai_base_url", proposed["openai_base_url"])
+            if (
+                proposed["openai_base_url"] != settings.openai_base_url
+                and "openai_api_key" not in proposed
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Changing openai_base_url requires openai_api_key in the "
+                        "same PATCH so the existing stored key is not sent to a new endpoint."
+                    ),
+                )
+
         # openrouter_base_url must be HTTPS or loopback HTTP. AND if the base URL
         # changes, require a new API key in the same patch — otherwise the next
         # /api/settings/test/openrouter (or /api/chat) would send the existing
@@ -1283,6 +1303,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             {"fields": sorted(proposed.keys())},
         )
         return _settings_view(settings)
+
+    @app.post("/api/settings/test/openai", dependencies=[human_dependency])
+    async def test_openai(payload: OpenAITestRequest | None = None) -> dict[str, Any]:
+        return await _test_openai_endpoint(settings, payload or OpenAITestRequest())
 
     @app.post("/api/settings/test/openrouter", dependencies=[human_dependency])
     async def test_openrouter(payload: OpenRouterTestRequest | None = None) -> dict[str, Any]:

@@ -27,7 +27,7 @@ class Mem0UnavailableError(RuntimeError):
     pass
 
 
-Mem0LlmProvider = Literal["openrouter", "ollama", "ollama_cloud"]
+Mem0LlmProvider = Literal["openai", "openrouter", "ollama", "ollama_cloud"]
 
 
 def _effective_mem0_llm_provider(settings: Settings) -> Mem0LlmProvider | None:
@@ -35,7 +35,7 @@ def _effective_mem0_llm_provider(settings: Settings) -> Mem0LlmProvider | None:
         return settings.mem0_llm_provider
     if settings.model_provider == "codex":
         return None
-    if settings.model_provider in ("openrouter", "ollama", "ollama_cloud"):
+    if settings.model_provider in ("openai", "openrouter", "ollama", "ollama_cloud"):
         return settings.model_provider
     return None
 
@@ -84,6 +84,8 @@ def mem0_health(settings: Settings) -> dict[str, Any]:
         reason = "mem0_platform_api_key_missing"
     elif not settings.mem0_use_platform and provider is None:
         reason = "mem0_llm_provider_required_for_codex"
+    elif provider == "openai" and not settings.openai_api_key:
+        reason = "openai_api_key_missing"
     elif provider == "openrouter" and not settings.openrouter_api_key:
         reason = "openrouter_api_key_missing"
     elif provider == "ollama_cloud" and not settings.ollama_api_key:
@@ -111,6 +113,8 @@ def mem0_enabled(settings: Settings) -> bool:
     if settings.mem0_use_platform:
         return True
     provider = _effective_mem0_llm_provider(settings)
+    if provider == "openai":
+        return bool(settings.openai_api_key)
     if provider == "openrouter":
         return bool(settings.openrouter_api_key)
     if provider == "ollama_cloud":
@@ -122,6 +126,8 @@ def _llm_api_key(settings: Settings) -> str | None:
     if settings.mem0_use_platform:
         return settings.mem0_api_key
     provider = _effective_mem0_llm_provider(settings)
+    if provider == "openai":
+        return settings.openai_api_key
     if provider == "openrouter":
         return settings.openrouter_api_key
     if provider == "ollama_cloud":
@@ -151,6 +157,12 @@ def _mem0_openai_llm(settings: Settings) -> tuple[str, str, str]:
     if provider is None:
         raise Mem0UnavailableError(
             "mem0 LLM provider required for codex; set WABOT_AGENT_MEM0_LLM_PROVIDER"
+        )
+    if provider == "openai":
+        return (
+            settings.openai_api_key or "",
+            settings.openai_base_url,
+            settings.mem0_llm_model or settings.openai_model,
         )
     if provider == "openrouter":
         return (
@@ -196,7 +208,7 @@ def _mem0_use_fastembed(settings: Settings) -> bool:
 
 @contextmanager
 def _mem0_llm_env(settings: Settings):
-    """Mem0's OpenAI LLM uses OpenRouter whenever OPENROUTER_API_KEY is set."""
+    """Keep Mem0 from inheriting OpenRouter env unless that provider is selected."""
     if _effective_mem0_llm_provider(settings) == "openrouter":
         yield
         return

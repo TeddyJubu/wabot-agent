@@ -6,6 +6,9 @@ This page is only if you want [Composio Connect](https://docs.composio.dev/docs/
 
 wabot-agent can use Composio Connect as a remote MCP server so the agent can search tools, connect OAuth apps on demand, and run actions (Gmail, Notion, Slack, GitHub, etc.) through Composio’s meta-tools.
 
+Do not use Composio MCP for WhatsApp. WhatsApp is handled by the native `wabot`
+service and local `send_whatsapp_*`, lookup, group, media, and readiness tools.
+
 ## 1. API key (dashboard)
 
 1. Open [Composio dashboard → MCP getting started](https://dashboard.composio.dev/syeedmdjobayer/MCP/getting-started) (or **AI Clients** in the sidebar).
@@ -27,7 +30,7 @@ Restart wabot-agent. On startup, the agent connects to `https://connect.composio
 
 ## 3. Connect apps
 
-When the agent needs an app, Composio returns an OAuth link — open it in a browser and approve. You can also pre-connect apps under **Connect Apps** in the [dashboard](https://dashboard.composio.dev/).
+When the agent needs a non-WhatsApp app, Composio returns an OAuth link — open it in a browser and approve. You can also pre-connect apps under **Connect Apps** in the [dashboard](https://dashboard.composio.dev/).
 
 ## 4. Verify
 

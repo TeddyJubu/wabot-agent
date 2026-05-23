@@ -188,10 +188,8 @@ def model_provider_explicitly_set(
 
 def detect_model_provider(settings: Settings) -> str:
     """Pick a live provider when WABOT_AGENT_MODEL_PROVIDER is unset."""
+    if settings.openai_api_key:
+        return "openai"
     if _load_credentials_from_auth_file(settings) is not None:
         return "codex"
-    if settings.openrouter_api_key:
-        return "openrouter"
-    if settings.ollama_api_key:
-        return "ollama_cloud"
-    return "openrouter"
+    return "openai"
