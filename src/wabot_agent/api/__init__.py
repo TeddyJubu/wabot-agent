@@ -19,7 +19,6 @@ from fastapi import (
     Depends,
     FastAPI,
     File,
-    Form,
     Header,
     HTTPException,
     Query,
@@ -27,10 +26,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import (
-    FileResponse,
-    HTMLResponse,
     JSONResponse,
-    RedirectResponse,
     Response,
     StreamingResponse,
 )
@@ -39,12 +35,6 @@ from qrcode.image.svg import SvgFillImage
 
 from ..agent import run_agent
 from ..auth import (
-    AuthIdentity,
-    maybe_mint_operator_cookie,
-    mint_operator_session_cookie,
-    password_grants_dashboard_access,
-    render_login_page,
-    resolve_human_factory,
     verify_human_factory,
 )
 from ..auto_reply import (
@@ -92,7 +82,6 @@ from ..wabot_process import (
 )
 from .dependencies import (
     _LOOPBACK_HOSTS,  # noqa: F401  (re-export — used by external callers and tests)
-    _safe_next_path,
     _verify_inbound_auth,
     _wabot_call,
 )
@@ -104,7 +93,9 @@ from .llm_tests import (
     _settings_view,
     _test_llm_endpoint,
 )
+from .routes.auth import register_auth_routes
 from .routes.health import register_health_routes
+from .routes.pages import register_pages_routes
 from .schemas import (
     GroupCreateRequest,
     GroupInviteRequest,
@@ -557,15 +548,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     if static_dir.exists():
         app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
-    @app.get("/favicon.ico", include_in_schema=False, response_model=None)
-    async def favicon() -> Response:
-        favicon_path = static_dir / "favicon.svg"
-        if favicon_path.exists():
-            return FileResponse(favicon_path, media_type="image/svg+xml")
-        return Response(status_code=204)
-
     verify_human = verify_human_factory(settings)
-    resolve_human = resolve_human_factory(settings)
     human_dependency = Depends(verify_human)
 
     async def _verify_inbound_auth_dep(
@@ -580,91 +563,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     inbound_auth_dependency = Depends(_verify_inbound_auth_dep)
 
-    @app.get("/login", include_in_schema=False, response_model=None)
-    async def login_page(
-        request: Request,
-        identity: AuthIdentity | None = Depends(resolve_human),  # noqa: B008
-        next_path: str = Query("/", alias="next"),
-        err: str | None = Query(None),
-    ) -> Response:
-        if identity is not None:
-            return RedirectResponse(url=_safe_next_path(next_path), status_code=302)
-        error_html = f'<p class="err">{err}</p>' if err else ""
-        return HTMLResponse(render_login_page(error_html=error_html, next_path=next_path))
-
-    @app.post("/api/auth/login", include_in_schema=False, response_model=None)
-    async def login_submit(
-        request: Request,
-        password: str = Form(...),
-        next_path: str = Form("/", alias="next"),
-    ) -> Response:
-        if not settings.operator_token:
-            raise HTTPException(status_code=503, detail="operator token not configured")
-        safe_next = _safe_next_path(next_path)
-        if not password_grants_dashboard_access(settings, password):
-            return HTMLResponse(
-                render_login_page(
-                    error_html='<p class="err">Wrong password.</p>',
-                    next_path=safe_next,
-                ),
-                status_code=401,
-            )
-        response = RedirectResponse(url=safe_next, status_code=303)
-        mint_operator_session_cookie(response, request, settings)
-        return response
-
-    @app.get("/")
-    async def dashboard(
-        request: Request,
-        identity: AuthIdentity | None = Depends(resolve_human),  # noqa: B008
-    ) -> Response:
-        if identity is None:
-            return RedirectResponse(url="/login?next=/", status_code=302)
-        file_response = _dashboard_file(static_dir)
-        file_response.headers["Cache-Control"] = "no-store"
-        maybe_mint_operator_cookie(file_response, request, settings)
-        return file_response
-
-    @app.get("/pair")
-    async def pair_page(
-        request: Request,
-        identity: AuthIdentity | None = Depends(resolve_human),  # noqa: B008
-    ) -> Response:
-        """Mobile-first WhatsApp pairing page.
-
-        Serves the same React bundle as ``/`` — ``web/src/main.tsx`` picks
-        ``<PairView />`` when ``window.location.pathname === '/pair'``.
-        """
-        if identity is None:
-            return RedirectResponse(url="/login?next=/pair", status_code=302)
-        file_response = _dashboard_file(static_dir)
-        file_response.headers["Cache-Control"] = "no-store"
-        maybe_mint_operator_cookie(file_response, request, settings)
-        return file_response
-
-    @app.get("/knowledge")
-    async def knowledge_page(
-        request: Request,
-        identity: AuthIdentity | None = Depends(resolve_human),  # noqa: B008
-    ) -> Response:
-        """Knowledge management dashboard (BlockNote editors + contact facts)."""
-        if identity is None:
-            return RedirectResponse(url="/login?next=/knowledge", status_code=302)
-        file_response = _dashboard_file(static_dir)
-        file_response.headers["Cache-Control"] = "no-store"
-        maybe_mint_operator_cookie(file_response, request, settings)
-        return file_response
-
-    def _dashboard_file(static_dir: Path) -> FileResponse:
-        index = static_dir / "index.html"
-        if not index.exists():
-            raise HTTPException(status_code=404, detail="Dashboard not built.")
-        return FileResponse(index)
-
     # /health and /ready — extracted to api/routes/health.py (MASTER ME-1 Part 2).
     _health_router = APIRouter()
     register_health_routes(_health_router, deps)
     app.include_router(_health_router)
+
+    # /, /pair, /knowledge, /favicon.ico — extracted to api/routes/pages.py (ME-1 Part 3).
+    _pages_router = APIRouter()
+    register_pages_routes(_pages_router, deps)
+    app.include_router(_pages_router)
+
+    # /login, /api/auth/login — extracted to api/routes/auth.py (ME-1 Part 3).
+    _auth_router = APIRouter()
+    register_auth_routes(_auth_router, deps)
+    app.include_router(_auth_router)
 
     @app.get("/api/whatsapp/pairing", dependencies=[human_dependency])
     async def whatsapp_pairing() -> dict[str, Any]:
