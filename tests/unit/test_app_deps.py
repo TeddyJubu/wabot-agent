@@ -33,6 +33,7 @@ def _fake_deps() -> AppDeps:
         pairing_state=PairingState(),
         scheduler_state=SchedulerState(),
         snapshot_cache=SnapshotCache(),
+        settings_service=MagicMock(name="settings_service"),
     )
 
 
@@ -76,3 +77,8 @@ def test_create_app_exposes_deps_on_app_state(tmp_path: Path) -> None:
     assert isinstance(deps, AppDeps)
     assert deps.pairing_state is not None  # the sub-dataclass instance
     assert deps.snapshot_cache is not None
+
+    # SR-1: SettingsService must be wired into AppDeps.
+    from wabot_agent.settings_service import SettingsService
+
+    assert isinstance(deps.settings_service, SettingsService)
