@@ -36,6 +36,16 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     description: "Open knowledge editor",
     expand: () => "__open_knowledge__",
   },
+  {
+    name: "/agents",
+    description: "Open agents manager",
+    expand: () => "__open_slide_over__:agents",
+  },
+  {
+    name: "/tools",
+    description: "Open tools catalog",
+    expand: () => "__open_slide_over__:tools",
+  },
 ];
 
 export function matchSlash(input: string): SlashCommand[] {
