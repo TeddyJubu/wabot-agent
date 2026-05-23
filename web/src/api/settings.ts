@@ -5,6 +5,13 @@ export interface MaskedField {
 
 export type ModelProvider = "openai" | "codex" | "openrouter" | "ollama" | "ollama_cloud";
 
+// Per-purpose model routing (Phase 2 of the simplification roadmap).
+// A ModelChoice of {provider, model} routes one purpose to a specific provider+model.
+// Empty model means "use the provider's default model field".
+// Empty dict (or absent key) means all purposes fall back to the global provider.
+export type ModelChoice = { provider: string; model: string };
+export type ModelRouting = Partial<Record<string, ModelChoice>>;
+
 export interface SettingsView {
   env_source: string;
   send_policy: "dry_run" | "allowlist" | "allow_all" | "owner";
@@ -12,6 +19,7 @@ export interface SettingsView {
   allowed_recipients: string[];
   owner_numbers: string[];
   max_agent_turns: number;
+  model_routing: ModelRouting;
   llm: {
     provider: ModelProvider;
     provider_choices: ModelProvider[];

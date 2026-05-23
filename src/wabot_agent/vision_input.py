@@ -5,9 +5,10 @@ import base64
 from agents.items import TResponseInputItem
 
 from .config import Settings
-from .llm_provider import active_model_id, vision_supported
+from .llm_provider import active_model_for_purpose, vision_supported_for_purpose
 from .media_download import MediaDownloadResult, download_inbound_media
 from .memory import InboundMessage
+from .model_routing import ModelPurpose
 from .wabot import WabotClient
 
 MAX_VISION_BYTES = 5 * 1024 * 1024
@@ -53,7 +54,8 @@ async def prepare_runner_input(
     downloaded: MediaDownloadResult | None = None,
 ) -> str | list[TResponseInputItem]:
     """Text prompt, or multimodal input when an inbound image can be attached."""
-    if inbound is None or not settings.vision_attach_images or not vision_supported(settings):
+    vision_ok = vision_supported_for_purpose(ModelPurpose.VISION, settings)
+    if inbound is None or not settings.vision_attach_images or not vision_ok:
         return augmented_text
     if not inbound_is_image(inbound):
         return augmented_text
@@ -68,7 +70,8 @@ async def prepare_runner_input(
             "expired from wabot cache. Ask the user to resend if needed.)"
         )
 
-    model = active_model_id(settings)
+    vision_model = active_model_for_purpose(ModelPurpose.VISION, settings)
+    model = vision_model.model_id
     note = (
         f"\n\n[The user's image is attached below for model {model}. Describe what you see "
         "and answer their message. Do not say you cannot see images.]"

@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from .config import Settings
 from .llm_provider import active_model_id
+from .model_routing import ModelPurpose, get_model_for
 from .redaction import looks_sensitive, redact
 
 logger = logging.getLogger(__name__)
@@ -69,9 +70,26 @@ def _maybe_degrade_from_exception(exc: Exception) -> None:
         _mark_degraded(text)
 
 
+def _effective_mem0_llm_provider_or_routed(settings: Settings) -> str | None:
+    """Return the effective LLM provider name for Mem0, routing-aware.
+
+    Returns the routed provider name when model_routing[MEMORY_EXTRACTION] is
+    set, otherwise falls back to ``_effective_mem0_llm_provider``.
+    """
+    raw_routing: dict = getattr(settings, "model_routing", {}) or {}
+    choice_raw = raw_routing.get(ModelPurpose.MEMORY_EXTRACTION) or raw_routing.get(
+        ModelPurpose.MEMORY_EXTRACTION.value
+    )
+    if choice_raw is not None:
+        from .model_routing import _coerce_choice
+
+        return _coerce_choice(choice_raw).provider
+    return _effective_mem0_llm_provider(settings)
+
+
 def mem0_health(settings: Settings) -> dict[str, Any]:
     """Return a redacted, operator-facing Mem0 health summary."""
-    provider = _effective_mem0_llm_provider(settings)
+    provider = _effective_mem0_llm_provider_or_routed(settings)
     degraded_reason = _current_degraded_reason()
     reason: str | None = None
     if not settings.mem0_enabled:
@@ -112,7 +130,7 @@ def mem0_enabled(settings: Settings) -> bool:
         return False
     if settings.mem0_use_platform:
         return True
-    provider = _effective_mem0_llm_provider(settings)
+    provider = _effective_mem0_llm_provider_or_routed(settings)
     if provider == "openai":
         return bool(settings.openai_api_key)
     if provider == "openrouter":
@@ -125,7 +143,7 @@ def mem0_enabled(settings: Settings) -> bool:
 def _llm_api_key(settings: Settings) -> str | None:
     if settings.mem0_use_platform:
         return settings.mem0_api_key
-    provider = _effective_mem0_llm_provider(settings)
+    provider = _effective_mem0_llm_provider_or_routed(settings)
     if provider == "openai":
         return settings.openai_api_key
     if provider == "openrouter":
@@ -146,13 +164,48 @@ def _config_cache_key(settings: Settings) -> str:
             str(settings.mem0_llm_model or llm_model),
             embed_model,
             base_url,
-            str(_effective_mem0_llm_provider(settings)),
+            str(_effective_mem0_llm_provider_or_routed(settings)),
         ]
     )
 
 
 def _mem0_openai_llm(settings: Settings) -> tuple[str, str, str]:
-    """API key, OpenAI-compatible base URL, and model for Mem0 fact extraction."""
+    """API key, OpenAI-compatible base URL, and model for Mem0 fact extraction.
+
+    Lookup order (Phase 2):
+    1. If ``settings.model_routing[MEMORY_EXTRACTION]`` is set, use that
+       provider + model — it wins over both ``mem0_llm_provider`` and the
+       global ``model_provider``.
+    2. Otherwise fall through to the legacy ``mem0_llm_provider`` / global
+       provider path (identical to pre-Phase-2 behaviour).
+
+    Mem0 only understands OpenAI-compatible provider configs, so we always
+    return ``(api_key, base_url, model)`` regardless of provider — the caller
+    passes these into Mem0's ``llm.config`` dict under ``openai_base_url``.
+    """
+    # Phase-2 routing: check if MEMORY_EXTRACTION is explicitly routed.
+    raw_routing: dict = getattr(settings, "model_routing", {}) or {}
+    has_routing = (
+        ModelPurpose.MEMORY_EXTRACTION in raw_routing
+        or ModelPurpose.MEMORY_EXTRACTION.value in raw_routing
+    )
+    if has_routing:
+        resolved = get_model_for(ModelPurpose.MEMORY_EXTRACTION, settings)
+        # Codex uses device-flow auth — Mem0 cannot call Codex directly.
+        if resolved.provider == "codex":
+            raise Mem0UnavailableError(
+                "model_routing[MEMORY_EXTRACTION] points at 'codex' which is not "
+                "supported by the Mem0 LLM config; use openai, openrouter, or ollama."
+            )
+        api_key = resolved.api_key or ""
+        base_url = resolved.base_url or settings.openai_base_url
+        model = resolved.model_id
+        # If the operator set mem0_llm_model as an additional override, honour it.
+        if settings.mem0_llm_model:
+            model = settings.mem0_llm_model
+        return (api_key, base_url, model)
+
+    # Legacy path (pre-Phase-2): mem0_llm_provider override or global provider.
     provider = _effective_mem0_llm_provider(settings)
     if provider is None:
         raise Mem0UnavailableError(
@@ -202,6 +255,21 @@ def _mem0_embedding_dims(settings: Settings) -> int:
 
 
 def _mem0_use_fastembed(settings: Settings) -> bool:
+    # When Phase-2 routing explicitly points MEMORY_EXTRACTION at openai or openrouter,
+    # those providers have an /embeddings endpoint — no need for local fastembed.
+    raw_routing: dict = getattr(settings, "model_routing", {}) or {}
+    has_routing = (
+        ModelPurpose.MEMORY_EXTRACTION in raw_routing
+        or ModelPurpose.MEMORY_EXTRACTION.value in raw_routing
+    )
+    if has_routing:
+        from .model_routing import _coerce_choice
+
+        choice_raw = raw_routing.get(ModelPurpose.MEMORY_EXTRACTION) or raw_routing.get(
+            ModelPurpose.MEMORY_EXTRACTION.value
+        )
+        choice = _coerce_choice(choice_raw)
+        return choice.provider in ("ollama", "ollama_cloud")
     provider = _effective_mem0_llm_provider(settings)
     return provider in (None, "ollama", "ollama_cloud")
 
@@ -209,7 +277,7 @@ def _mem0_use_fastembed(settings: Settings) -> bool:
 @contextmanager
 def _mem0_llm_env(settings: Settings):
     """Keep Mem0 from inheriting OpenRouter env unless that provider is selected."""
-    if _effective_mem0_llm_provider(settings) == "openrouter":
+    if _effective_mem0_llm_provider_or_routed(settings) == "openrouter":
         yield
         return
     saved = {
@@ -232,8 +300,19 @@ def build_mem0_config(settings: Settings) -> dict[str, Any]:
         return {"api_key": api_key}
 
     api_key, base_url, llm_model = _mem0_openai_llm(settings)
-    if not api_key and _effective_mem0_llm_provider(settings) != "ollama":
-        raise Mem0UnavailableError("no API key for mem0 LLM")
+    # Finding 4 fix: use the routing-aware provider check so that local Ollama
+    # (which needs no API key) does not erroneously raise when MEMORY_EXTRACTION
+    # is routed to "ollama" but the global provider is something else.
+    # We use the provider spec's secret_field to determine whether a key is
+    # required: secret_field=None means the provider is local and keyless.
+    effective_provider = _effective_mem0_llm_provider_or_routed(settings)
+    if not api_key:
+        from .providers import get_registry
+
+        spec = get_registry().get(effective_provider or "")
+        provider_requires_key = spec is None or spec.secret_field is not None
+        if provider_requires_key:
+            raise Mem0UnavailableError("no API key for mem0 LLM")
 
     settings.mem0_path.mkdir(parents=True, exist_ok=True)
 
