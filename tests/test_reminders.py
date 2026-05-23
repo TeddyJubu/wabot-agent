@@ -114,3 +114,30 @@ def test_count_pending_reminders(memory: MemoryStore) -> None:
 def test_reminders_enabled_setting() -> None:
     settings = Settings(reminders_enabled=False, _env_file=None)
     assert settings.reminders_enabled is False
+
+
+def test_mark_reminder_fired_only_updates_claimed_rows(memory: MemoryStore) -> None:
+    """Regression test for #53 — a delayed fire callback must not corrupt a released reminder."""
+    past = (datetime.now(UTC) - timedelta(minutes=5)).isoformat()
+    memory.create_reminder(
+        requester_jid="owner@s.whatsapp.net",
+        message="fire me",
+        due_at=past,
+    )
+    # Claim the reminder (transitions to 'processing').
+    claimed = memory.claim_due_reminders(now=now_iso(), limit=5)
+    assert len(claimed) == 1
+    reminder_id = str(claimed[0]["id"])
+
+    # Release the claim back to 'pending' (simulates a failed send / retry).
+    released = memory.release_reminder_claim(reminder_id)
+    assert released is True
+    rows = memory.list_reminders(requester_jid="owner@s.whatsapp.net", status="pending")
+    assert len(rows) == 1
+
+    # A delayed worker now calls mark_reminder_fired — must NOT transition the row.
+    memory.mark_reminder_fired(reminder_id)
+    row = memory.list_reminders(requester_jid="owner@s.whatsapp.net")[0]
+    assert row["status"] == "pending", (
+        "mark_reminder_fired must not fire a reminder that was released back to pending"
+    )

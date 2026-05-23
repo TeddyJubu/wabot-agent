@@ -32,34 +32,32 @@ class InboxRepo:
             self.complete_message(message_id, run_id=None)
 
     def claim_message(self, message_id: str, sender: str) -> bool:
+        """Atomically claim a message for processing.
+
+        Uses INSERT ... ON CONFLICT(message_id) DO UPDATE ... WHERE status = 'failed'
+        so two concurrent workers racing on the same message_id resolve at the
+        SQLite layer: exactly one INSERT wins (rowcount == 1) or the conditional
+        UPDATE fires for the failed-retry path, while the loser's UPDATE touches
+        zero rows (rowcount == 0). Rows already at 'processing' or 'done' are
+        never re-claimed. Closes #51.
+        """
         with self._connect() as conn:
-            existing = conn.execute(
+            cur = conn.execute(
                 """
-                select status from processed_messages where message_id = ?
-                """,
-                (message_id,),
-            ).fetchone()
-            if existing and existing["status"] in {"processing", "done"}:
-                return False
-            if existing and existing["status"] == "failed":
-                conn.execute(
-                    """
-                    update processed_messages
-                    set sender = ?, processed_at = ?, status = 'processing',
-                        run_id = null, error = null
-                    where message_id = ?
-                    """,
-                    (sender, now_iso(), message_id),
-                )
-                return True
-            conn.execute(
-                """
-                insert into processed_messages (message_id, sender, processed_at, status)
-                values (?, ?, ?, 'processing')
+                INSERT INTO processed_messages
+                    (message_id, sender, processed_at, status, run_id, error)
+                VALUES (?, ?, ?, 'processing', NULL, NULL)
+                ON CONFLICT(message_id) DO UPDATE SET
+                    sender       = excluded.sender,
+                    processed_at = excluded.processed_at,
+                    status       = 'processing',
+                    run_id       = NULL,
+                    error        = NULL
+                WHERE processed_messages.status = 'failed'
                 """,
                 (message_id, sender, now_iso()),
             )
-            return True
+            return cur.rowcount > 0
 
     def complete_message(self, message_id: str, run_id: str | None) -> None:
         with self._connect() as conn:
