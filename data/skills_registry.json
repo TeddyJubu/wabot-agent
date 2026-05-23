@@ -1,0 +1,56 @@
+[
+  {
+    "id": "sk_whatsapp_operator",
+    "slug": "whatsapp-operator",
+    "name": "WhatsApp Operator",
+    "description": "Handles inbound WhatsApp message routing and operator-level replies for business accounts.",
+    "version": "1.0.0",
+    "source_url": "https://registry.anthropic.com/skills/whatsapp-operator",
+    "tags": ["whatsapp", "operator", "messaging", "routing"]
+  },
+  {
+    "id": "sk_scheduler",
+    "slug": "scheduler",
+    "name": "Scheduler",
+    "description": "Enables agents to create and manage scheduled reminders and time-based triggers.",
+    "version": "1.1.0",
+    "source_url": "https://registry.anthropic.com/skills/scheduler",
+    "tags": ["scheduling", "reminders", "automation", "time"]
+  },
+  {
+    "id": "sk_web_research",
+    "slug": "web-research",
+    "name": "Web Research",
+    "description": "Provides structured web search, URL fetching, and content extraction capabilities.",
+    "version": "2.0.1",
+    "source_url": "https://registry.anthropic.com/skills/web-research",
+    "tags": ["web", "search", "research", "scraping"]
+  },
+  {
+    "id": "sk_contact_manager",
+    "slug": "contact-manager",
+    "name": "Contact Manager",
+    "description": "Manages WhatsApp contacts, groups, and per-contact memory enrichment.",
+    "version": "1.0.0",
+    "source_url": "https://registry.anthropic.com/skills/contact-manager",
+    "tags": ["contacts", "crm", "whatsapp", "memory"]
+  },
+  {
+    "id": "sk_document_processor",
+    "slug": "document-processor",
+    "name": "Document Processor",
+    "description": "Extracts and summarises content from PDFs, images, and office documents.",
+    "version": "1.2.0",
+    "source_url": "https://registry.anthropic.com/skills/document-processor",
+    "tags": ["documents", "pdf", "extraction", "summarisation"]
+  },
+  {
+    "id": "sk_code_reviewer",
+    "slug": "code-reviewer",
+    "name": "Code Reviewer",
+    "description": "Reviews code snippets for bugs, style issues, and security vulnerabilities.",
+    "version": "0.9.0",
+    "source_url": "https://registry.anthropic.com/skills/code-reviewer",
+    "tags": ["code", "review", "security", "quality"]
+  }
+]

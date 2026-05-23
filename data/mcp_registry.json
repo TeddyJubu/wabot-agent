@@ -1,0 +1,62 @@
+[
+  {
+    "id": "mcp_filesystem",
+    "slug": "filesystem",
+    "name": "Filesystem",
+    "description": "Read, write, and manage files on the local filesystem with configurable root directories.",
+    "version": "1.0.0",
+    "source_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
+    "tags": ["filesystem", "files", "local", "io"],
+    "transport_hint": "stdio"
+  },
+  {
+    "id": "mcp_github",
+    "slug": "github",
+    "name": "GitHub",
+    "description": "Interact with GitHub repositories: search code, manage issues, pull requests, and releases.",
+    "version": "1.0.0",
+    "source_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/github",
+    "tags": ["github", "code", "git", "devtools"],
+    "transport_hint": "stdio"
+  },
+  {
+    "id": "mcp_slack",
+    "slug": "slack",
+    "name": "Slack",
+    "description": "Send messages, read channels, and manage Slack workspace interactions.",
+    "version": "1.0.0",
+    "source_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/slack",
+    "tags": ["slack", "messaging", "team", "notifications"],
+    "transport_hint": "stdio"
+  },
+  {
+    "id": "mcp_postgres",
+    "slug": "postgres",
+    "name": "PostgreSQL",
+    "description": "Query and manage PostgreSQL databases with read/write access via connection string.",
+    "version": "1.0.0",
+    "source_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/postgres",
+    "tags": ["database", "postgres", "sql", "data"],
+    "transport_hint": "stdio"
+  },
+  {
+    "id": "mcp_brave_search",
+    "slug": "brave-search",
+    "name": "Brave Search",
+    "description": "Web and local search powered by the Brave Search API.",
+    "version": "1.0.0",
+    "source_url": "https://github.com/modelcontextprotocol/servers/tree/main/src/brave-search",
+    "tags": ["search", "web", "brave", "research"],
+    "transport_hint": "stdio"
+  },
+  {
+    "id": "mcp_notion",
+    "slug": "notion",
+    "name": "Notion",
+    "description": "Read, create, and update Notion pages, databases, and blocks.",
+    "version": "1.0.0",
+    "source_url": "https://github.com/makenotion/notion-mcp-server",
+    "tags": ["notion", "notes", "knowledge-base", "productivity"],
+    "transport_hint": "http"
+  }
+]
