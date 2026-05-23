@@ -20,6 +20,7 @@ export interface SettingsView {
   owner_numbers: string[];
   max_agent_turns: number;
   model_routing: ModelRouting;
+  subagents_enabled: boolean;
   llm: {
     provider: ModelProvider;
     provider_choices: ModelProvider[];

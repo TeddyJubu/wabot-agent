@@ -251,6 +251,7 @@ def _settings_view(settings: Settings) -> dict[str, Any]:
         "auto_reply_enabled": settings.auto_reply_enabled,
         "max_agent_turns": settings.max_agent_turns,
         "model_routing": model_routing_view,
+        "subagents_enabled": settings.subagents_enabled,
         "llm": {
             "provider": settings.model_provider,
             "provider_choices": ["openai", "codex", "openrouter", "ollama", "ollama_cloud"],
