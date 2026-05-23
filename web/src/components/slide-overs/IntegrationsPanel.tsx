@@ -3,6 +3,7 @@ import { listSkills, type SkillRow } from "@/api/skills";
 import { listMcpServers, type McpServerRow } from "@/api/mcp";
 import { SkillsSection } from "./integrations/SkillsSection";
 import { McpServersSection } from "./integrations/McpServersSection";
+import { ComposioSection } from "./integrations/ComposioSection";
 
 export default function IntegrationsPanel() {
   const [skills, setSkills] = useState<SkillRow[]>([]);
@@ -62,6 +63,7 @@ export default function IntegrationsPanel() {
         <>
           <SkillsSection skills={skills} onRefresh={() => void refreshSkills()} />
           <McpServersSection servers={servers} onRefresh={() => void refreshServers()} />
+          <ComposioSection />
         </>
       )}
     </div>

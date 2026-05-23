@@ -51,6 +51,7 @@ from .deps import AppDeps, PairingState, SchedulerState, SnapshotCache
 from .routes.agents import register_agents_routes
 from .routes.auth import register_auth_routes
 from .routes.codex import register_codex_routes
+from .routes.composio import register_composio_routes
 from .routes.groups import register_groups_routes
 from .routes.health import register_health_routes
 from .routes.inbound import register_inbound_routes
@@ -259,6 +260,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     _mcp_router = APIRouter()
     register_mcp_admin_routes(_mcp_router, deps)
     app.include_router(_mcp_router)
+
+    # /api/composio/* — Phase 5 Composio connect.
+    _composio_router = APIRouter()
+    register_composio_routes(_composio_router, deps)
+    app.include_router(_composio_router)
 
     return app
 

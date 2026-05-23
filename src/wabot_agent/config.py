@@ -813,6 +813,31 @@ class Settings(BaseSettings):
         self.mem0_path.mkdir(parents=True, exist_ok=True)
         self.knowledge_dir.mkdir(parents=True, exist_ok=True)
 
+    def reload_from_runtime_secrets(self) -> set[str]:
+        """Re-read runtime_secrets.json and overlay matching Settings fields.
+
+        Currently only COMPOSIO_API_KEY is overlaid; the mechanism is
+        intentionally open for future secrets.
+
+        Returns the set of field names that were changed.
+        """
+        from .secrets_service import read_runtime_secrets
+
+        secrets = read_runtime_secrets(self)
+        changed: set[str] = set()
+
+        if "COMPOSIO_API_KEY" in secrets:
+            new_val = secrets["COMPOSIO_API_KEY"]
+            if self.composio_api_key != new_val:
+                self.composio_api_key = new_val  # type: ignore[assignment]
+                changed.add("composio_api_key")
+            # Also enable composio when a key is present
+            if not self.composio_enabled:
+                self.composio_enabled = True  # type: ignore[assignment]
+                changed.add("composio_enabled")
+
+        return changed
+
 
 @lru_cache
 def get_settings() -> Settings:
@@ -830,5 +855,7 @@ def get_settings() -> Settings:
         settings.model_provider = detect_model_provider(settings)  # type: ignore[assignment]
     if overrides:
         apply_overrides(settings, overrides)
+    # Phase 5: overlay secrets from runtime_secrets.json (after all other layers)
+    settings.reload_from_runtime_secrets()
     configure_process_caches(settings)
     return settings
