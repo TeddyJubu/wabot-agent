@@ -144,6 +144,9 @@ class SettingsPatch(BaseModel):
 
     Any field omitted is unchanged. To clear a secret, pass an empty string.
     `confirm_allow_all` must be true to set send_policy='allow_all'.
+    `model_routing` is a dict keyed by ModelPurpose values; the PATCH handler
+    validates each entry against ModelChoice. An empty dict wipes all routing
+    (every purpose falls back to the global provider).
     """
 
     model_provider: str | None = None
@@ -171,6 +174,7 @@ class SettingsPatch(BaseModel):
     auto_reply_enabled: bool | None = None
     max_agent_turns: int | None = None
     confirm_allow_all: bool = False
+    model_routing: dict | None = None
 
 
 class OpenAITestRequest(BaseModel):

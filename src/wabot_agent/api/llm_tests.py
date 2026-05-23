@@ -227,6 +227,21 @@ async def _test_openrouter_endpoint(
 
 def _settings_view(settings: Settings) -> dict[str, Any]:
     """Build the GET /api/settings response: secrets masked, source-of-truth annotated."""
+    # Serialise model_routing as a plain dict of {purpose_str: {provider, model}}.
+    # No secrets in routing entries (just provider names and model strings).
+    raw_routing: dict = getattr(settings, "model_routing", {}) or {}
+    model_routing_view: dict[str, Any] = {}
+    for k, v in raw_routing.items():
+        # Key may be a ModelPurpose enum or a plain string.
+        key_str = k.value if hasattr(k, "value") else str(k)
+        if isinstance(v, dict):
+            model_routing_view[key_str] = v
+        else:
+            # ModelChoice or similar — serialise to dict.
+            model_routing_view[key_str] = (
+                v.model_dump() if hasattr(v, "model_dump") else dict(v)
+            )
+
     return {
         "env_source": ".env (immutable) + data/runtime_overrides.json (operator-mutable)",
         "send_policy": settings.send_policy,
@@ -235,6 +250,7 @@ def _settings_view(settings: Settings) -> dict[str, Any]:
         "owner_numbers": sorted(settings.owner_numbers),
         "auto_reply_enabled": settings.auto_reply_enabled,
         "max_agent_turns": settings.max_agent_turns,
+        "model_routing": model_routing_view,
         "llm": {
             "provider": settings.model_provider,
             "provider_choices": ["openai", "codex", "openrouter", "ollama", "ollama_cloud"],

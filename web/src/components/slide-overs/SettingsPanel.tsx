@@ -8,6 +8,7 @@ import {
 } from "@/api/settings";
 
 import { CodexSection } from "./settings/CodexSection";
+import { ModelRoutingSection } from "./settings/ModelRoutingSection";
 import { OllamaSection } from "./settings/OllamaSection";
 import { OpenAISection } from "./settings/OpenAISection";
 import { OpenRouterSection } from "./settings/OpenRouterSection";
@@ -167,6 +168,8 @@ export default function SettingsPanel() {
           provider={provider}
         />
       )}
+
+      <ModelRoutingSection view={view} onSaved={refetchSettings} />
 
       <WabotSection view={view} draft={draft} setDraft={setDraft} />
 

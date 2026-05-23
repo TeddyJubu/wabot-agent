@@ -8,6 +8,12 @@ from pathlib import Path
 from .config import Settings
 from .system_tools import ffmpeg_to_wav, ffprobe_metadata
 
+# TODO (Phase 2 follow-up): when transcription routing points at a remote
+# provider (e.g., gpt-4o-transcribe), use
+# get_model_for(ModelPurpose.TRANSCRIPTION, settings) here to pick the
+# provider + model, then call the remote transcription API instead of
+# local faster-whisper. For now, this module always uses local faster-whisper.
+
 _whisper_lock = threading.Lock()
 
 

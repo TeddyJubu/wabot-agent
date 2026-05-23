@@ -642,6 +642,19 @@ class Settings(BaseSettings):
             "WABOT_AGENT_MEM0_PROMPT_MAX_CHARS", "VIGNESH_MEM0_PROMPT_MAX_CHARS"
         ),
     )
+    # Per-purpose model routing (Phase 2 of the simplification roadmap).
+    # Empty dict means every purpose falls back to the global ``model_provider``
+    # — identical to pre-Phase-2 behaviour.  Values are ModelChoice instances
+    # validated at PATCH time; stored as a plain dict in runtime_overrides.json.
+    # The type annotation is kept as dict to avoid importing model_routing at
+    # Settings load time (would create an import cycle via providers).
+    model_routing: dict = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_MODEL_ROUTING",
+        ),
+    )
+
     mem0_llm_provider: Literal["openai", "openrouter", "ollama", "ollama_cloud"] | None = Field(
         default=None,
         validation_alias=AliasChoices(

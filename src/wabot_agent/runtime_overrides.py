@@ -60,6 +60,8 @@ MUTABLE_FIELDS: frozenset[str] = frozenset(
         "owner_numbers",
         "auto_reply_enabled",
         "max_agent_turns",
+        # per-purpose model routing (Phase 2)
+        "model_routing",
     }
 )
 

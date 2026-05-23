@@ -1181,6 +1181,37 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 continue
             proposed[key] = value
 
+        # Validate model_routing if present. Uses Pydantic TypeAdapter to parse
+        # the whole dict in one shot — catches unknown purpose keys and invalid
+        # ModelChoice values with a single call.
+        if "model_routing" in proposed:
+            routing_raw = proposed["model_routing"]
+            if not isinstance(routing_raw, dict):
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        'model_routing must be a dict (e.g. {"chat": '
+                        '{"provider": "openai", "model": ""}})'
+                    ),
+                )
+            try:
+                from pydantic import TypeAdapter
+
+                from ..model_routing import ModelChoice, ModelPurpose
+
+                _ta = TypeAdapter(dict[ModelPurpose, ModelChoice])
+                validated_routing = _ta.validate_python(routing_raw)
+            except Exception as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid model_routing: {exc}",
+                ) from exc
+            # Store as serialisable plain dicts for JSON persistence.
+            proposed["model_routing"] = {
+                purpose.value: choice.model_dump()
+                for purpose, choice in validated_routing.items()
+            }
+
         if proposed.get("send_policy") == "allow_all" and not patch.confirm_allow_all:
             raise HTTPException(
                 status_code=400,
