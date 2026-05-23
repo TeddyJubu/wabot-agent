@@ -714,55 +714,6 @@ def test_settings_patch_atomicity_invalid_field_leaves_state_clean(tmp_path: Pat
     assert not overrides_path.exists()
 
 
-def test_chat_stream_emits_ndjson_final_event(tmp_path: Path) -> None:
-    """Offline-mode streaming chat must complete with a final event and
-    an NDJSON content type. We exercise the fallback (Runner.run -> single
-    delta + final) since OfflineModel doesn't implement stream_response."""
-    import json as _json
-
-    client = TestClient(create_app(make_settings(tmp_path)))
-
-    with client.stream(
-        "POST",
-        "/api/chat/stream",
-        json={"message": "hello", "session_id": "test-stream"},
-    ) as resp:
-        assert resp.status_code == 200
-        assert resp.headers["content-type"].startswith("application/x-ndjson")
-        events: list[dict] = []
-        buffer = ""
-        for chunk in resp.iter_text():
-            buffer += chunk
-            while "\n" in buffer:
-                line, buffer = buffer.split("\n", 1)
-                line = line.strip()
-                if line:
-                    events.append(_json.loads(line))
-
-    assert events, "expected at least one event"
-    # The fallback path emits a synthetic delta with the entire echo response,
-    # then a final event with the run summary.
-    types = [e["type"] for e in events]
-    assert types[-1] == "final"
-    final = events[-1]
-    assert final["live_model"] is False
-    assert "Offline mode is active" in final["output"]
-    assert final["session_id"] == "test-stream"
-    assert final["run_id"]
-    # And a delta carrying the same text.
-    deltas = [e for e in events if e["type"] == "delta"]
-    assert deltas, "expected at least one delta event"
-    assert any("Offline mode is active" in d["text"] for d in deltas)
-
-
-def test_chat_stream_requires_operator_token_when_configured(tmp_path: Path) -> None:
-    settings = make_settings(tmp_path).model_copy(update={"operator_token": "operator-secret"})
-    client = TestClient(create_app(settings))
-
-    denied = client.post("/api/chat/stream", json={"message": "hi"})
-    assert denied.status_code == 401
-
-
 def test_startup_ignores_invalid_overrides_atomically(tmp_path: Path) -> None:
     """A stale overrides file with one bad field must not partially mutate Settings."""
     import json

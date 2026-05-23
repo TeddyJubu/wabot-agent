@@ -16,6 +16,9 @@ Wire format invariants worth preserving (see CLAUDE.md):
 * ``SettingsPatch.confirm_allow_all`` MUST be ``True`` for the PATCH handler
   to accept ``send_policy="allow_all"`` — this guards the fail-closed send
   boundary.
+
+Note: ``ChatRequest`` / ``ChatResponse`` were removed in Phase 6 (chore/phase-6-cleanup).
+The dashboard chat path was deprecated per plan.md P2; the bot is WhatsApp-first.
 """
 
 from __future__ import annotations
@@ -25,18 +28,6 @@ from typing import Any  # noqa: F401  (kept for downstream type-hint parity)
 from pydantic import BaseModel, Field
 
 from ..memory import InboundMessage
-
-
-class ChatRequest(BaseModel):
-    message: str = Field(min_length=1)
-    session_id: str | None = None
-
-
-class ChatResponse(BaseModel):
-    run_id: str
-    session_id: str
-    output: str
-    live_model: bool
 
 
 class KnowledgeContentBody(BaseModel):
@@ -191,8 +182,6 @@ class OpenRouterTestRequest(BaseModel):
 
 
 __all__ = [
-    "ChatRequest",
-    "ChatResponse",
     "GroupCreateRequest",
     "GroupInviteRequest",
     "GroupJoinRequest",

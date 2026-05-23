@@ -37,7 +37,7 @@ from fastapi.responses import (
 from fastapi.staticfiles import StaticFiles
 from qrcode.image.svg import SvgFillImage
 
-from ..agent import run_agent, run_agent_streamed
+from ..agent import run_agent
 from ..auth import (
     AuthIdentity,
     maybe_mint_operator_cookie,
@@ -105,8 +105,6 @@ from .llm_tests import (
 )
 from .routes.health import register_health_routes
 from .schemas import (
-    ChatRequest,
-    ChatResponse,
     GroupCreateRequest,
     GroupInviteRequest,
     GroupJoinRequest,
@@ -708,77 +706,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             {"store_backups": [path.name for path in backups]},
         )
         return payload
-
-    @app.post("/api/chat", response_model=ChatResponse, dependencies=[human_dependency])
-    async def chat(payload: ChatRequest) -> ChatResponse:
-        result = await run_agent(
-            payload.message,
-            settings=settings,
-            memory=memory,
-            event_log=event_log,
-            wabot=wabot,
-            session_id=payload.session_id,
-        )
-        return ChatResponse(
-            run_id=result.run_id,
-            session_id=result.session_id,
-            output=result.final_output,
-            live_model=result.live_model,
-        )
-
-    @app.post(
-        "/api/chat/stream",
-        dependencies=[human_dependency],
-        response_model=None,
-    )
-    async def chat_stream(payload: ChatRequest, request: Request) -> StreamingResponse:
-        """Run the agent and stream NDJSON events to the client.
-
-        One JSON object per line. Event types:
-          - delta:      incremental model token (text)
-          - tool_call:  tool invocation (name + redacted args)
-          - tool_result: tool completion marker
-          - final:      run summary (run_id, output, live_model)
-          - error:      terminal failure (message)
-        The stream ends after `final` or `error`.
-
-        The existing `POST /api/chat` JSON endpoint is preserved for callers
-        that don't want a stream (external scripts, the inbound webhook path).
-        """
-
-        async def event_generator() -> Any:
-            iterator = run_agent_streamed(
-                payload.message,
-                settings=settings,
-                memory=memory,
-                event_log=event_log,
-                wabot=wabot,
-                session_id=payload.session_id,
-            ).__aiter__()
-            try:
-                while True:
-                    # Cancel the agent if the client has gone away — otherwise
-                    # we'd keep burning OpenRouter tokens for nobody.
-                    if await request.is_disconnected():
-                        raise asyncio.CancelledError()
-                    try:
-                        event = await iterator.__anext__()
-                    except StopAsyncIteration:
-                        return
-                    yield json.dumps(event, ensure_ascii=False) + "\n"
-            except asyncio.CancelledError:
-                try:
-                    await iterator.aclose()
-                except Exception:  # noqa: BLE001
-                    pass
-                event_log.write("chat_stream_cancelled", {"session_id": payload.session_id})
-                raise
-
-        return StreamingResponse(
-            event_generator(),
-            media_type="application/x-ndjson",
-            headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
-        )
 
     async def _process_whatsapp_inbound(
         inbound: InboundMessage,
