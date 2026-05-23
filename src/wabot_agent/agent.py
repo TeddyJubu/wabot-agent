@@ -5,6 +5,7 @@ import logging
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from agents import Agent, RunConfig, Runner
@@ -398,6 +399,38 @@ def _mcp_skip_names(settings: Settings) -> frozenset[str]:
     return frozenset()
 
 
+_db_orchestrator_cache: dict[Path, bool] = {}
+
+
+def _reset_db_orchestrator_cache() -> None:
+    """Clear the module-level cache.  Called from tests to isolate state."""
+    _db_orchestrator_cache.clear()
+
+
+def _has_db_orchestrator(store: MemoryStore) -> bool:
+    """Return True if the subagents table has an enabled row for slug='orchestrator'.
+
+    Once a True result is observed it is cached keyed on store.path — the row
+    is permanent after seed, so the cache never needs to expire.  A False
+    result is NOT cached so a boot-time miss will be re-checked on the next
+    turn (cheap SELECT with a LIMIT 1 index scan).
+    """
+    cached = _db_orchestrator_cache.get(store.path)
+    if cached is True:
+        return True
+    try:
+        with store.connect() as conn:
+            row = conn.execute(
+                "select 1 from subagents where slug='orchestrator' and is_enabled=1 limit 1"
+            ).fetchone()
+        result = row is not None
+    except Exception:  # noqa: BLE001
+        return False
+    if result:
+        _db_orchestrator_cache[store.path] = True
+    return result
+
+
 _CODEX_EMPTY_OUTPUT_MAX_ATTEMPTS = 2
 
 _CODEX_LIGHTWEIGHT_INSTRUCTIONS = (
@@ -547,7 +580,15 @@ async def run_agent(
         async with connected_mcp_servers(
             settings.mcp_config, skip_names=_mcp_skip_names(settings)
         ) as mcp_servers:
-            if settings.subagents_enabled:
+            if settings.subagents_db_enabled and _has_db_orchestrator(memory):
+                from .agents.registry import build_orchestrator_from_db  # noqa: PLC0415
+                agent = build_orchestrator_from_db(
+                    settings,
+                    memory,
+                    mcp_servers=mcp_servers,
+                    composio_tools=composio_tools,
+                )
+            elif settings.subagents_enabled:
                 from .agents import build_orchestrator
                 agent = build_orchestrator(
                     settings,
@@ -702,7 +743,15 @@ async def run_agent_streamed(
         async with connected_mcp_servers(
             settings.mcp_config, skip_names=_mcp_skip_names(settings)
         ) as mcp_servers:
-            if settings.subagents_enabled:
+            if settings.subagents_db_enabled and _has_db_orchestrator(memory):
+                from .agents.registry import build_orchestrator_from_db  # noqa: PLC0415
+                agent = build_orchestrator_from_db(
+                    settings,
+                    memory,
+                    mcp_servers=mcp_servers,
+                    composio_tools=composio_tools,
+                )
+            elif settings.subagents_enabled:
                 from .agents import build_orchestrator
                 agent = build_orchestrator(
                     settings,

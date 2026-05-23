@@ -668,6 +668,19 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Phase 2 — DB-driven subagent registry (opt-in, default OFF).
+    # When True AND a row exists for slug='orchestrator' in the subagents table,
+    # build_orchestrator_from_db() is used instead of the hardcoded
+    # build_orchestrator().  The hardcoded path is untouched and remains the
+    # fallback.  Requires subagents_enabled=True to take effect.
+    subagents_db_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_SUBAGENTS_DB_ENABLED",
+            "SUBAGENTS_DB_ENABLED",
+        ),
+    )
+
     mem0_llm_provider: Literal["openai", "openrouter", "ollama", "ollama_cloud"] | None = Field(
         default=None,
         validation_alias=AliasChoices(
