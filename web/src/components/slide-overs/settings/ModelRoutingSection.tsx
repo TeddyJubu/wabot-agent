@@ -61,7 +61,7 @@ const ADVANCED_PURPOSES: VisiblePurpose[] = [
   },
 ];
 
-function purposeDefaultPlaceholder(purposeKey: string, view: SettingsView): string {
+function purposeDefaultPlaceholder(_purposeKey: string, view: SettingsView): string {
   const provider = view.llm.provider;
   const model = view.llm.model;
   return `${model} (${provider} default)`;
