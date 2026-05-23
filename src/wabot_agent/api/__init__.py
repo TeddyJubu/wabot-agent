@@ -72,6 +72,7 @@ from ..knowledge_store import (
 )
 from ..llm_provider import active_model_id
 from ..memory import InboundMessage, MemoryStore
+from ..providers import get_registry
 from ..recipients import is_owner_inbound
 from ..redaction import redact
 from ..runtime_overrides import (
@@ -93,10 +94,6 @@ from ..wabot_process import (
 from .dependencies import (
     _LOOPBACK_HOSTS,  # noqa: F401  (re-export — used by external callers and tests)
     _require_loopback_url,
-    _require_safe_ollama_cloud_url,
-    _require_safe_ollama_local_url,
-    _require_safe_openai_url,
-    _require_safe_openrouter_url,
     _safe_next_path,
     _verify_inbound_auth,
     _wabot_call,
@@ -105,8 +102,6 @@ from .deps import AppDeps, PairingState, SchedulerState, SnapshotCache
 from .llm_tests import (
     _settings_view,
     _test_llm_endpoint,
-    _test_openai_endpoint,
-    _test_openrouter_endpoint,
 )
 from .routes.health import register_health_routes
 from .schemas import (
@@ -1200,60 +1195,38 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if "wabot_endpoint" in proposed:
             _require_loopback_url("wabot_endpoint", proposed["wabot_endpoint"])
 
-        # openai_base_url must be HTTPS or loopback HTTP. AND if the base URL changes,
-        # require a new API key in the same patch — otherwise the next /api/chat or
-        # /api/settings/test/openai would send the existing stored key to the new endpoint.
-        if "openai_base_url" in proposed:
-            _require_safe_openai_url("openai_base_url", proposed["openai_base_url"])
-            if (
-                proposed["openai_base_url"] != settings.openai_base_url
-                and "openai_api_key" not in proposed
-            ):
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        "Changing openai_base_url requires openai_api_key in the "
-                        "same PATCH so the existing stored key is not sent to a new endpoint."
-                    ),
-                )
+        # Validate base URLs and enforce the key-in-same-PATCH rule for each
+        # provider with a URL safety validator in the registry.  The rule is:
+        # if base_url_field is present in proposed AND the URL differs from the
+        # stored value AND the provider has a secret, require the secret in the
+        # same PATCH — otherwise the stored key would be sent to the new endpoint.
+        #
+        # Codex is handled separately below because its URL validator raises
+        # ValueError (not HTTPException) and it uses a non-registry codex_base_url
+        # with a different token field (codex_access_token) already in MUTABLE_FIELDS.
+        for _spec in get_registry().values():
+            if _spec.base_url_field is None or _spec.url_safety_validator is None:
+                continue
+            if _spec.base_url_field not in proposed:
+                continue
+            _new_url = proposed[_spec.base_url_field]
+            _spec.url_safety_validator(_spec.base_url_field, _new_url)
+            # If the URL is changing AND the provider has a secret field, require
+            # the secret to accompany the change.
+            if _spec.secret_field is not None:
+                _stored_url = getattr(settings, _spec.base_url_field, None)
+                if _new_url != _stored_url and _spec.secret_field not in proposed:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=(
+                            f"Changing {_spec.base_url_field} requires {_spec.secret_field} in the "
+                            "same PATCH so the existing stored key is not sent to a new endpoint."
+                        ),
+                    )
 
-        # openrouter_base_url must be HTTPS or loopback HTTP. AND if the base URL
-        # changes, require a new API key in the same patch — otherwise the next
-        # /api/settings/test/openrouter (or /api/chat) would send the existing
-        # stored key to the new endpoint, defeating the no-round-trip property.
-        if "openrouter_base_url" in proposed:
-            _require_safe_openrouter_url("openrouter_base_url", proposed["openrouter_base_url"])
-            if (
-                proposed["openrouter_base_url"] != settings.openrouter_base_url
-                and "openrouter_api_key" not in proposed
-            ):
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        "Changing openrouter_base_url requires openrouter_api_key in the "
-                        "same PATCH so the existing stored key is not sent to a new endpoint."
-                    ),
-                )
-
-        if "ollama_base_url" in proposed:
-            _require_safe_ollama_local_url("ollama_base_url", proposed["ollama_base_url"])
-
-        if "ollama_cloud_base_url" in proposed:
-            _require_safe_ollama_cloud_url(
-                "ollama_cloud_base_url", proposed["ollama_cloud_base_url"]
-            )
-            if (
-                proposed["ollama_cloud_base_url"] != settings.ollama_cloud_base_url
-                and "ollama_api_key" not in proposed
-            ):
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        "Changing ollama_cloud_base_url requires ollama_api_key in the "
-                        "same PATCH so the existing stored key is not sent to a new endpoint."
-                    ),
-                )
-
+        # Codex base URL uses a different (ValueError-raising) validator and a
+        # separate base_url field outside the standard ProviderSpec.base_url_field
+        # contract (codex_base_url lives in MUTABLE_FIELDS but not in the spec).
         if "codex_base_url" in proposed:
             try:
                 from ..codex_auth import require_safe_codex_url
@@ -1304,13 +1277,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         )
         return _settings_view(settings)
 
+    # Test endpoints for providers that declare test_endpoint_path in the registry.
+    # FastAPI requires static type annotations for request bodies, so these handlers
+    # are kept as explicit named functions rather than dynamically generated routes.
+    # The handlers look up the spec from the registry to delegate to the right
+    # test_endpoint_handler — adding a new provider with a test endpoint requires
+    # a registry entry + a new handler here + a TSX section in the SPA.
+
     @app.post("/api/settings/test/openai", dependencies=[human_dependency])
     async def test_openai(payload: OpenAITestRequest | None = None) -> dict[str, Any]:
-        return await _test_openai_endpoint(settings, payload or OpenAITestRequest())
+        spec = get_registry()["openai"]
+        assert spec.test_endpoint_handler is not None
+        return await spec.test_endpoint_handler(settings, payload or OpenAITestRequest())
 
     @app.post("/api/settings/test/openrouter", dependencies=[human_dependency])
     async def test_openrouter(payload: OpenRouterTestRequest | None = None) -> dict[str, Any]:
-        return await _test_openrouter_endpoint(settings, payload or OpenRouterTestRequest())
+        spec = get_registry()["openrouter"]
+        assert spec.test_endpoint_handler is not None
+        return await spec.test_endpoint_handler(settings, payload or OpenRouterTestRequest())
 
     @app.post("/api/settings/test/llm", dependencies=[human_dependency])
     async def test_llm() -> dict[str, Any]:

@@ -23,26 +23,37 @@ from .config import Settings
 
 # Fields that may be set at runtime via /api/settings. Anything not in this set
 # is ignored when applying overrides — defends against mass-assignment via the API.
+#
+# Provider-related fields (api keys, base URLs, model names) should match the
+# provider registry in providers.py. The test in tests/unit/test_provider_registry.py
+# asserts the sets stay in sync. Adding a new provider: add it to providers.py
+# AND extend the sets below, then run the registry tests to verify.
 MUTABLE_FIELDS: frozenset[str] = frozenset(
     {
         "model_provider",
+        # openai
         "openai_api_key",
         "openai_base_url",
         "openai_model",
+        # openrouter
+        "openrouter_api_key",
+        "openrouter_base_url",
+        "openrouter_model",
+        # codex (extra fields beyond ProviderSpec.secret_field / model_field)
         "codex_model",
         "codex_reasoning_effort",
         "codex_base_url",
         "codex_access_token",
         "codex_account_id",
-        "openrouter_api_key",
-        "openrouter_base_url",
-        "openrouter_model",
+        # ollama (local) + ollama_cloud — they share model + api_key fields
         "ollama_model",
         "ollama_base_url",
         "ollama_api_key",
         "ollama_cloud_base_url",
+        # wabot connection
         "wabot_endpoint",
         "wabot_token",
+        # other operator-mutable settings
         "composio_user_id",
         "send_policy",
         "allowed_recipients",
@@ -59,12 +70,16 @@ MUTABLE_FIELDS: frozenset[str] = frozenset(
 # required, same trust level as operator_token.
 
 # Fields whose values are secrets and must be masked when read back over the API.
+# Provider secret fields are sourced from providers.py (ProviderSpec.secret_field).
+# The test in tests/unit/test_provider_registry.py verifies the sets stay in sync.
 SECRET_FIELDS: frozenset[str] = frozenset(
     {
+        # provider secrets (see providers.py for the authoritative list)
         "openai_api_key",
         "codex_access_token",
         "openrouter_api_key",
         "ollama_api_key",
+        # non-provider secrets
         "wabot_token",
     }
 )
