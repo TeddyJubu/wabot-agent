@@ -20,6 +20,10 @@ data/*.db-*
 data/*.jsonl
 data/*.log
 data/*.json
+# Phase 4: curated registry JSONs shipped with the repo — exempt from the
+# broad `data/*.json` runtime-state ignore above.
+!data/skills_registry.json
+!data/mcp_registry.json
 data/operator-token.txt
 evals/results/*
 !evals/results/.gitkeep

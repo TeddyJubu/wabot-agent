@@ -54,6 +54,7 @@ from .routes.codex import register_codex_routes
 from .routes.groups import register_groups_routes
 from .routes.health import register_health_routes
 from .routes.inbound import register_inbound_routes
+from .routes.mcp_admin import register_mcp_admin_routes
 from .routes.memory import register_memory_routes
 from .routes.pages import register_pages_routes
 from .routes.pairing import (
@@ -70,6 +71,7 @@ from .routes.pairing import (
     register_pairing_routes,
 )
 from .routes.settings import register_settings_routes
+from .routes.skills_admin import register_skills_admin_routes
 from .routes.stream import _sse_frame as _sse_frame  # noqa: F401 (re-export)
 from .routes.stream import register_stream_routes
 from .routes.tools_catalog import register_tools_catalog_routes
@@ -247,6 +249,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     _tools_catalog_router = APIRouter()
     register_tools_catalog_routes(_tools_catalog_router, deps)
     app.include_router(_tools_catalog_router)
+
+    # /api/skills/* — Phase 4 skills admin.
+    _skills_router = APIRouter()
+    register_skills_admin_routes(_skills_router, deps)
+    app.include_router(_skills_router)
+
+    # /api/mcp/* — Phase 4 MCP admin.
+    _mcp_router = APIRouter()
+    register_mcp_admin_routes(_mcp_router, deps)
+    app.include_router(_mcp_router)
 
     return app
 

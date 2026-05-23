@@ -16,7 +16,7 @@ export interface Readiness {
   memory: ReadinessRow;
 }
 
-export type SlideOverId = "qr" | "runs" | "groups" | "settings" | "agents" | "tools" | null;
+export type SlideOverId = "qr" | "runs" | "groups" | "settings" | "agents" | "tools" | "integrations" | null;
 
 interface State {
   readiness: Readiness;

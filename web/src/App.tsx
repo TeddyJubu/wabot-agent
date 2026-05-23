@@ -8,6 +8,7 @@ import GroupsPanel from "@/components/slide-overs/GroupsPanel";
 import SettingsPanel from "@/components/slide-overs/SettingsPanel";
 import AgentsPanel from "@/components/slide-overs/AgentsPanel";
 import ToolsPanel from "@/components/slide-overs/ToolsPanel";
+import IntegrationsPanel from "@/components/slide-overs/IntegrationsPanel";
 import { matchSlash } from "@/hooks/useSlashCommands";
 import { usePairingStream } from "@/hooks/usePairingStream";
 import { fetchSettings } from "@/api/settings";
@@ -79,7 +80,8 @@ export default function App() {
         which === "settings" ||
         which === "groups" ||
         which === "agents" ||
-        which === "tools"
+        which === "tools" ||
+        which === "integrations"
       ) {
         open(which);
       }
@@ -168,6 +170,9 @@ export default function App() {
       </SlideOver>
       <SlideOver open={slideOver === "tools"} onClose={close} title="Tools">
         <ToolsPanel />
+      </SlideOver>
+      <SlideOver open={slideOver === "integrations"} onClose={close} title="Integrations">
+        <IntegrationsPanel />
       </SlideOver>
     </div>
   );
