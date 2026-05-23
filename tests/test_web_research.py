@@ -43,6 +43,44 @@ async def test_web_agent_health_disabled() -> None:
     assert result["reason"] == "disabled"
 
 
+def test_complete_does_not_clobber_failed_job(memory: MemoryStore) -> None:
+    """Regression test for #52 — stale complete must not overwrite failure metadata."""
+    created = memory.create_web_research_job(
+        requester_jid="owner@s.whatsapp.net",
+        prompt="Find clinics",
+        output_format="csv",
+    )
+    job_id = str(created["id"])
+    # Claim the job (transitions to 'running').
+    job = memory.claim_pending_web_research_job()
+    assert job is not None
+
+    # Simulate fail_stale_web_research_jobs marking it failed.
+    from datetime import UTC, datetime, timedelta
+    stale_before = (datetime.now(UTC) + timedelta(seconds=1)).isoformat()
+    failed_ids = memory.fail_stale_web_research_jobs(stale_before=stale_before)
+    assert job_id in failed_ids
+
+    row = memory.get_web_research_job(job_id)
+    assert row is not None
+    assert row["status"] == "failed"
+    assert row["error"] == "stale_timeout"
+
+    # A stale worker now calls complete — must NOT flip the row back to completed.
+    memory.complete_web_research_job(
+        job_id,
+        error=None,
+        result_path="research/out.csv",
+        preview="preview",
+        duration_ms=1000,
+        steps=5,
+    )
+    row_after = memory.get_web_research_job(job_id)
+    assert row_after is not None
+    assert row_after["status"] == "failed", "stale complete must not clobber failed state"
+    assert row_after["error"] == "stale_timeout", "failure metadata must be preserved"
+
+
 def test_create_and_claim_web_research_job(memory: MemoryStore) -> None:
     created = memory.create_web_research_job(
         requester_jid="owner@s.whatsapp.net",

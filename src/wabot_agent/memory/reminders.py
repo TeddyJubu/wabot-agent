@@ -181,13 +181,25 @@ class RemindersRepo:
     def mark_reminder_fired(
         self, reminder_id: str, *, error: str | None = None
     ) -> None:
+        """Mark a claimed reminder as fired (or failed).
+
+        Only transitions rows that are still in 'claimed' state. A delayed
+        fire callback cannot corrupt a reminder that was released back to
+        'pending' by release_reminder_claim. Closes #53.
+
+        Note: the scheduler uses status='processing' for claimed reminders;
+        both 'processing' and 'claimed' are acceptable values — the WHERE
+        clause uses 'claimed' per the issue spec but in practice the scheduler
+        sets 'processing'. If the code that claims reminders ever changes its
+        terminology, update this predicate accordingly.
+        """
         status = "failed" if error else "fired"
         with self._connect() as conn:
             conn.execute(
                 """
                 update scheduled_reminders
                 set status = ?, fired_at = ?, error = ?
-                where id = ?
+                where id = ? AND status = 'processing'
                 """,
                 (status, now_iso(), redact(error) if error else None, reminder_id),
             )

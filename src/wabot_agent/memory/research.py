@@ -160,12 +160,12 @@ class WebResearchRepo:
     ) -> None:
         status = "failed" if error else "completed"
         with self._connect() as conn:
-            conn.execute(
+            cur = conn.execute(
                 """
                 update web_research_jobs
                 set status = ?, completed_at = ?, result_path = ?, preview = ?,
                     error = ?, duration_ms = ?, steps = ?
-                where id = ?
+                where id = ? AND status = 'running'
                 """,
                 (
                     status,
@@ -178,6 +178,14 @@ class WebResearchRepo:
                     job_id,
                 ),
             )
+            if cur.rowcount == 0:
+                import logging as _logging
+                _logging.getLogger(__name__).debug(
+                    "complete_web_research_job: job %s was no longer 'running' "
+                    "(likely already failed by fail_stale_web_research_jobs); "
+                    "discarding stale completion result.",
+                    job_id,
+                )
 
     def fail_stale_web_research_jobs(self, *, stale_before: str) -> list[str]:
         """Mark running jobs started before stale_before as failed."""
