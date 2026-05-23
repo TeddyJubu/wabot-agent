@@ -40,3 +40,4 @@ class AppDeps:
     pairing_state: PairingState
     scheduler_state: SchedulerState
     snapshot_cache: SnapshotCache
+    settings_service: Any    # SettingsService — Any to avoid import cycles

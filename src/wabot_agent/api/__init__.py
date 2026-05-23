@@ -77,11 +77,10 @@ from ..recipients import is_owner_inbound
 from ..redaction import redact
 from ..runtime_overrides import (
     MUTABLE_FIELDS,
-    SECRET_FIELDS,
     apply_overrides,
     load_overrides,
-    save_overrides,
 )
+from ..settings_service import SettingsService
 from ..tools import _is_send_allowed
 from ..typing_indicator import inbound_typing_indicator
 from ..wabot import WabotClient, WabotError
@@ -93,10 +92,12 @@ from ..wabot_process import (
 )
 from .dependencies import (
     _LOOPBACK_HOSTS,  # noqa: F401  (re-export — used by external callers and tests)
-    _require_loopback_url,
     _safe_next_path,
     _verify_inbound_auth,
     _wabot_call,
+)
+from .dependencies import (
+    _require_loopback_url as _require_loopback_url,  # noqa: F401  (re-export)
 )
 from .deps import AppDeps, PairingState, SchedulerState, SnapshotCache
 from .llm_tests import (
@@ -326,6 +327,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     event_log = EventLog(settings.log_path, hub=hub)
     wabot = WabotClient(settings.wabot_endpoint, settings.resolved_wabot_token)
 
+    # SR-1: SettingsService is the single owner of settings mutations.
+    settings_service = SettingsService(settings)
+
+    # Subscriber: keep WabotClient in sync when wabot_endpoint / wabot_token change.
+    def _on_settings_change(new_settings: Settings, changed: frozenset[str]) -> None:
+        if "wabot_endpoint" in changed:
+            wabot.endpoint = new_settings.wabot_endpoint.rstrip("/")
+        if "wabot_token" in changed:
+            wabot.token = new_settings.resolved_wabot_token
+
+    settings_service.subscribe(_on_settings_change)
+
+    # TODO(Phase-6): subscribe event_log SSE broadcast here so the dashboard
+    # receives a settings_updated event from any settings change source.
+    # e.g.: settings_service.subscribe(lambda s, changed:
+    #     event_log.write("settings_updated", {"fields": sorted(changed)}))
+    # Blocked until hub.publish() is safe to call from a sync subscriber.
+
     # Pairing poller state — last published payload + the asyncio task handle.
     pairing_state = PairingState()
     snapshot_cache = SnapshotCache()
@@ -521,6 +540,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         pairing_state=pairing_state,
         scheduler_state=scheduler_state,
         snapshot_cache=snapshot_cache,
+        settings_service=settings_service,
     )
 
     app = FastAPI(title="wabot-agent", version="0.1.0", lifespan=lifespan)
@@ -1091,147 +1111,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.patch("/api/settings", dependencies=[human_dependency])
     async def update_settings(patch: SettingsPatch) -> dict[str, Any]:
-        # Build the override dict from non-None fields only.
-        proposed: dict[str, Any] = {}
-        raw = patch.model_dump(exclude={"confirm_allow_all"}, exclude_none=True)
-        for key, value in raw.items():
-            if key not in MUTABLE_FIELDS:
-                continue
-            if key in {"allowed_recipients", "owner_numbers"}:
-                cleaned = sorted(
-                    {str(item).strip() for item in (value or []) if str(item).strip()}
-                )
-                proposed[key] = cleaned
-                continue
-            if key in SECRET_FIELDS and isinstance(value, str) and value == "":
-                proposed[key] = None
-                continue
-            proposed[key] = value
-
-        # Validate model_routing if present. Uses Pydantic TypeAdapter to parse
-        # the whole dict in one shot — catches unknown purpose keys and invalid
-        # ModelChoice values with a single call.
-        if "model_routing" in proposed:
-            routing_raw = proposed["model_routing"]
-            if not isinstance(routing_raw, dict):
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        'model_routing must be a dict (e.g. {"chat": '
-                        '{"provider": "openai", "model": ""}})'
-                    ),
-                )
-            try:
-                from pydantic import TypeAdapter
-
-                from ..model_routing import ModelChoice, ModelPurpose
-
-                _ta = TypeAdapter(dict[ModelPurpose, ModelChoice])
-                validated_routing = _ta.validate_python(routing_raw)
-            except Exception as exc:
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Invalid model_routing: {exc}",
-                ) from exc
-            # Store as serialisable plain dicts for JSON persistence.
-            proposed["model_routing"] = {
-                purpose.value: choice.model_dump()
-                for purpose, choice in validated_routing.items()
-            }
-
-        if proposed.get("send_policy") == "allow_all" and not patch.confirm_allow_all:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "Setting send_policy=allow_all removes the recipient guard. "
-                    "Pass confirm_allow_all=true to acknowledge."
-                ),
-            )
-
-        # wabot must stay on loopback (README safety rule). A non-loopback endpoint
-        # would let an operator redirect the bearer token to an arbitrary host.
-        if "wabot_endpoint" in proposed:
-            _require_loopback_url("wabot_endpoint", proposed["wabot_endpoint"])
-
-        # Validate base URLs and enforce the key-in-same-PATCH rule for each
-        # provider with a URL safety validator in the registry.  The rule is:
-        # if base_url_field is present in proposed AND the URL differs from the
-        # stored value AND the provider has a secret, require the secret in the
-        # same PATCH — otherwise the stored key would be sent to the new endpoint.
-        #
-        # Codex is handled separately below because its URL validator raises
-        # ValueError (not HTTPException) and it uses a non-registry codex_base_url
-        # with a different token field (codex_access_token) already in MUTABLE_FIELDS.
-        for _spec in get_registry().values():
-            if _spec.base_url_field is None or _spec.url_safety_validator is None:
-                continue
-            if _spec.base_url_field not in proposed:
-                continue
-            _new_url = proposed[_spec.base_url_field]
-            _spec.url_safety_validator(_spec.base_url_field, _new_url)
-            # If the URL is changing AND the provider has a secret field, require
-            # the secret to accompany the change.
-            if _spec.secret_field is not None:
-                _stored_url = getattr(settings, _spec.base_url_field, None)
-                if _new_url != _stored_url and _spec.secret_field not in proposed:
-                    raise HTTPException(
-                        status_code=400,
-                        detail=(
-                            f"Changing {_spec.base_url_field} requires {_spec.secret_field} in the "
-                            "same PATCH so the existing stored key is not sent to a new endpoint."
-                        ),
-                    )
-
-        # Codex base URL uses a different (ValueError-raising) validator and a
-        # separate base_url field outside the standard ProviderSpec.base_url_field
-        # contract (codex_base_url lives in MUTABLE_FIELDS but not in the spec).
-        if "codex_base_url" in proposed:
-            try:
-                from ..codex_auth import require_safe_codex_url
-
-                require_safe_codex_url(proposed["codex_base_url"])
-            except ValueError as exc:
-                raise HTTPException(status_code=400, detail=str(exc)) from exc
-            if (
-                proposed["codex_base_url"] != settings.codex_base_url
-                and "codex_access_token" not in proposed
-            ):
-                raise HTTPException(
-                    status_code=400,
-                    detail=(
-                        "Changing codex_base_url requires codex_access_token in the "
-                        "same PATCH so the existing stored token is not sent to a new endpoint."
-                    ),
-                )
-
-        # Build the full set we'll persist (existing disk overrides + this patch),
-        # then validate the WHOLE thing on a snapshot — not just the delta. This
-        # catches the edge case where a stale/manually-edited overrides file
-        # contains a value that would fail validation when reapplied at restart.
-        merged = load_overrides(settings.runtime_overrides_path)
-        merged.update(proposed)
-
-        snapshot = settings.model_copy(deep=True)
-        try:
-            apply_overrides(snapshot, merged)
-        except Exception as exc:  # pydantic ValidationError or other
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-        # Persist to disk first. If this raises, live settings stay unchanged.
-        # Disk is the authoritative source on next restart, so failing here means
-        # we MUST NOT mutate live state — the next reload would otherwise diverge.
-        save_overrides(settings.runtime_overrides_path, merged)
-
-        # Now commit to live settings. The same validators just succeeded on the
-        # snapshot, so this is reliable (and we'd rather crash here than leave
-        # disk and memory desynced — the operator can restart to recover).
-        apply_overrides(settings, proposed)
-        wabot.endpoint = settings.wabot_endpoint.rstrip("/")
-        wabot.token = settings.resolved_wabot_token
-
+        # SR-1: all validation, persistence, and subscriber notification is
+        # now owned by SettingsService.patch(). The route handler is ~5 lines.
+        settings_service.patch(patch)
         event_log.write(
             "settings_updated",
-            {"fields": sorted(proposed.keys())},
+            {"fields": sorted(
+                k for k in patch.model_dump(exclude={"confirm_allow_all"}, exclude_none=True)
+                if k in MUTABLE_FIELDS
+            )},
         )
         return _settings_view(settings)
 
