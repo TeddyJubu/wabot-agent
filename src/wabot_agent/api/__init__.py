@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import io
 import json
 import logging
-import secrets
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Any
 
 import qrcode
 import uvicorn
@@ -18,15 +16,12 @@ from fastapi import (
     APIRouter,
     Depends,
     FastAPI,
-    File,
     Header,
     HTTPException,
     Query,
     Request,
-    UploadFile,
 )
 from fastapi.responses import (
-    JSONResponse,
     Response,
     StreamingResponse,
 )
@@ -42,13 +37,6 @@ from ..auto_reply import (
     deliver_inbound_error_reply,
     inbound_session_id,
 )
-from ..codex_auth import disconnect_codex_credentials
-from ..codex_device_login import (
-    cancel_device_login,
-    device_login_view,
-    poll_device_login,
-    start_device_login,
-)
 from ..config import Settings, get_settings
 from ..context_management import maybe_prune_audit_tables
 from ..events import EventHub, EventLog
@@ -62,11 +50,9 @@ from ..knowledge_store import (
 )
 from ..llm_provider import active_model_id
 from ..memory import InboundMessage, MemoryStore
-from ..providers import get_registry
 from ..recipients import is_owner_inbound
 from ..redaction import redact
 from ..runtime_overrides import (
-    MUTABLE_FIELDS,
     apply_overrides,
     load_overrides,
 )
@@ -83,35 +69,25 @@ from ..wabot_process import (
 from .dependencies import (
     _LOOPBACK_HOSTS,  # noqa: F401  (re-export — used by external callers and tests)
     _verify_inbound_auth,
-    _wabot_call,
 )
 from .dependencies import (
     _require_loopback_url as _require_loopback_url,  # noqa: F401  (re-export)
 )
 from .deps import AppDeps, PairingState, SchedulerState, SnapshotCache
-from .llm_tests import (
-    _settings_view,
-    _test_llm_endpoint,
-)
 from .routes.auth import register_auth_routes
+from .routes.codex import register_codex_routes
+from .routes.groups import register_groups_routes
 from .routes.health import register_health_routes
 from .routes.pages import register_pages_routes
+from .routes.settings import register_settings_routes
 from .schemas import (
-    GroupCreateRequest,
-    GroupInviteRequest,
-    GroupJoinRequest,
-    GroupParticipantsRequest,
-    GroupUpdateRequest,
     HistoryBatchPayload,
     HistorySyncSummaryPayload,
     InboundPayload,
     KnowledgeContentBody,
     MemoryFactBody,
-    OpenAITestRequest,
-    OpenRouterTestRequest,
     PresencePayload,
     ReceiptPayload,
-    SettingsPatch,
 )
 
 logger = logging.getLogger(__name__)
@@ -578,6 +554,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_auth_routes(_auth_router, deps)
     app.include_router(_auth_router)
 
+    # /api/settings/* — extracted to api/routes/settings.py (ME-1 Part 4).
+    _settings_router = APIRouter()
+    register_settings_routes(_settings_router, deps)
+    app.include_router(_settings_router)
+
+    # /api/whatsapp/groups/* — extracted to api/routes/groups.py (ME-1 Part 4).
+    _groups_router = APIRouter()
+    register_groups_routes(_groups_router, deps)
+    app.include_router(_groups_router)
+
+    # /api/codex/* — extracted to api/routes/codex.py (ME-1 Part 4).
+    _codex_router = APIRouter()
+    register_codex_routes(_codex_router, deps)
+    app.include_router(_codex_router)
+
     @app.get("/api/whatsapp/pairing", dependencies=[human_dependency])
     async def whatsapp_pairing() -> dict[str, Any]:
         # _pairing_payload defines the canonical shape; both the SSE
@@ -1006,201 +997,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "X-Accel-Buffering": "no",
             },
         )
-
-    @app.get("/api/settings", dependencies=[human_dependency])
-    async def read_settings(
-        if_none_match: str | None = Header(default=None, alias="If-None-Match"),
-    ) -> Response:
-        # The settings view is small but the dashboard re-fetches it on every
-        # save, refresh, and (soon) SSE settings.changed event. A weak ETag
-        # over the redacted view turns the common case into a 304 with no body.
-        view = _settings_view(settings)
-        body = json.dumps(view, sort_keys=True, ensure_ascii=False).encode("utf-8")
-        etag = f'W/"{hashlib.blake2s(body, digest_size=12).hexdigest()}"'
-        if if_none_match == etag:
-            return Response(status_code=304, headers={"ETag": etag})
-        return JSONResponse(view, headers={"ETag": etag, "Cache-Control": "no-cache"})
-
-    @app.patch("/api/settings", dependencies=[human_dependency])
-    async def update_settings(patch: SettingsPatch) -> dict[str, Any]:
-        # SR-1: all validation, persistence, and subscriber notification is
-        # now owned by SettingsService.patch(). The route handler is ~5 lines.
-        settings_service.patch(patch)
-        event_log.write(
-            "settings_updated",
-            {"fields": sorted(
-                k for k in patch.model_dump(exclude={"confirm_allow_all"}, exclude_none=True)
-                if k in MUTABLE_FIELDS
-            )},
-        )
-        return _settings_view(settings)
-
-    # Test endpoints for providers that declare test_endpoint_path in the registry.
-    # FastAPI requires static type annotations for request bodies, so these handlers
-    # are kept as explicit named functions rather than dynamically generated routes.
-    # The handlers look up the spec from the registry to delegate to the right
-    # test_endpoint_handler — adding a new provider with a test endpoint requires
-    # a registry entry + a new handler here + a TSX section in the SPA.
-
-    @app.post("/api/settings/test/openai", dependencies=[human_dependency])
-    async def test_openai(payload: OpenAITestRequest | None = None) -> dict[str, Any]:
-        spec = get_registry()["openai"]
-        assert spec.test_endpoint_handler is not None
-        return await spec.test_endpoint_handler(settings, payload or OpenAITestRequest())
-
-    @app.post("/api/settings/test/openrouter", dependencies=[human_dependency])
-    async def test_openrouter(payload: OpenRouterTestRequest | None = None) -> dict[str, Any]:
-        spec = get_registry()["openrouter"]
-        assert spec.test_endpoint_handler is not None
-        return await spec.test_endpoint_handler(settings, payload or OpenRouterTestRequest())
-
-    @app.post("/api/settings/test/llm", dependencies=[human_dependency])
-    async def test_llm() -> dict[str, Any]:
-        return await _test_llm_endpoint(settings)
-
-    @app.get("/api/codex/login", dependencies=[human_dependency])
-    async def codex_login_status() -> dict[str, Any]:
-        await poll_device_login(settings)
-        return device_login_view(settings)
-
-    @app.post("/api/codex/login/device", dependencies=[human_dependency])
-    async def codex_login_device_start() -> dict[str, Any]:
-        await start_device_login(settings)
-        await poll_device_login(settings, wait_seconds=8)
-        return device_login_view(settings)
-
-    @app.post("/api/codex/login/device/cancel", dependencies=[human_dependency])
-    async def codex_login_device_cancel() -> dict[str, Any]:
-        await cancel_device_login()
-        return device_login_view(settings)
-
-    @app.post("/api/codex/login/disconnect", dependencies=[human_dependency])
-    async def codex_login_disconnect() -> dict[str, Any]:
-        await cancel_device_login()
-        try:
-            result = disconnect_codex_credentials(settings)
-        except OSError as exc:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Could not remove Codex credentials: {exc}",
-            ) from exc
-
-        view = device_login_view(settings)
-        event_log.write(
-            "codex_disconnected",
-            {
-                "auth_file_removed": result["auth_file_removed"],
-                "token_override_masked": result["token_override_masked"],
-            },
-        )
-        return {**view, "disconnected": True, **result}
-
-    @app.post("/api/settings/test/wabot", dependencies=[human_dependency])
-    async def test_wabot() -> dict[str, Any]:
-        health = await wabot.health()
-        return {
-            "ok": health.ready,
-            "reachable": health.reachable,
-            "logged_in": health.logged_in,
-            "connected": health.connected,
-            "detail": health.detail or (
-                "wabot daemon is reachable and WhatsApp is linked."
-                if health.ready
-                else "wabot reachable but session not ready."
-            ),
-        }
-
-    @app.get("/api/whatsapp/groups", dependencies=[human_dependency])
-    async def list_whatsapp_groups_api() -> dict[str, Any]:
-        return await _wabot_call(wabot.list_groups())
-
-    @app.post("/api/whatsapp/groups", dependencies=[human_dependency])
-    async def create_whatsapp_group_api(body: GroupCreateRequest) -> dict[str, Any]:
-        return await _wabot_call(wabot.create_group(body.name, body.participants))
-
-    @app.get("/api/whatsapp/groups/{group_jid}", dependencies=[human_dependency])
-    async def get_whatsapp_group_api(group_jid: str) -> dict[str, Any]:
-        return await _wabot_call(wabot.get_group(group_jid))
-
-    @app.patch("/api/whatsapp/groups/{group_jid}", dependencies=[human_dependency])
-    async def update_whatsapp_group_api(
-        group_jid: str, body: GroupUpdateRequest
-    ) -> dict[str, Any]:
-        if (
-            body.name is None
-            and body.topic is None
-            and body.announce is None
-            and body.locked is None
-        ):
-            raise HTTPException(
-                status_code=400,
-                detail="provide at least one of name, topic, announce, locked",
-            )
-        return await _wabot_call(
-            wabot.update_group(
-                group_jid,
-                name=body.name,
-                topic=body.topic,
-                announce=body.announce,
-                locked=body.locked,
-            )
-        )
-
-    @app.post(
-        "/api/whatsapp/groups/{group_jid}/participants",
-        dependencies=[human_dependency],
-    )
-    async def update_whatsapp_group_participants_api(
-        group_jid: str, body: GroupParticipantsRequest
-    ) -> dict[str, Any]:
-        return await _wabot_call(
-            wabot.update_group_participants(
-                group_jid, body.participants, action=body.action
-            )
-        )
-
-    @app.post("/api/whatsapp/groups/{group_jid}/leave", dependencies=[human_dependency])
-    async def leave_whatsapp_group_api(group_jid: str) -> dict[str, Any]:
-        return await _wabot_call(wabot.leave_group(group_jid))
-
-    @app.post(
-        "/api/whatsapp/groups/{group_jid}/picture",
-        dependencies=[human_dependency],
-    )
-    async def set_whatsapp_group_picture_api(
-        group_jid: str,
-        file: Annotated[UploadFile, File()],
-    ) -> dict[str, Any]:
-        suffix = Path(file.filename or "group.jpg").suffix or ".jpg"
-        tmp = settings.media_dir / f"group-picture-upload-{secrets.token_hex(8)}{suffix}"
-        try:
-            data = await file.read()
-            if not data:
-                raise HTTPException(status_code=400, detail="empty file")
-            tmp.write_bytes(data)
-            return await _wabot_call(wabot.set_group_picture(group_jid, str(tmp)))
-        finally:
-            tmp.unlink(missing_ok=True)
-
-    @app.delete(
-        "/api/whatsapp/groups/{group_jid}/picture",
-        dependencies=[human_dependency],
-    )
-    async def remove_whatsapp_group_picture_api(group_jid: str) -> dict[str, Any]:
-        return await _wabot_call(wabot.remove_group_picture(group_jid))
-
-    @app.post(
-        "/api/whatsapp/groups/{group_jid}/invite",
-        dependencies=[human_dependency],
-    )
-    async def get_whatsapp_group_invite_api(
-        group_jid: str, body: GroupInviteRequest
-    ) -> dict[str, Any]:
-        return await _wabot_call(wabot.get_group_invite(group_jid, reset=body.reset))
-
-    @app.post("/api/whatsapp/groups/join", dependencies=[human_dependency])
-    async def join_whatsapp_group_api(body: GroupJoinRequest) -> dict[str, Any]:
-        return await _wabot_call(wabot.join_group(body.invite_link))
 
     return app
 
