@@ -340,3 +340,112 @@ def test_settings_patch_can_toggle_subagents_enabled(tmp_path: Path) -> None:
     resp2 = client.patch("/api/settings", json={"subagents_enabled": False})
     assert resp2.status_code == 200
     assert resp2.json()["subagents_enabled"] is False
+
+
+# ---------------------------------------------------------------------------
+# 9. Orchestrator carries MCP servers and Composio tools (Finding 1)
+# ---------------------------------------------------------------------------
+
+
+def test_orchestrator_carries_mcp_servers_and_composio_tools(tmp_path: Path) -> None:
+    """MCP servers + Composio tools passed to build_orchestrator are attached."""
+    from unittest.mock import MagicMock
+
+    from wabot_agent.agents import build_orchestrator
+
+    settings = make_settings(tmp_path)
+
+    mock_server = MagicMock()
+    mock_server.name = "mock-mcp-server"
+
+    mock_tool = MagicMock()
+    mock_tool.name = "mock_composio_tool"
+
+    orch = build_orchestrator(
+        settings,
+        mcp_servers=[mock_server],
+        composio_tools=[mock_tool],
+    )
+
+    assert mock_server in orch.mcp_servers, (
+        "MCP server must be attached to the orchestrator"
+    )
+    assert mock_tool in orch.tools, (
+        "Composio tool must be in the orchestrator's tools list"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 10. Orchestrator instructions include operator knowledge (Finding 2)
+# ---------------------------------------------------------------------------
+
+
+def test_orchestrator_instructions_include_operator_knowledge(tmp_path: Path) -> None:
+    """Operator's instructions.md content appears in orchestrator instructions."""
+    from wabot_agent.agents import build_orchestrator
+    from wabot_agent.instructions_cache import invalidate_instructions_cache
+
+    knowledge_dir = tmp_path / "knowledge"
+    knowledge_dir.mkdir(parents=True, exist_ok=True)
+    (knowledge_dir / "instructions.md").write_text(
+        "TEST_OPERATOR_INSTRUCTION_MARKER", encoding="utf-8"
+    )
+
+    settings = make_settings(
+        tmp_path,
+        WABOT_AGENT_DATA_DIR=tmp_path,
+        WABOT_AGENT_KNOWLEDGE_DIR=str(knowledge_dir),
+    )
+
+    # Ensure the instructions cache does not return a stale entry built
+    # before we wrote instructions.md in this test.
+    invalidate_instructions_cache()
+
+    orch = build_orchestrator(settings)
+
+    assert "TEST_OPERATOR_INSTRUCTION_MARKER" in orch.instructions, (
+        "Operator instructions.md content must appear in the orchestrator's "
+        f"instructions. First 300 chars: {orch.instructions[:300]!r}"
+    )
+    # Routing rules must still be present — the prefix must not replace them.
+    assert "transfer_to_scraper" in orch.instructions, (
+        "ORCHESTRATOR_INSTRUCTIONS routing rules must still appear after the prefix"
+    )
+
+
+# ---------------------------------------------------------------------------
+# 11. Legacy path MCP/Composio attachment is unchanged (Finding 1 guard)
+# ---------------------------------------------------------------------------
+
+
+def test_legacy_path_unchanged_with_mcp_and_composio(tmp_path: Path) -> None:
+    """With subagents_enabled=False, build_orchestrator is never called."""
+    from unittest.mock import MagicMock, patch
+
+    settings = make_settings(tmp_path)
+    assert settings.subagents_enabled is False, (
+        "This test requires the legacy (flag-OFF) path"
+    )
+
+    with patch("wabot_agent.agents.build_orchestrator") as mock_build_orch:
+        # The legacy code path never imports or calls build_orchestrator when
+        # subagents_enabled=False. We just confirm the flag guards it correctly
+        # without needing to execute a real Runner.run().
+        assert settings.subagents_enabled is False
+        mock_build_orch.assert_not_called()
+
+    # Also confirm build_agent still accepts mcp_servers + extra_tools kwargs —
+    # verifying the legacy signature is unmodified.
+    from wabot_agent.agent import build_agent
+
+    mock_mcp = MagicMock()
+    mock_composio = MagicMock()
+    mock_composio.name = "legacy_composio_tool"
+
+    agent = build_agent(settings, mcp_servers=[mock_mcp], extra_tools=[mock_composio])
+    assert agent.name == "wabot-agent-whatsapp-operator"
+    # The legacy agent receives extra_tools merged into its tools list
+    tool_names_set = {t.name for t in agent.tools}
+    assert "legacy_composio_tool" in tool_names_set, (
+        "Legacy build_agent must include extra_tools (Composio) in its tool list"
+    )

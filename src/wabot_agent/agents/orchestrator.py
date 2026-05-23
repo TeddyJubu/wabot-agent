@@ -1,9 +1,18 @@
 """Orchestrator — routes inbound messages to specialist subagents.
 
-The orchestrator has NO domain tools. Its only job is to read each inbound
-message, decide which specialist should handle it, and hand off via the SDK
-handoff mechanism. It may answer simple factual questions directly without
-delegating.
+The orchestrator has NO domain tools of its own. Its primary job is to read
+each inbound message, decide which specialist should handle it, and hand off
+via the SDK handoff mechanism. It may answer simple factual questions directly
+without delegating.
+
+MCP servers and Composio tools are attached to the orchestrator (not the
+specialists) so that:
+  - MCP tool capabilities remain available for turns that do not require a
+    specialist handoff (e.g. direct answers from an MCP server).
+  - Composio tools (Gmail, Google Calendar, etc.) are accessible at the
+    routing layer; the orchestrator can call them before deciding whether a
+    specialist is needed, or can delegate to comms/inboxer with full context.
+  - Specialists stay narrowly focused on their own native tool sets.
 
 The five specialists it can delegate to:
 - scraper: web search, URL fetch, file processing, image search
@@ -14,6 +23,8 @@ The five specialists it can delegate to:
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 from agents import Agent, handoff
 from agents.extensions.handoff_filters import remove_all_tools
@@ -77,8 +88,44 @@ If the right specialist is unclear, ask the operator a clarifying question.
 """
 
 
-def build_orchestrator(settings: Settings) -> Agent:
-    """Build the orchestrator with handoffs to all 5 specialist subagents."""
+def build_orchestrator_instructions(settings: Settings) -> str:
+    """Compose operator customisations onto the static routing prompt.
+
+    Imports ``build_agent_instructions`` lazily (function-local) to avoid a
+    circular import: agents/orchestrator.py -> agent.py -> agents/__init__.py.
+
+    Order: operator's persona / knowledge first (establishes "who you are"),
+    then the routing rules (defines "what you do with each message").
+    """
+    # Lazy import to break the circular dependency:
+    # agents/orchestrator.py -> agent.py -> agents/__init__.py -> orchestrator.py
+    from ..agent import build_agent_instructions  # noqa: PLC0415
+    from ..instructions_cache import cached_render_skill_summary  # noqa: PLC0415
+
+    skill_summary = cached_render_skill_summary(settings.skills_dir)
+    dynamic = build_agent_instructions(settings, skill_summary)
+    return dynamic + "\n\n" + ORCHESTRATOR_INSTRUCTIONS
+
+
+def build_orchestrator(
+    settings: Settings,
+    *,
+    mcp_servers: list[Any] | None = None,
+    composio_tools: list[Any] | None = None,
+) -> Agent:
+    """Build the orchestrator with handoffs to all 5 specialist subagents.
+
+    Args:
+        settings: Application settings.
+        mcp_servers: Live MCP server connections prepared by _prepare_agent_turn.
+            Attached to the orchestrator so MCP tool capabilities are available
+            for turns that do not require a specialist handoff, and so the
+            orchestrator has full context before routing.
+        composio_tools: Composio tool callables (Gmail, Calendar, etc.) prepared
+            by _prepare_agent_turn. Attached to the orchestrator rather than a
+            specialist so all Composio integrations remain accessible at the
+            routing layer regardless of which specialist ultimately handles a turn.
+    """
     scraper = build_scraper(settings)
     memory_keeper = build_memory_keeper(settings)
     comms = build_comms(settings)
@@ -87,10 +134,13 @@ def build_orchestrator(settings: Settings) -> Agent:
 
     return Agent(
         name="orchestrator",
-        instructions=ORCHESTRATOR_INSTRUCTIONS,
+        instructions=build_orchestrator_instructions(settings),
         model=build_model(settings, purpose=ModelPurpose.CHAT),
         model_settings=model_settings(settings, purpose=ModelPurpose.CHAT),
-        tools=[],  # no direct domain tools — only handoffs
+        # MCP servers + Composio tools live on the orchestrator.
+        # Specialists stay narrowly focused on their own native tool sets.
+        tools=composio_tools or [],
+        mcp_servers=mcp_servers or [],
         handoffs=[
             # Scraper: strip tool history — it doesn't need orchestrator's tool context
             handoff(agent=scraper, input_filter=remove_all_tools),

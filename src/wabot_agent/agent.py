@@ -549,7 +549,11 @@ async def run_agent(
         ) as mcp_servers:
             if settings.subagents_enabled:
                 from .agents import build_orchestrator
-                agent = build_orchestrator(settings)
+                agent = build_orchestrator(
+                    settings,
+                    mcp_servers=mcp_servers,
+                    composio_tools=composio_tools,
+                )
             else:
                 agent = build_agent(
                     settings,
@@ -700,7 +704,11 @@ async def run_agent_streamed(
         ) as mcp_servers:
             if settings.subagents_enabled:
                 from .agents import build_orchestrator
-                agent = build_orchestrator(settings)
+                agent = build_orchestrator(
+                    settings,
+                    mcp_servers=mcp_servers,
+                    composio_tools=composio_tools,
+                )
             else:
                 agent = build_agent(
                     settings,

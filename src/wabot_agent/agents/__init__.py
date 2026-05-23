@@ -6,8 +6,11 @@ in Settings (default: False). When the flag is off, the legacy monolithic
 agent in `agent.py` is used unchanged.
 
 Public surface:
-    build_orchestrator(settings) — builds the orchestrator Agent with all
-        five specialist subagents wired as handoffs.
+    build_orchestrator(settings, *, mcp_servers, composio_tools) — builds the
+        orchestrator Agent with all five specialist subagents wired as handoffs.
+        MCP servers and Composio tools loaded by _prepare_agent_turn are
+        threaded through here so they are attached to the orchestrator rather
+        than dropped on the floor when subagents_enabled=True.
     SUBAGENT_NAMES — frozenset of the five specialist names (for tests and
         introspection).
 
