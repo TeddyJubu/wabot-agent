@@ -5,7 +5,7 @@ import base64
 from agents.items import TResponseInputItem
 
 from .config import Settings
-from .llm_provider import active_model_for_purpose, vision_supported
+from .llm_provider import active_model_for_purpose, vision_supported_for_purpose
 from .media_download import MediaDownloadResult, download_inbound_media
 from .memory import InboundMessage
 from .model_routing import ModelPurpose
@@ -54,7 +54,8 @@ async def prepare_runner_input(
     downloaded: MediaDownloadResult | None = None,
 ) -> str | list[TResponseInputItem]:
     """Text prompt, or multimodal input when an inbound image can be attached."""
-    if inbound is None or not settings.vision_attach_images or not vision_supported(settings):
+    vision_ok = vision_supported_for_purpose(ModelPurpose.VISION, settings)
+    if inbound is None or not settings.vision_attach_images or not vision_ok:
         return augmented_text
     if not inbound_is_image(inbound):
         return augmented_text

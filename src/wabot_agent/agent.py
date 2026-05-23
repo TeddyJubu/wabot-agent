@@ -386,7 +386,7 @@ def build_agent(
         name="wabot-agent-whatsapp-operator",
         instructions=instructions,
         model=build_model(settings, purpose=ModelPurpose.CHAT),
-        model_settings=model_settings(settings),
+        model_settings=model_settings(settings, purpose=ModelPurpose.CHAT),
         tools=tools,
         mcp_servers=mcp_servers or [],
     )
@@ -416,7 +416,7 @@ async def _run_codex_lightweight_reply(
         name="wabot-agent-light-reply",
         instructions=_CODEX_LIGHTWEIGHT_INSTRUCTIONS,
         model=build_model(settings, purpose=ModelPurpose.CHAT),
-        model_settings=model_settings(settings),
+        model_settings=model_settings(settings, purpose=ModelPurpose.CHAT),
         tools=[],
     )
     light_config = RunConfig(tracing_disabled=True, workflow_name="wabot-agent-light")

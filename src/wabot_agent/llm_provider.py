@@ -59,16 +59,29 @@ def llm_default_headers(settings: Settings) -> dict[str, str]:
     }
 
 
-def vision_supported(settings: Settings) -> bool:
-    """Whether the active model is expected to accept image inputs."""
-    if not settings.live_model_enabled:
-        return False
-    model = active_model_id(settings).lower()
-    if settings.model_provider == "openai":
-        return any(token in model for token in ("gpt-4o", "gpt-4.1", "vision"))
-    if settings.model_provider == "codex":
-        return any(token in model for token in ("gpt-4o", "gpt-4.1", "vision"))
-    if settings.model_provider == "openrouter":
+def _model_is_vision_capable(provider: str, model_id: str) -> bool:
+    """Return True when *model_id* on *provider* is known to accept image inputs.
+
+    Central token list used by both ``vision_supported`` (global path) and
+    ``vision_supported_for_purpose`` (routed path).  Includes validated
+    May-2026 model names alongside the legacy ones.
+    """
+    model = model_id.lower()
+    if provider in ("openai", "codex"):
+        return any(
+            token in model
+            for token in (
+                "gpt-4o",
+                "gpt-4.1",
+                "vision",
+                # May-2026 additions (use precise substrings to avoid matching
+                # unrelated gpt-5.x codex-only models like gpt-5.3-codex-spark)
+                "gpt-5.5",
+                "o3",
+                "o4",
+            )
+        )
+    if provider == "openrouter":
         return any(
             token in model
             for token in (
@@ -77,19 +90,67 @@ def vision_supported(settings: Settings) -> bool:
                 "gpt-4o",
                 "gpt-4.1",
                 "gpt-4-turbo",
+                "gpt-5.5",
                 "claude-3",
                 "claude-sonnet-4",
+                "claude-opus-4",
+                "claude-haiku-4",
                 "gemini",
                 "llava",
                 "pixtral",
                 "qwen-vl",
                 "qwen2-vl",
+                # May-2026 additions
+                "claude-opus-4-7",
+                "claude-sonnet-4-6",
+                "claude-haiku-4-5",
             )
         )
+    # ollama / ollama_cloud
     return any(
         token in model
         for token in ("gemma4", "gemma3", "vl", "llava", "moondream", "bakllava", "vision")
     )
+
+
+def vision_supported(settings: Settings) -> bool:
+    """Whether the active (global) model is expected to accept image inputs.
+
+    This is the no-purpose fallback — it checks the *global* provider and model.
+    Use ``vision_supported_for_purpose(purpose, settings)`` when a per-purpose
+    vision route may be active (Finding 3 fix).
+    """
+    if not settings.live_model_enabled:
+        return False
+    return _model_is_vision_capable(settings.model_provider, active_model_id(settings))
+
+
+def vision_supported_for_purpose(purpose: Any, settings: Settings) -> bool:
+    """Whether the *routed* model for *purpose* is expected to accept image inputs.
+
+    Finding 3 fix: consults the routed provider + model rather than the global
+    provider, so a vision route pointing at a vision-capable model is honoured
+    even when the global provider/model is not vision-capable.
+
+    Falls back to the global path when the purpose has no routing entry
+    (``used_fallback=True``), preserving backward compat.
+    """
+    resolved = active_model_for_purpose(purpose, settings)
+    # Liveness: routed provider must have credentials (or be local).
+    if settings.offline_mode:
+        return False
+    if resolved.provider == "openai" and not settings.openai_api_key:
+        return False
+    if resolved.provider == "codex":
+        from .codex_auth import load_codex_credentials
+
+        if load_codex_credentials(settings) is None:
+            return False
+    if resolved.provider == "openrouter" and not settings.openrouter_api_key:
+        return False
+    if resolved.provider == "ollama_cloud" and not settings.ollama_api_key:
+        return False
+    return _model_is_vision_capable(resolved.provider, resolved.model_id)
 
 
 def llm_provider_label(settings: Settings) -> str:

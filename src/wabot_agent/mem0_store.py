@@ -300,8 +300,19 @@ def build_mem0_config(settings: Settings) -> dict[str, Any]:
         return {"api_key": api_key}
 
     api_key, base_url, llm_model = _mem0_openai_llm(settings)
-    if not api_key and _effective_mem0_llm_provider(settings) != "ollama":
-        raise Mem0UnavailableError("no API key for mem0 LLM")
+    # Finding 4 fix: use the routing-aware provider check so that local Ollama
+    # (which needs no API key) does not erroneously raise when MEMORY_EXTRACTION
+    # is routed to "ollama" but the global provider is something else.
+    # We use the provider spec's secret_field to determine whether a key is
+    # required: secret_field=None means the provider is local and keyless.
+    effective_provider = _effective_mem0_llm_provider_or_routed(settings)
+    if not api_key:
+        from .providers import get_registry
+
+        spec = get_registry().get(effective_provider or "")
+        provider_requires_key = spec is None or spec.secret_field is not None
+        if provider_requires_key:
+            raise Mem0UnavailableError("no API key for mem0 LLM")
 
     settings.mem0_path.mkdir(parents=True, exist_ok=True)
 

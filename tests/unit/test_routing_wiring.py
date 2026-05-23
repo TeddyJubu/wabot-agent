@@ -272,3 +272,106 @@ def test_vision_active_model_for_purpose(tmp_path: Path) -> None:
 
     assert resolved.provider == "openai"
     assert resolved.model_id == "gpt-4o"
+
+
+# ---------------------------------------------------------------------------
+# P2 codex-review fixes — 4 new regression tests
+# ---------------------------------------------------------------------------
+
+
+def test_liveness_uses_routed_provider_keys(tmp_path: Path) -> None:
+    """Finding 1: global=openai(no key) + chat→openrouter(has key) → live model."""
+    from wabot_agent.models import OfflineModel, build_model
+
+    settings = make_settings(
+        tmp_path,
+        OPENAI_API_KEY="",          # global provider has no key
+        WABOT_AGENT_OFFLINE_MODE=False,  # NOT global offline; liveness via key
+    )
+    settings.model_routing = {
+        ModelPurpose.CHAT: ModelChoice(provider="openrouter", model="openai/gpt-4.1-mini")
+    }
+    # openrouter_api_key is set by make_settings ("router-key-test")
+
+    model = build_model(settings, purpose=ModelPurpose.CHAT)
+
+    assert not isinstance(model, OfflineModel), (
+        "build_model returned OfflineModel even though the routed provider "
+        "(openrouter) has a key — liveness check must use the routed provider."
+    )
+
+
+def test_model_settings_follow_chat_route(tmp_path: Path) -> None:
+    """Finding 2: model_settings(purpose=CHAT) uses the routed provider for headers."""
+    from wabot_agent.models import model_settings
+
+    # Global=openai, but CHAT is routed to openrouter.
+    settings = make_settings(tmp_path)
+    settings.model_routing = {
+        ModelPurpose.CHAT: ModelChoice(provider="openrouter", model="openai/gpt-4.1-mini")
+    }
+
+    ms = model_settings(settings, purpose=ModelPurpose.CHAT)
+
+    # OpenRouter requires HTTP-Referer header; openai does not.
+    extra = ms.extra_headers or {}
+    assert "HTTP-Referer" in extra, (
+        "model_settings(purpose=CHAT) did not include OpenRouter headers even "
+        "though CHAT is routed to openrouter — settings must follow the routed provider."
+    )
+
+    # Without purpose (global path), no extra headers since global is openai.
+    ms_global = model_settings(settings)
+    assert not (ms_global.extra_headers or {}), (
+        "model_settings() without purpose should still use global provider (openai) "
+        "and thus produce no OpenRouter extra_headers."
+    )
+
+
+def test_vision_support_uses_routed_model(tmp_path: Path) -> None:
+    """Finding 3: vision_supported_for_purpose uses the routed VISION model."""
+    from wabot_agent.llm_provider import vision_supported, vision_supported_for_purpose
+
+    # Global provider is openai with a non-vision model (no known vision tokens).
+    settings = make_settings(
+        tmp_path,
+        OPENAI_MODEL="gpt-3.5-turbo",   # no vision tokens → not vision-capable
+        WABOT_AGENT_OFFLINE_MODE=False,
+    )
+    settings.model_routing = {
+        ModelPurpose.VISION: ModelChoice(provider="openai", model="gpt-5.5")
+    }
+
+    # Global path: gpt-3.5-turbo has no vision tokens → False.
+    assert not vision_supported(settings), (
+        "vision_supported(settings) should return False for gpt-3.5-turbo."
+    )
+
+    # Routed path: gpt-5.5 is vision-capable → True.
+    assert vision_supported_for_purpose(ModelPurpose.VISION, settings), (
+        "vision_supported_for_purpose(VISION, settings) should return True "
+        "because the VISION route points at gpt-5.5 (a vision-capable model)."
+    )
+
+
+def test_mem0_routing_to_local_ollama_no_key(tmp_path: Path) -> None:
+    """Finding 4: routing MEMORY_EXTRACTION to local ollama does not raise for missing key."""
+    from wabot_agent.mem0_store import build_mem0_config
+
+    settings = make_settings(
+        tmp_path,
+        WABOT_AGENT_OFFLINE_MODE=False,
+        OPENAI_API_KEY="sk-test-key",  # global provider has a key (irrelevant here)
+        WABOT_AGENT_MEM0_ENABLED=True,
+        WABOT_AGENT_MEM0_USE_PLATFORM=False,
+    )
+    settings.model_routing = {
+        ModelPurpose.MEMORY_EXTRACTION: ModelChoice(provider="ollama", model="llama3.2")
+    }
+
+    # Should NOT raise Mem0UnavailableError("no API key for mem0 LLM").
+    # Local ollama doesn't require an API key.
+    config = build_mem0_config(settings)
+
+    assert "llm" in config, "build_mem0_config should return a config dict with 'llm' key."
+    assert config["llm"]["config"]["model"] == "llama3.2"
