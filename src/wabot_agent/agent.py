@@ -45,6 +45,7 @@ from .memory import (
     inbound_memory_user_ids,
     inbound_person_memory_id,
 )
+from .model_routing import ModelPurpose
 from .models import build_model, model_settings
 from .output_sanitize import strip_model_thinking
 from .redaction import redact
@@ -384,7 +385,7 @@ def build_agent(
     return Agent[RuntimeContext](
         name="wabot-agent-whatsapp-operator",
         instructions=instructions,
-        model=build_model(settings),
+        model=build_model(settings, purpose=ModelPurpose.CHAT),
         model_settings=model_settings(settings),
         tools=tools,
         mcp_servers=mcp_servers or [],
@@ -414,7 +415,7 @@ async def _run_codex_lightweight_reply(
     agent = Agent[RuntimeContext](
         name="wabot-agent-light-reply",
         instructions=_CODEX_LIGHTWEIGHT_INSTRUCTIONS,
-        model=build_model(settings),
+        model=build_model(settings, purpose=ModelPurpose.CHAT),
         model_settings=model_settings(settings),
         tools=[],
     )

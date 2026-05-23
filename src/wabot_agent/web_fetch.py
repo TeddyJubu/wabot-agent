@@ -13,6 +13,7 @@ import httpx
 from .config import Settings
 from .media_download import _extension_for_mime
 from .media_paths import filename_from_content_disposition, safe_media_segment
+from .model_routing import ModelPurpose, get_model_for
 
 _PRIVATE_NETWORKS = (
     ipaddress.ip_network("0.0.0.0/8"),
@@ -101,6 +102,18 @@ def _filename_from_url(url: str, content_type: str | None) -> str:
         return safe_media_segment(name)
     ext = _extension_for_mime(content_type or "")
     return f"download{ext}"
+
+
+def resolve_scraping_model(settings: Settings) -> str:
+    """Return the model_id routed for SCRAPING (or the global default).
+
+    The synchronous scrape path (fetch_url_to_media) is pure HTTP and does not
+    call an LLM directly.  This helper resolves the SCRAPING purpose so that
+    per-purpose routing has an observable effect and downstream callers (e.g.
+    an LLM-based HTML summariser) can pick up the model without a second
+    Settings lookup.
+    """
+    return get_model_for(ModelPurpose.SCRAPING, settings).model_id
 
 
 async def fetch_url_to_media(

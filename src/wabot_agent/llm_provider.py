@@ -143,3 +143,18 @@ def _codex_reasoning(settings: Settings) -> Any | None:
     # from streamed responses. Keep effort unset until store=true is supported.
     _ = settings.codex_reasoning_effort
     return None
+
+
+def active_model_for_purpose(purpose: Any, settings: Settings) -> Any:
+    """Resolve provider + model for *purpose*, delegating to get_model_for().
+
+    This is the stable export point for per-purpose model resolution.  Other
+    modules should import from here rather than importing model_routing directly,
+    to keep the coupling surface small.
+
+    With an empty model_routing (today's default) this behaves identically to
+    calling ``active_model_id(settings)`` — the global provider fallback is used.
+    """
+    from .model_routing import get_model_for  # local import to avoid cycles
+
+    return get_model_for(purpose, settings)

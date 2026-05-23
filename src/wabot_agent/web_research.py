@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
 from .config import Settings
 from .events import EventHub, EventLog
 from .memory import InboundMessage, MemoryStore
+from .model_routing import ModelPurpose, get_model_for
 from .redaction import mask_phone, redact
 from .tools import _is_send_allowed
 from .wabot import WabotClient, WabotError
 from .web_agent import WebAgentError, run_web_agent
+
+logger = logging.getLogger(__name__)
 
 
 def research_output_dir(settings: Settings) -> Path:
@@ -106,6 +110,19 @@ async def execute_web_research_job(
                 job_id, error="invalid_schema_json", result_path=None, preview=None
             )
             return
+
+    # Resolve which model is routed for background research.  The Firecrawl
+    # web-agent sidecar is a self-contained service and does not accept a model
+    # parameter today, but we resolve the purpose here so that (a) the routing
+    # config has an observable effect and (b) a future Firecrawl integration
+    # can pass the model without refactoring.
+    bg_model = get_model_for(ModelPurpose.BACKGROUND_RESEARCH, settings)
+    logger.debug(
+        "web_research job=%s using background_research model=%s provider=%s",
+        job_id,
+        bg_model.model_id,
+        bg_model.provider,
+    )
 
     event_log.write("web_research_started", {"id": job_id, "requester": mask_phone(requester)})
     hub.publish("web_research_started", {"id": job_id})

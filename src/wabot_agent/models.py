@@ -22,14 +22,14 @@ from .codex_auth import codex_request_headers, load_codex_credentials
 from .codex_model import CodexSubscriptionModel
 from .config import Settings
 from .llm_provider import (
-    active_model_id,
+    active_model_for_purpose,
     llm_default_headers,
     max_tokens_for_model,
     omit_tool_choice,
     reasoning_for_model,
-    resolved_llm_api_key,
     resolved_llm_base_url,
 )
+from .model_routing import ModelPurpose
 from .redaction import redact_text
 
 try:
@@ -100,11 +100,30 @@ class OfflineModel(Model):
         raise NotImplementedError("OfflineModel does not implement streaming.")
 
 
-def build_model(settings: Settings) -> Model:
+def build_model(
+    settings: Settings,
+    purpose: ModelPurpose = ModelPurpose.CHAT,
+) -> Model:
+    """Build the Agents SDK Model object for *purpose*.
+
+    When ``settings.model_routing`` has an entry for *purpose*, that provider
+    + model is used.  When *purpose* has no routing entry (today's default for
+    all purposes), the global ``settings.model_provider`` is used — identical
+    to pre-Phase-2 behaviour.
+
+    The codex path is special-cased (device-flow auth, OpenAIResponsesModel)
+    regardless of purpose, preserving all existing codex behaviour.
+    """
     if not settings.live_model_enabled:
         return OfflineModel()
 
-    if settings.model_provider == "codex":
+    # Resolve provider + model for this purpose.
+    resolved = active_model_for_purpose(purpose, settings)
+
+    # Codex uses device-flow auth and a different SDK model class.
+    # We special-case it here regardless of purpose — any purpose routed to
+    # "codex" goes through the same codex auth path.
+    if resolved.provider == "codex":
         if OpenAIResponsesModel is None:  # pragma: no cover
             raise RuntimeError("openai-agents is missing OpenAIResponsesModel.")
         credentials = load_codex_credentials(settings)
@@ -112,11 +131,11 @@ def build_model(settings: Settings) -> Model:
             return OfflineModel()
         client = AsyncOpenAI(
             api_key=credentials.access_token,
-            base_url=resolved_llm_base_url(settings),
+            base_url=resolved.base_url or resolved_llm_base_url(settings),
             default_headers=codex_request_headers(credentials),
         )
         inner = OpenAIResponsesModel(
-            model=active_model_id(settings),
+            model=resolved.model_id,
             openai_client=client,
         )
         return CodexSubscriptionModel(inner)
@@ -124,13 +143,21 @@ def build_model(settings: Settings) -> Model:
     if OpenAIChatCompletionsModel is None:  # pragma: no cover
         raise RuntimeError("openai-agents is missing OpenAIChatCompletionsModel.")
 
+    # For openrouter, include the referral headers.
+    default_headers: dict[str, str] = {}
+    if resolved.provider == "openrouter":
+        default_headers = {
+            "HTTP-Referer": settings.openrouter_site_url,
+            "X-OpenRouter-Title": settings.openrouter_app_title,
+        }
+
     client = AsyncOpenAI(
-        api_key=resolved_llm_api_key(settings),
-        base_url=resolved_llm_base_url(settings),
-        default_headers=llm_default_headers(settings),
+        api_key=resolved.api_key or "",
+        base_url=resolved.base_url or resolved_llm_base_url(settings),
+        default_headers=default_headers,
     )
     return OpenAIChatCompletionsModel(
-        model=active_model_id(settings),
+        model=resolved.model_id,
         openai_client=client,
         strict_feature_validation=False,
     )
