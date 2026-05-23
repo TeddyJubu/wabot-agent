@@ -42,6 +42,7 @@ export default function SettingsPanel() {
   const [recipients, setRecipients] = useState("");
   const [owners, setOwners] = useState("");
   const [status, setStatus] = useState("");
+  const [subagentsEnabled, setSubagentsEnabled] = useState(false);
 
   useEffect(() => {
     fetchSettings()
@@ -51,6 +52,7 @@ export default function SettingsPanel() {
         setPolicy(v.send_policy);
         setRecipients(v.allowed_recipients.join(", "));
         setOwners(v.owner_numbers.join(", "));
+        setSubagentsEnabled(v.subagents_enabled ?? false);
       })
       .catch((err) => setStatus(`Couldn't load: ${String(err)}`));
   }, []);
@@ -86,6 +88,9 @@ export default function SettingsPanel() {
         .map((s) => s.trim())
         .filter(Boolean);
     }
+    if (subagentsEnabled !== (view.subagents_enabled ?? false)) {
+      body.subagents_enabled = subagentsEnabled;
+    }
     for (const [key, value] of Object.entries(draft)) {
       if (value !== "") body[key] = value;
     }
@@ -96,6 +101,7 @@ export default function SettingsPanel() {
       const next = await fetchSettings();
       setView(next);
       setProvider(next.llm.provider);
+      setSubagentsEnabled(next.subagents_enabled ?? false);
     } catch (err) {
       setStatus(`Error: ${String(err)}`);
     }
@@ -170,6 +176,27 @@ export default function SettingsPanel() {
       )}
 
       <ModelRoutingSection view={view} onSaved={refetchSettings} />
+
+      <fieldset className="space-y-2">
+        <legend className="text-xs font-medium uppercase tracking-wider text-fg-muted">
+          Experimental
+        </legend>
+        <label className="flex items-start gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={subagentsEnabled}
+            onChange={(e) => setSubagentsEnabled(e.target.checked)}
+          />
+          <span className="text-xs">
+            <span className="font-medium">Use multi-agent orchestrator</span>
+            <span className="text-fg-muted ml-1">
+              — routes each request to a specialist subagent (scraper, memory,
+              comms, scheduler, inboxer). Opt-in. Default: off.
+            </span>
+          </span>
+        </label>
+      </fieldset>
 
       <WabotSection view={view} draft={draft} setDraft={setDraft} />
 

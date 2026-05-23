@@ -547,12 +547,20 @@ async def run_agent(
         async with connected_mcp_servers(
             settings.mcp_config, skip_names=_mcp_skip_names(settings)
         ) as mcp_servers:
-            agent = build_agent(
-                settings,
-                mcp_servers=mcp_servers,
-                extra_tools=composio_tools,
-                memory=memory,
-            )
+            if settings.subagents_enabled:
+                from .agents import build_orchestrator
+                agent = build_orchestrator(
+                    settings,
+                    mcp_servers=mcp_servers,
+                    composio_tools=composio_tools,
+                )
+            else:
+                agent = build_agent(
+                    settings,
+                    mcp_servers=mcp_servers,
+                    extra_tools=composio_tools,
+                    memory=memory,
+                )
             return await Runner.run(
                 agent,
                 runner_input,
@@ -694,12 +702,20 @@ async def run_agent_streamed(
         async with connected_mcp_servers(
             settings.mcp_config, skip_names=_mcp_skip_names(settings)
         ) as mcp_servers:
-            agent = build_agent(
-                settings,
-                mcp_servers=mcp_servers,
-                extra_tools=composio_tools,
-                memory=memory,
-            )
+            if settings.subagents_enabled:
+                from .agents import build_orchestrator
+                agent = build_orchestrator(
+                    settings,
+                    mcp_servers=mcp_servers,
+                    composio_tools=composio_tools,
+                )
+            else:
+                agent = build_agent(
+                    settings,
+                    mcp_servers=mcp_servers,
+                    extra_tools=composio_tools,
+                    memory=memory,
+                )
             use_streaming = (
                 hasattr(Runner, "run_streamed") and settings.live_model_enabled
             )

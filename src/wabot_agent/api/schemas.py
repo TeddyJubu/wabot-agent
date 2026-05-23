@@ -175,6 +175,7 @@ class SettingsPatch(BaseModel):
     max_agent_turns: int | None = None
     confirm_allow_all: bool = False
     model_routing: dict | None = None
+    subagents_enabled: bool | None = None
 
 
 class OpenAITestRequest(BaseModel):

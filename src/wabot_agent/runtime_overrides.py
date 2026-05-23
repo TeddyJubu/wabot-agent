@@ -62,6 +62,8 @@ MUTABLE_FIELDS: frozenset[str] = frozenset(
         "max_agent_turns",
         # per-purpose model routing (Phase 2)
         "model_routing",
+        # Phase 5 — opt-in multi-agent orchestrator
+        "subagents_enabled",
     }
 )
 

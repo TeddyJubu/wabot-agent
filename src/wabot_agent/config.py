@@ -655,6 +655,19 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Phase 5 — Multi-agent orchestrator (opt-in, default OFF).
+    # When True, run_agent / run_agent_streamed use the orchestrator + 5
+    # specialist subagents instead of the monolithic build_agent. Existing
+    # deployments are unaffected until the operator explicitly enables this.
+    # Can be toggled at runtime via PATCH /api/settings {"subagents_enabled": true}.
+    subagents_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_SUBAGENTS_ENABLED",
+            "VIGNESH_SUBAGENTS_ENABLED",
+        ),
+    )
+
     mem0_llm_provider: Literal["openai", "openrouter", "ollama", "ollama_cloud"] | None = Field(
         default=None,
         validation_alias=AliasChoices(
