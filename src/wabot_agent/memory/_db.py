@@ -19,6 +19,10 @@ def get_thread_connection(path: Path, lock: threading.RLock) -> sqlite3.Connecti
         conn.row_factory = sqlite3.Row
         conn.execute("pragma synchronous=NORMAL")
         conn.execute("pragma busy_timeout=5000")
+        # SQLite ships with FK enforcement OFF by default. Enable it so
+        # `on delete cascade` clauses (used in the new dynamic-subagent
+        # schema and any future child-table relationships) actually fire.
+        conn.execute("pragma foreign_keys=ON")
         _thread_local.conn = conn
         _thread_local.path = path
     return conn
