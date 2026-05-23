@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import io
 import json
 import logging
 import time
@@ -10,23 +9,19 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-import qrcode
 import uvicorn
 from fastapi import (
     APIRouter,
     Depends,
     FastAPI,
     Header,
-    HTTPException,
     Query,
     Request,
 )
 from fastapi.responses import (
-    Response,
     StreamingResponse,
 )
 from fastapi.staticfiles import StaticFiles
-from qrcode.image.svg import SvgFillImage
 
 from ..agent import run_agent
 from ..auth import (
@@ -61,10 +56,16 @@ from ..tools import _is_send_allowed
 from ..typing_indicator import inbound_typing_indicator
 from ..wabot import WabotClient, WabotError
 from ..wabot_process import (
-    WabotRestartError,
-    restart_wabot_daemon,
-    rotate_wabot_store_files,
-    wait_for_fresh_pairing,
+    WabotRestartError as WabotRestartError,  # noqa: F401 (re-export for routes/pairing.py late-import patch target)
+)
+from ..wabot_process import (
+    restart_wabot_daemon as restart_wabot_daemon,  # noqa: F401 (re-export — patched by tests via api module)
+)
+from ..wabot_process import (
+    rotate_wabot_store_files as rotate_wabot_store_files,  # noqa: F401 (re-export)
+)
+from ..wabot_process import (
+    wait_for_fresh_pairing as wait_for_fresh_pairing,  # noqa: F401 (re-export)
 )
 from .dependencies import (
     _LOOPBACK_HOSTS,  # noqa: F401  (re-export — used by external callers and tests)
@@ -79,6 +80,17 @@ from .routes.codex import register_codex_routes
 from .routes.groups import register_groups_routes
 from .routes.health import register_health_routes
 from .routes.pages import register_pages_routes
+from .routes.pairing import (
+    _pairing_payload,  # re-exported for the SSE initial-snapshot call site
+    pairing_poll_loop,
+    register_pairing_routes,
+)
+from .routes.pairing import (
+    _pairing_unreachable_payload as _pairing_unreachable_payload,  # noqa: F401 (re-export)
+)
+from .routes.pairing import (
+    _qr_svg as _qr_svg,  # noqa: F401 re-exported: wabot_agent.api._qr_svg used by tests
+)
 from .routes.settings import register_settings_routes
 from .schemas import (
     HistoryBatchPayload,
@@ -328,70 +340,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 inbound_locks[session_key] = lock
             return lock
 
-    def _pairing_payload(p: Any) -> dict[str, Any]:
-        # Same shape as GET /api/whatsapp/pairing — keep them in sync so the
-        # client can paint from either source.
-        detail = p.detail
-        if not p.qr_available and p.event == "timeout" and not detail:
-            detail = (
-                "The last QR expired before it was scanned. Tap New QR, then scan "
-                "within about a minute while this page stays open."
-            )
-        return {
-            "supported": p.supported,
-            "reachable": p.reachable,
-            "logged_in": p.logged_in,
-            "connected": p.connected,
-            "qr_available": p.qr_available,
-            "event": p.event,
-            "updated_at": p.updated_at,
-            "expires_at": p.expires_at,
-            "detail": detail,
-        }
-
-    def _pairing_unreachable_payload(
-        last: dict[str, Any] | None, *, detail: str
-    ) -> dict[str, Any]:
-        payload = dict(last) if last else {
-            "supported": True,
-            "reachable": False,
-            "logged_in": None,
-            "connected": None,
-            "qr_available": False,
-            "event": None,
-            "updated_at": None,
-            "expires_at": None,
-            "detail": detail,
-        }
-        payload["reachable"] = False
-        payload["detail"] = detail
-        return payload
-
-    async def _pairing_poll_loop() -> None:
-        """Probe wabot pairing state and publish pairing_changed on diff.
-
-        Polls every 5s on loopback — cheap. We only publish when the snapshot
-        actually changes, so a stable linked session generates zero events
-        beyond the initial state push at startup.
-        """
-        while True:
-            try:
-                pairing = await wabot.pairing_qr()
-                payload = _pairing_payload(pairing)
-            except Exception as exc:  # noqa: BLE001 — never kill the loop
-                logger.warning("pairing poll failed: %s", redact(str(exc)))
-                payload = _pairing_unreachable_payload(
-                    pairing_state.last,
-                    detail="Could not reach wabot for pairing status.",
-                )
-            if payload != pairing_state.last:
-                pairing_state.last = payload
-                hub.publish("pairing_changed", payload)
-            try:
-                await asyncio.sleep(5)
-            except asyncio.CancelledError:
-                return
-
     async def _run_web_research_job(job: dict[str, Any]) -> None:
         from ..web_research import execute_web_research_job
 
@@ -477,7 +425,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         hub.bind_loop(asyncio.get_running_loop())
         ensure_knowledge_files(settings)
         maybe_prune_audit_tables(memory, settings, force=True)
-        pairing_state.task = asyncio.create_task(_pairing_poll_loop())
+        pairing_state.task = asyncio.create_task(pairing_poll_loop(deps))
         scheduler_state.task = asyncio.create_task(_scheduler_loop())
         try:
             yield
@@ -569,66 +517,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_codex_routes(_codex_router, deps)
     app.include_router(_codex_router)
 
-    @app.get("/api/whatsapp/pairing", dependencies=[human_dependency])
-    async def whatsapp_pairing() -> dict[str, Any]:
-        # _pairing_payload defines the canonical shape; both the SSE
-        # `pairing_changed` event and this REST endpoint emit it.
-        return redact(_pairing_payload(await wabot.pairing_qr()))
-
-    @app.get(
-        "/api/whatsapp/pairing.svg",
-        dependencies=[human_dependency],
-        include_in_schema=False,
-        response_model=None,
-    )
-    async def whatsapp_pairing_svg() -> Response:
-        pairing = await wabot.pairing_qr()
-        if not pairing.qr:
-            raise HTTPException(
-                status_code=404, detail=pairing.detail or "Pairing QR is unavailable."
-            )
-        return Response(
-            content=_qr_svg(pairing.qr),
-            media_type="image/svg+xml",
-            headers={"Cache-Control": "no-store"},
-        )
-
-    @app.post("/api/whatsapp/pairing/restart", dependencies=[human_dependency])
-    async def whatsapp_pairing_restart() -> dict[str, Any]:
-        try:
-            await restart_wabot_daemon(settings)
-        except WabotRestartError as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-        pairing = await wait_for_fresh_pairing(wabot.pairing_qr)
-        payload = redact(_pairing_payload(pairing))
-        pairing_state.last = payload
-        hub.publish("pairing_changed", payload)
-        return payload
-
-    @app.post("/api/whatsapp/pairing/disconnect", dependencies=[human_dependency])
-    async def whatsapp_pairing_disconnect() -> dict[str, Any]:
-        try:
-            backups = rotate_wabot_store_files(settings)
-            await restart_wabot_daemon(settings)
-        except (OSError, WabotRestartError) as exc:
-            raise HTTPException(status_code=503, detail=str(exc)) from exc
-
-        pairing = await wait_for_fresh_pairing(wabot.pairing_qr)
-        payload = redact(_pairing_payload(pairing))
-        payload.update(
-            {
-                "disconnected": True,
-                "store_backups": [path.name for path in backups],
-            }
-        )
-        pairing_state.last = payload
-        hub.publish("pairing_changed", payload)
-        event_log.write(
-            "whatsapp_disconnected",
-            {"store_backups": [path.name for path in backups]},
-        )
-        return payload
+    # /api/whatsapp/pairing/* — extracted to api/routes/pairing.py (ME-1 Part 5).
+    _pairing_router = APIRouter()
+    register_pairing_routes(_pairing_router, deps)
+    app.include_router(_pairing_router)
 
     async def _process_whatsapp_inbound(
         inbound: InboundMessage,
@@ -1022,22 +914,6 @@ def _sse_frame(event_id: int | None, name: str, data: Any) -> str:
     parts.append("")
     parts.append("")
     return "\n".join(parts)
-
-
-def _qr_svg(payload: str) -> bytes:
-    qr = qrcode.QRCode(border=2, error_correction=qrcode.constants.ERROR_CORRECT_M)
-    qr.add_data(payload)
-    qr.make(fit=True)
-    # SvgFillImage embeds a white backdrop; SvgPathImage is transparent and
-    # disappears on the dashboard's dark pairing panel.
-    image = qr.make_image(
-        image_factory=SvgFillImage,
-        fill_color="black",
-        back_color="white",
-    )
-    out = io.BytesIO()
-    image.save(out)
-    return out.getvalue()
 
 
 # _wabot_call and _verify_inbound_auth now live in api/dependencies.py.
