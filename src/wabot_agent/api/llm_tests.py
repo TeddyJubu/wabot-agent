@@ -45,8 +45,8 @@ from ..llm_provider import (
     resolved_llm_base_url,
 )
 from ..runtime_overrides import mask_secret
-from .dependencies import _require_safe_openrouter_url
-from .schemas import OpenRouterTestRequest
+from .dependencies import _require_safe_openai_url, _require_safe_openrouter_url
+from .schemas import OpenAITestRequest, OpenRouterTestRequest
 
 
 async def _test_llm_endpoint(settings: Settings) -> dict[str, Any]:
@@ -56,6 +56,8 @@ async def _test_llm_endpoint(settings: Settings) -> dict[str, Any]:
 
     label = llm_provider_label(settings)
     if not settings.live_model_enabled:
+        if settings.model_provider == "openai":
+            return {"ok": False, "detail": "OPENAI_API_KEY is not configured."}
         if settings.model_provider == "codex":
             return {
                 "ok": False,
@@ -113,6 +115,59 @@ async def _test_llm_endpoint(settings: Settings) -> dict[str, Any]:
     return {
         "ok": False,
         "detail": f"{label} returned HTTP {resp.status_code}: {resp.text[:200]}",
+    }
+
+
+async def _test_openai_endpoint(
+    settings: Settings, payload: OpenAITestRequest
+) -> dict[str, Any]:
+    from openai import AsyncOpenAI
+
+    snapshot = settings.model_copy(deep=True)
+    snapshot.model_provider = "openai"
+    snapshot.offline_mode = False
+
+    if payload.base_url is not None:
+        base_url = payload.base_url.strip()
+        if base_url:
+            _require_safe_openai_url("openai_base_url", base_url)
+            snapshot.openai_base_url = base_url
+    if payload.model is not None:
+        model = payload.model.strip()
+        if model:
+            snapshot.openai_model = model
+    if payload.api_key is not None:
+        api_key = payload.api_key.strip()
+        if api_key:
+            snapshot.openai_api_key = api_key
+
+    if not snapshot.openai_api_key:
+        return {"ok": False, "detail": "OPENAI_API_KEY is not configured."}
+
+    model = active_model_id(snapshot)
+    client = AsyncOpenAI(
+        api_key=snapshot.openai_api_key,
+        base_url=snapshot.openai_base_url.rstrip("/"),
+    )
+    try:
+        completion = await client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": "Reply with exactly: ok"}],
+            max_tokens=8,
+            temperature=0,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "detail": f"OpenAI connection failed: {exc}"}
+
+    text = (completion.choices[0].message.content or "").strip() if completion.choices else ""
+    if text.lower().strip(".") == "ok":
+        return {
+            "ok": True,
+            "detail": f"OpenAI chat completions reachable. Active model: {model}",
+        }
+    return {
+        "ok": True,
+        "detail": f"OpenAI reachable. Active model: {model}; probe replied: {text[:80]}",
     }
 
 
@@ -182,10 +237,16 @@ def _settings_view(settings: Settings) -> dict[str, Any]:
         "max_agent_turns": settings.max_agent_turns,
         "llm": {
             "provider": settings.model_provider,
-            "provider_choices": ["codex", "openrouter", "ollama", "ollama_cloud"],
+            "provider_choices": ["openai", "codex", "openrouter", "ollama", "ollama_cloud"],
             "model": active_model_id(settings),
             "label": llm_provider_label(settings),
             "live": settings.live_model_enabled,
+        },
+        "openai": {
+            "api_key": mask_secret(settings.openai_api_key),
+            "base_url": settings.openai_base_url,
+            "model": settings.openai_model,
+            "live": settings.model_provider == "openai" and settings.live_model_enabled,
         },
         "codex": {
             "access_token": mask_secret(settings.codex_access_token),
@@ -225,5 +286,6 @@ def _settings_view(settings: Settings) -> dict[str, Any]:
 __all__ = [
     "_settings_view",
     "_test_llm_endpoint",
+    "_test_openai_endpoint",
     "_test_openrouter_endpoint",
 ]

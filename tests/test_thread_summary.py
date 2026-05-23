@@ -69,6 +69,7 @@ async def test_summarize_thread_live_calls_llm(tmp_path: Path) -> None:
         WABOT_AGENT_LOG_PATH=tmp_path / "events.jsonl",
         WABOT_AGENT_RUNTIME_OVERRIDES_PATH=tmp_path / "runtime_overrides.json",
         WABOT_AGENT_MCP_CONFIG=None,
+        WABOT_AGENT_MODEL_PROVIDER="openrouter",
         OPENROUTER_MODEL="openai/gpt-4.1-mini",
         OPENROUTER_API_KEY="test-key",
         WABOT_AGENT_SESSION_SUMMARY_ENABLED=True,

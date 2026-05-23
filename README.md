@@ -48,7 +48,7 @@ Everything the project can talk to, what you must install, and what each piece n
 | **Runtime** | Python 3.12+, [uv](https://docs.astral.sh/uv/) | Yes | `uv sync` |
 | **Runtime** | Node.js 20+ (build dashboard) | Yes for deploy | `scripts/build-web.sh` |
 | **Core** | [wabot](https://github.com/TeddyJubu/wabot) daemon | Yes | Separate repo; loopback `:7777` |
-| **LLM** | OpenRouter, Ollama local, or Ollama Cloud | One of three | See [LLM providers](#llm-providers-pick-one) |
+| **LLM** | OpenAI API, ChatGPT / Codex, OpenRouter, Ollama local, or Ollama Cloud | One provider | See [LLM providers](#llm-providers-pick-one) |
 | **Memory** | Mem0 + local Qdrant + FastEmbed | Optional | Enabled in `.env`; see [docs/mem0-setup.md](docs/mem0-setup.md) |
 | **Integrations** | Composio native tools | Optional | `COMPOSIO_API_KEY`; see [docs/composio-setup.md](docs/composio-setup.md) |
 | **Integrations** | Firecrawl web-agent | Optional | Node sidecar `:3000`; see [docs/web-agent-setup.md](docs/web-agent-setup.md) |
@@ -71,7 +71,7 @@ uv sync --all-extras          # Python deps (see table below)
 ./scripts/build-web.sh        # Dashboard → static/
 ```
 
-**Offline / no API key:** leave `OPENROUTER_API_KEY` and `OLLAMA_API_KEY` unset and use defaults — agent boots in offline mode for local UI and tests.
+**Offline / no API key:** leave provider API keys unset and use defaults — agent boots in offline mode for local UI and tests.
 
 ---
 
@@ -151,16 +151,17 @@ Set `WABOT_AGENT_MODEL_PROVIDER` in `.env`.
 
 | Provider | Value | Credentials | Base URL | Notes |
 |----------|--------|-------------|----------|--------|
-| **ChatGPT / Codex** (default) | `codex` | `codex login` → `~/.codex/auth.json` | `CODEX_BASE_URL` | Uses your ChatGPT or Codex subscription |
+| **OpenAI API** (default) | `openai` | `OPENAI_API_KEY` | `OPENAI_BASE_URL` | Main hosted API path |
+| **ChatGPT / Codex** | `codex` | `codex login` → `~/.codex/auth.json` | `CODEX_BASE_URL` | Uses your ChatGPT or Codex subscription |
 | **OpenRouter** | `openrouter` | `OPENROUTER_API_KEY` | `OPENROUTER_BASE_URL` | Hosted models, credits |
 | **Ollama (local)** | `ollama` | optional (`ollama`) | `OLLAMA_BASE_URL` | Default `http://127.0.0.1:11434/v1` |
 | **Ollama Cloud** | `ollama_cloud` | `OLLAMA_API_KEY` | `OLLAMA_CLOUD_BASE_URL` | e.g. `gemma4:31b-cloud` → API id `gemma4:31b` |
 
 ```dotenv
-# ChatGPT / Codex subscription (default)
-WABOT_AGENT_MODEL_PROVIDER=codex
-CODEX_MODEL=gpt-5.5
-# Run: codex login
+# OpenAI API (default)
+WABOT_AGENT_MODEL_PROVIDER=openai
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-4.1-mini
 ```
 
 ```dotenv
@@ -292,7 +293,7 @@ Copy [`.env.example`](.env.example) → `.env`. High-signal groups:
 ```bash
 uv sync --all-extras
 cp .env.example .env
-# Edit .env: at minimum wabot tokens; add OPENROUTER_API_KEY or OLLAMA_API_KEY for live model
+# Edit .env: at minimum wabot tokens; add OPENAI_API_KEY or another provider key for live model
 ./scripts/build-web.sh
 uv run python main.py
 ```

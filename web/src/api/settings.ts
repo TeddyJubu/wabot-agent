@@ -3,7 +3,7 @@ export interface MaskedField {
   preview: string | null;
 }
 
-export type ModelProvider = "codex" | "openrouter" | "ollama" | "ollama_cloud";
+export type ModelProvider = "openai" | "codex" | "openrouter" | "ollama" | "ollama_cloud";
 
 export interface SettingsView {
   env_source: string;
@@ -17,6 +17,12 @@ export interface SettingsView {
     provider_choices: ModelProvider[];
     model: string;
     label: string;
+    live: boolean;
+  };
+  openai: {
+    api_key: MaskedField;
+    base_url: string;
+    model: string;
     live: boolean;
   };
   codex: {
@@ -93,5 +99,24 @@ export async function testOpenRouter(body: {
     throw new Error(data?.detail || `openrouter test failed: ${res.status}`);
   }
   if (!data) throw new Error("openrouter test returned no body");
+  return data;
+}
+
+export async function testOpenAI(body: {
+  api_key?: string;
+  base_url?: string;
+  model?: string;
+}): Promise<SettingsTestResult> {
+  const res = await fetch("/api/settings/test/openai", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    credentials: "include",
+    body: JSON.stringify(body),
+  });
+  const data = (await res.json().catch(() => null)) as SettingsTestResult | null;
+  if (!res.ok) {
+    throw new Error(data?.detail || `openai test failed: ${res.status}`);
+  }
+  if (!data) throw new Error("openai test returned no body");
   return data;
 }

@@ -224,3 +224,36 @@ def test_inbound_session_id_uses_chat_for_groups() -> None:
         "111@s.whatsapp.net",
         "120363@g.us",
     ]
+
+
+def test_inbound_session_id_uses_stable_dm_chat_id() -> None:
+    first = InboundMessage(
+        id="d2",
+        sender="56676572987400:31@lid",
+        text="go ahead",
+        chat="56676572987400@lid",
+    )
+    second = InboundMessage(
+        id="d3",
+        sender="56676572987400@lid",
+        text="yup",
+        chat="56676572987400@lid",
+    )
+
+    assert inbound_chat_session_id(first) == "56676572987400@lid"
+    assert inbound_chat_session_id(second) == "56676572987400@lid"
+    assert inbound_person_memory_id(first) == "56676572987400@lid"
+    assert inbound_memory_contact_id(second) == "56676572987400@lid"
+
+
+def test_group_sender_memory_strips_device_suffix() -> None:
+    group = InboundMessage(
+        id="g2",
+        sender="111:42@s.whatsapp.net",
+        text="hi",
+        chat="120363@g.us",
+        is_group=True,
+    )
+
+    assert inbound_chat_session_id(group) == "120363@g.us"
+    assert inbound_person_memory_id(group) == "111@s.whatsapp.net"

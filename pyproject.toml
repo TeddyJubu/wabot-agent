@@ -1,7 +1,7 @@
 [project]
 name = "wabot-agent"
 version = "0.1.0"
-description = "A VPS-ready OpenRouter-powered WhatsApp automation agent for wabot."
+description = "A VPS-ready WhatsApp automation agent for wabot with switchable LLM providers."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -53,5 +53,5 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
   "offline: tests that do not need live credentials or WhatsApp",
-  "live: tests that require live OpenRouter or wabot credentials",
+  "live: tests that require live LLM or wabot credentials",
 ]

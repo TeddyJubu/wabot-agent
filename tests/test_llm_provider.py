@@ -65,6 +65,27 @@ def test_codex_spark_is_not_marked_vision_capable() -> None:
     assert not vision_supported(settings)
 
 
+def test_openai_live_requires_key() -> None:
+    settings = Settings(
+        WABOT_AGENT_MODEL_PROVIDER="openai",
+        WABOT_AGENT_OFFLINE_MODE=False,
+        _env_file=None,
+    )
+    assert not settings.live_model_enabled
+
+    settings = Settings(
+        WABOT_AGENT_MODEL_PROVIDER="openai",
+        OPENAI_API_KEY="sk-test",
+        OPENAI_MODEL="gpt-4.1-mini",
+        WABOT_AGENT_OFFLINE_MODE=False,
+        _env_file=None,
+    )
+    assert settings.live_model_enabled
+    assert active_model_id(settings) == "gpt-4.1-mini"
+    assert resolved_llm_base_url(settings) == "https://api.openai.com/v1"
+    assert resolved_llm_api_key(settings) == "sk-test"
+
+
 def test_openrouter_live_requires_key() -> None:
     settings = Settings(
         WABOT_AGENT_MODEL_PROVIDER="openrouter",

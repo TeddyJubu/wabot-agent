@@ -147,6 +147,9 @@ class SettingsPatch(BaseModel):
     """
 
     model_provider: str | None = None
+    openai_api_key: str | None = None
+    openai_base_url: str | None = None
+    openai_model: str | None = None
     codex_model: str | None = None
     codex_reasoning_effort: str | None = None
     codex_base_url: str | None = None
@@ -161,12 +164,19 @@ class SettingsPatch(BaseModel):
     ollama_cloud_base_url: str | None = None
     wabot_endpoint: str | None = None
     wabot_token: str | None = None
+    composio_user_id: str | None = None
     send_policy: str | None = None
     allowed_recipients: list[str] | None = None
     owner_numbers: list[str] | None = None
     auto_reply_enabled: bool | None = None
     max_agent_turns: int | None = None
     confirm_allow_all: bool = False
+
+
+class OpenAITestRequest(BaseModel):
+    api_key: str | None = None
+    base_url: str | None = None
+    model: str | None = None
 
 
 class OpenRouterTestRequest(BaseModel):
@@ -188,6 +198,7 @@ __all__ = [
     "InboundPayload",
     "KnowledgeContentBody",
     "MemoryFactBody",
+    "OpenAITestRequest",
     "OpenRouterTestRequest",
     "PresencePayload",
     "ReceiptPayload",

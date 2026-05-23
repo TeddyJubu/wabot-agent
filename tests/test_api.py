@@ -504,6 +504,88 @@ def test_openrouter_test_endpoint_uses_openrouter_snapshot(
     assert not (tmp_path / "overrides.json").exists()
 
 
+def test_openai_test_endpoint_uses_openai_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            captured["request"] = kwargs
+            return type(
+                "Completion",
+                (),
+                {
+                    "choices": [
+                        type(
+                            "Choice",
+                            (),
+                            {"message": type("Message", (), {"content": "ok"})()},
+                        )()
+                    ]
+                },
+            )()
+
+    class FakeAsyncOpenAI:
+        def __init__(self, *, api_key: str, base_url: str):
+            captured["api_key"] = api_key
+            captured["base_url"] = base_url
+            self.chat = type("Chat", (), {"completions": FakeCompletions()})()
+
+    monkeypatch.setattr("openai.AsyncOpenAI", FakeAsyncOpenAI)
+    settings = make_settings(tmp_path).model_copy(
+        update={
+            "model_provider": "openrouter",
+            "openai_api_key": None,
+            "runtime_overrides_path": tmp_path / "overrides.json",
+        }
+    )
+    client = TestClient(create_app(settings))
+
+    resp = client.post(
+        "/api/settings/test/openai",
+        json={
+            "api_key": "sk-openai-test",
+            "base_url": "https://api.openai.com/v1",
+            "model": "gpt-4.1-mini",
+        },
+    )
+
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert captured["api_key"] == "sk-openai-test"
+    assert captured["base_url"] == "https://api.openai.com/v1"
+    assert captured["request"]["model"] == "gpt-4.1-mini"  # type: ignore[index]
+    assert settings.model_provider == "openrouter"
+    assert settings.openai_api_key is None
+    assert not (tmp_path / "overrides.json").exists()
+
+
+def test_settings_patch_can_switch_dashboard_to_openai(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path).model_copy(
+        update={
+            "model_provider": "openrouter",
+            "runtime_overrides_path": tmp_path / "overrides.json",
+        }
+    )
+    client = TestClient(create_app(settings))
+
+    resp = client.patch(
+        "/api/settings",
+        json={
+            "model_provider": "openai",
+            "openai_api_key": "sk-openai-new",
+            "openai_model": "gpt-4.1-mini",
+        },
+    )
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["llm"]["provider"] == "openai"
+    assert body["openai"]["api_key"]["set"] is True
+    assert settings.model_provider == "openai"
+
+
 def test_settings_patch_can_switch_dashboard_to_openrouter(tmp_path: Path) -> None:
     settings = make_settings(tmp_path).model_copy(
         update={
@@ -556,6 +638,24 @@ def test_settings_patch_rejects_plain_http_remote_openrouter(tmp_path: Path) -> 
         json={
             "openrouter_base_url": "http://attacker.example.com/v1",
             "openrouter_api_key": "sk-test",
+        },
+    )
+
+    assert resp.status_code == 400
+    assert "https" in resp.json()["detail"].lower()
+
+
+def test_settings_patch_rejects_plain_http_remote_openai(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path).model_copy(
+        update={"runtime_overrides_path": tmp_path / "overrides.json"}
+    )
+    client = TestClient(create_app(settings))
+
+    resp = client.patch(
+        "/api/settings",
+        json={
+            "openai_base_url": "http://attacker.example.com/v1",
+            "openai_api_key": "sk-test",
         },
     )
 

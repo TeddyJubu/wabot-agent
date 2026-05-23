@@ -26,6 +26,9 @@ from .config import Settings
 MUTABLE_FIELDS: frozenset[str] = frozenset(
     {
         "model_provider",
+        "openai_api_key",
+        "openai_base_url",
+        "openai_model",
         "codex_model",
         "codex_reasoning_effort",
         "codex_base_url",
@@ -40,6 +43,7 @@ MUTABLE_FIELDS: frozenset[str] = frozenset(
         "ollama_cloud_base_url",
         "wabot_endpoint",
         "wabot_token",
+        "composio_user_id",
         "send_policy",
         "allowed_recipients",
         "owner_numbers",
@@ -56,7 +60,13 @@ MUTABLE_FIELDS: frozenset[str] = frozenset(
 
 # Fields whose values are secrets and must be masked when read back over the API.
 SECRET_FIELDS: frozenset[str] = frozenset(
-    {"codex_access_token", "openrouter_api_key", "ollama_api_key", "wabot_token"}
+    {
+        "openai_api_key",
+        "codex_access_token",
+        "openrouter_api_key",
+        "ollama_api_key",
+        "wabot_token",
+    }
 )
 
 

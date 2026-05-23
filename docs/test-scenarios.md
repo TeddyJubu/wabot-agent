@@ -6,7 +6,7 @@ Quick checks after deploy. Use your **owner** WhatsApp number unless noted. Dash
 
 ---
 
-## 1. Codex chat (main LLM)
+## 1. OpenAI chat (main LLM)
 
 **Where:** Dashboard → Chat, or WhatsApp to the bot.
 
@@ -21,16 +21,16 @@ Reply with exactly one word: pong
 
 ---
 
-## 2. Codex settings
+## 2. OpenAI settings
 
 **Where:** Dashboard → Settings.
 
 **Check:**
-- Model provider = **ChatGPT / Codex**
-- Shows **signed in** (green), not stuck on device login
-- Model dropdown shows your Codex model (e.g. `gpt-5.5`)
+- Model provider = **OpenAI API**
+- Shows the OpenAI key as configured (green active status)
+- Model field shows your OpenAI model (e.g. `gpt-4.1-mini`)
 
-**Optional:** Change reasoning effort → Save → send test #1 again (should still work).
+**Optional:** Switch to another provider → Save → send test #1 again (should still work).
 
 ---
 
@@ -148,7 +148,7 @@ What was my test codename? One word only.
 What model provider are you using right now? Reply with provider name only.
 ```
 
-**Expect:** `codex` (or `ChatGPT` / Codex wording).
+**Expect:** `openai` (or OpenAI API wording).
 
 ---
 
@@ -168,7 +168,7 @@ print(asyncio.run(web_agent_health(s)))
 "
 ```
 
-**Expect:** Both services `active`, `provider: codex`, web health `ok: True`.
+**Expect:** Both services `active`, `provider: openai`, web health `ok: True`.
 
 ---
 

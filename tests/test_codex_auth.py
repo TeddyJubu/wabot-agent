@@ -157,6 +157,26 @@ def test_detect_model_provider_prefers_codex_auth_file(tmp_path: Path) -> None:
     assert not model_provider_explicitly_set()
 
 
+def test_detect_model_provider_prefers_openai_key(tmp_path: Path) -> None:
+    auth_path = tmp_path / "auth.json"
+    auth_path.write_text(
+        json.dumps(
+            {
+                "auth_mode": "chatgpt",
+                "tokens": {"access_token": "file-token"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    settings = Settings(
+        openai_api_key="sk-openai-test",
+        openrouter_api_key="sk-or-test",
+        codex_auth_path=auth_path,
+        _env_file=None,
+    )
+    assert detect_model_provider(settings) == "openai"
+
+
 def test_device_login_view_not_logged_in_while_pending(tmp_path: Path) -> None:
     auth_path = tmp_path / "auth.json"
     auth_path.write_text(

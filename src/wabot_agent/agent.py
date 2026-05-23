@@ -114,6 +114,10 @@ INSTRUCTIONS_TOOLS = """## Tools (use them proactively)
 - list_whatsapp_inbound_messages / get_last_whatsapp_inbound_message — who messaged, context.
 - recall_contact_memory / remember_contact_fact — per-contact key/value facts (SQLite).
 - lookup_whatsapp_contacts — before messaging unknown numbers.
+- WhatsApp is native `wabot` only in this product. Never search for, execute, or
+  manage a Composio `whatsapp` toolkit. Never tell the operator to connect
+  WhatsApp through Composio. If WhatsApp is not ready, use wabot_health/pairing
+  status and report the native wabot readiness issue.
 - Inbound files are downloaded and processed on the VPS automatically (text/PDF/zip excerpts).
 - process_vps_file / process_whatsapp_attachment — re-read or process attachments on demand.
 - search_web / search_images — find pages or image URLs on the public web (no API key).
@@ -168,16 +172,22 @@ INSTRUCTIONS_TOOLS_MEM0 = (
 
 INSTRUCTIONS_TOOLS_COMPOSIO = """- Composio (Gmail, Google Calendar, GitHub, Slack, …) —
   COMPOSIO_* meta-tools only.
+- **Hard boundary:** WhatsApp is never a Composio app/toolkit here. Do not call
+  COMPOSIO_SEARCH_TOOLS for WhatsApp lookup/send/use cases. Do not call COMPOSIO_MANAGE_CONNECTIONS
+  with `whatsapp`. All WhatsApp sending, lookup,
+  groups, media, and readiness checks must use the native wabot tools.
 - **Gmail & Calendar are connected** for this operator. For any email or calendar question,
   you MUST call COMPOSIO_SEARCH_TOOLS then COMPOSIO_MULTI_EXECUTE_TOOL in this turn before
   stating facts. Re-fetch every turn; never reuse stale inbox/calendar summaries from chat.
 - For appointment booking, use Calendar tools to verify the owner's availability before offering
-  times and again before creating the event. The attendee's availability must come from their
-  WhatsApp reply or another live source, not from a guess.
+  times and again before creating the event. Use native wabot tools for the attendee's WhatsApp
+  contact/outreach. The attendee's availability must come from their WhatsApp reply or another
+  live source, not from a guess.
 - **Never hallucinate** mail or events: no invented subjects, senders, times, attendees, or counts.
   If tools fail or return empty, say that plainly — do not guess.
 - Read skill `composio-gmail-calendar` (read_local_skill) before non-trivial mail/calendar work.
-- COMPOSIO_MANAGE_CONNECTIONS when auth fails; paste the OAuth link in your reply.
+- COMPOSIO_MANAGE_CONNECTIONS when Gmail/Calendar or another external non-WhatsApp app auth
+  fails; paste the OAuth link in your reply. Never generate or share a Composio WhatsApp link.
 """
 
 INSTRUCTIONS_INBOUND = """## Inbound auto-reply

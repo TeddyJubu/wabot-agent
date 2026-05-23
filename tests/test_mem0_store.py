@@ -36,6 +36,18 @@ def test_mem0_enabled_with_openrouter() -> None:
     assert mem0_enabled(settings) is True
 
 
+def test_mem0_enabled_with_openai() -> None:
+    settings = Settings(
+        model_provider="openai",
+        mem0_enabled=True,
+        openai_api_key="sk-test",
+    )
+    assert mem0_enabled(settings) is True
+    config = build_mem0_config(settings)
+    assert config["llm"]["config"]["openai_base_url"] == settings.openai_base_url
+    assert config["embedder"]["config"]["openai_base_url"] == settings.openai_base_url
+
+
 def test_mem0_codex_requires_explicit_llm_provider() -> None:
     settings = Settings(
         model_provider="codex",
