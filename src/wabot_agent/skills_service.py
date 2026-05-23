@@ -42,9 +42,14 @@ def _row_to_dict(row: Any) -> dict:
 
 
 def _registry_path() -> Path:
-    """Return the path to data/skills_registry.json shipped with the package."""
-    # Walk up from this file: src/wabot_agent/ -> src/ -> project_root/
-    return Path(__file__).resolve().parents[2] / "data" / "skills_registry.json"
+    """Return the path to skills_registry.json shipped inside the package.
+
+    Kept inside src/wabot_agent/registries/ rather than data/ because the
+    VPS deploy excludes data/ as runtime state (see
+    scripts/deploy-to-vignesh.sh); package data ships with the wheel/uv
+    install and survives rsync.
+    """
+    return Path(__file__).resolve().parent / "registries" / "skills_registry.json"
 
 
 # ---------------------------------------------------------------------------

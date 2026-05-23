@@ -80,8 +80,13 @@ def _row_to_dict(row: Any) -> dict:
 
 
 def _registry_path():
+    """Path to mcp_registry.json shipped inside the package.
+
+    Kept under src/wabot_agent/registries/ (not data/) because the VPS
+    deploy excludes data/; package data survives rsync.
+    """
     from pathlib import Path
-    return Path(__file__).resolve().parents[2] / "data" / "mcp_registry.json"
+    return Path(__file__).resolve().parent / "registries" / "mcp_registry.json"
 
 
 # ---------------------------------------------------------------------------
