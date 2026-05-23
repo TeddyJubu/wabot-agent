@@ -14,7 +14,18 @@ from typing import Annotated, Any
 
 import qrcode
 import uvicorn
-from fastapi import Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Query,
+    Request,
+    UploadFile,
+)
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
@@ -89,7 +100,13 @@ from .dependencies import (
     _verify_inbound_auth,
     _wabot_call,
 )
-from .llm_tests import _settings_view, _test_llm_endpoint, _test_openrouter_endpoint
+from .deps import AppDeps, PairingState, SchedulerState, SnapshotCache
+from .llm_tests import (
+    _settings_view,
+    _test_llm_endpoint,
+    _test_openrouter_endpoint,
+)
+from .routes.health import register_health_routes
 from .schemas import (
     ChatRequest,
     ChatResponse,
@@ -314,10 +331,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     wabot = WabotClient(settings.wabot_endpoint, settings.resolved_wabot_token)
 
     # Pairing poller state — last published payload + the asyncio task handle.
-    pairing_state: dict[str, Any] = {"last": None, "task": None}
-    snapshot_cache: dict[str, Any] = {"at": 0.0, "payload": None}
+    pairing_state = PairingState()
+    snapshot_cache = SnapshotCache()
     _SNAPSHOT_TTL_SEC = 2.0
-    scheduler_state: dict[str, Any] = {"task": None}
+    scheduler_state = SchedulerState()
     inbound_locks: dict[str, asyncio.Lock] = {}
     inbound_locks_guard = asyncio.Lock()
 
@@ -382,11 +399,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             except Exception as exc:  # noqa: BLE001 — never kill the loop
                 logger.warning("pairing poll failed: %s", redact(str(exc)))
                 payload = _pairing_unreachable_payload(
-                    pairing_state["last"],
+                    pairing_state.last,
                     detail="Could not reach wabot for pairing status.",
                 )
-            if payload != pairing_state["last"]:
-                pairing_state["last"] = payload
+            if payload != pairing_state.last:
+                pairing_state.last = payload
                 hub.publish("pairing_changed", payload)
             try:
                 await asyncio.sleep(5)
@@ -478,19 +495,19 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         hub.bind_loop(asyncio.get_running_loop())
         ensure_knowledge_files(settings)
         maybe_prune_audit_tables(memory, settings, force=True)
-        pairing_state["task"] = asyncio.create_task(_pairing_poll_loop())
-        scheduler_state["task"] = asyncio.create_task(_scheduler_loop())
+        pairing_state.task = asyncio.create_task(_pairing_poll_loop())
+        scheduler_state.task = asyncio.create_task(_scheduler_loop())
         try:
             yield
         finally:
-            pairing_task = pairing_state.get("task")
+            pairing_task = pairing_state.task
             if pairing_task is not None:
                 pairing_task.cancel()
                 try:
                     await pairing_task
                 except (asyncio.CancelledError, Exception):  # noqa: BLE001
                     pass
-            sched_task = scheduler_state.get("task")
+            sched_task = scheduler_state.task
             if sched_task is not None:
                 sched_task.cancel()
                 try:
@@ -499,12 +516,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                     pass
             await wabot.aclose()
 
+    deps = AppDeps(
+        settings=settings,
+        memory=memory,
+        wabot=wabot,
+        event_log=event_log,
+        hub=hub,
+        pairing_state=pairing_state,
+        scheduler_state=scheduler_state,
+        snapshot_cache=snapshot_cache,
+    )
+
     app = FastAPI(title="wabot-agent", version="0.1.0", lifespan=lifespan)
     app.state.settings = settings
     app.state.memory = memory
     app.state.event_log = event_log
     app.state.event_hub = hub
     app.state.wabot = wabot
+    app.state.deps = deps
 
     # NOTE: api/__init__.py is one level deeper than the old api.py was,
     # so the walk to the project root needs parents[3] (api → wabot_agent → src → root).
@@ -616,30 +645,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Dashboard not built.")
         return FileResponse(index)
 
-    @app.get("/health")
-    async def health() -> dict[str, Any]:
-        return {"ok": True, "service": "wabot-agent", "env": settings.env}
-
-    @app.get("/ready", dependencies=[human_dependency])
-    async def ready() -> dict[str, Any]:
-        wabot_health = await wabot.health()
-        return redact(
-            {
-                "ok": True,
-                "live_model": settings.live_model_enabled,
-                "model_provider": settings.model_provider,
-                "model": active_model_id(settings) if settings.live_model_enabled else "offline",
-                "send_policy": settings.send_policy,
-                "memory": memory.stats(),
-                "wabot": {
-                    "reachable": wabot_health.reachable,
-                    "logged_in": wabot_health.logged_in,
-                    "connected": wabot_health.connected,
-                    "ready": wabot_health.ready,
-                    "detail": wabot_health.detail,
-                },
-            }
-        )
+    # /health and /ready — extracted to api/routes/health.py (MASTER ME-1 Part 2).
+    _health_router = APIRouter()
+    register_health_routes(_health_router, deps)
+    app.include_router(_health_router)
 
     @app.get("/api/whatsapp/pairing", dependencies=[human_dependency])
     async def whatsapp_pairing() -> dict[str, Any]:
@@ -674,7 +683,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         pairing = await wait_for_fresh_pairing(wabot.pairing_qr)
         payload = redact(_pairing_payload(pairing))
-        pairing_state["last"] = payload
+        pairing_state.last = payload
         hub.publish("pairing_changed", payload)
         return payload
 
@@ -694,7 +703,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "store_backups": [path.name for path in backups],
             }
         )
-        pairing_state["last"] = payload
+        pairing_state.last = payload
         hub.publish("pairing_changed", payload)
         event_log.write(
             "whatsapp_disconnected",
@@ -1053,17 +1062,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         changes arrive as deltas on the same stream.
         """
         now = time.monotonic()
-        cached = snapshot_cache.get("payload")
+        cached = snapshot_cache.payload
         if (
             cached is not None
-            and now - float(snapshot_cache.get("at") or 0.0) < _SNAPSHOT_TTL_SEC
+            and now - float(snapshot_cache.at) < _SNAPSHOT_TTL_SEC
         ):
             return cached
         wabot_health = await wabot.health()
         # Prefer the poller's cached pairing snapshot (already redacted on
         # publish); on cold start before the first tick fires, fall through
         # to a fresh probe so the client doesn't paint a blank pairing card.
-        pairing = pairing_state.get("last")
+        pairing = pairing_state.last
         if pairing is None:
             pairing = _pairing_payload(await wabot.pairing_qr())
         snapshot = redact(
@@ -1085,8 +1094,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "runs": memory.recent_runs(limit=8),
             }
         )
-        snapshot_cache["at"] = now
-        snapshot_cache["payload"] = snapshot
+        snapshot_cache.at = now
+        snapshot_cache.payload = snapshot
         return snapshot
 
     @app.get("/api/stream", dependencies=[human_dependency])
