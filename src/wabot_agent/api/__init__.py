@@ -15,7 +15,6 @@ from fastapi import (
     Depends,
     FastAPI,
     Header,
-    Query,
     Request,
 )
 from fastapi.responses import (
@@ -35,14 +34,7 @@ from ..auto_reply import (
 from ..config import Settings, get_settings
 from ..context_management import maybe_prune_audit_tables
 from ..events import EventHub, EventLog
-from ..knowledge_store import (
-    ensure_knowledge_files,
-    list_knowledge_docs,
-    read_global_memory_raw,
-    read_instructions_raw,
-    save_global_memory,
-    save_instructions,
-)
+from ..knowledge_store import ensure_knowledge_files
 from ..llm_provider import active_model_id
 from ..memory import InboundMessage, MemoryStore
 from ..recipients import is_owner_inbound
@@ -79,6 +71,7 @@ from .routes.auth import register_auth_routes
 from .routes.codex import register_codex_routes
 from .routes.groups import register_groups_routes
 from .routes.health import register_health_routes
+from .routes.memory import register_memory_routes
 from .routes.pages import register_pages_routes
 from .routes.pairing import (
     _pairing_payload,  # re-exported for the SSE initial-snapshot call site
@@ -96,8 +89,6 @@ from .schemas import (
     HistoryBatchPayload,
     HistorySyncSummaryPayload,
     InboundPayload,
-    KnowledgeContentBody,
-    MemoryFactBody,
     PresencePayload,
     ReceiptPayload,
 )
@@ -522,6 +513,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     register_pairing_routes(_pairing_router, deps)
     app.include_router(_pairing_router)
 
+    # /api/memory/* + /api/knowledge/* + /api/runs — extracted to routes/memory.py (ME-1 Part 6).
+    _memory_router = APIRouter()
+    register_memory_routes(_memory_router, deps)
+    app.include_router(_memory_router)
+
     async def _process_whatsapp_inbound(
         inbound: InboundMessage,
         request: Request,
@@ -716,83 +712,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             },
         )
         return {"accepted": True, **result}
-
-    @app.get("/api/memory/agent-notes", dependencies=[human_dependency])
-    async def list_agent_notes() -> dict[str, Any]:
-        # Top-level keys must not contain SECRET_KEYS substrings (e.g. "notes" → "key").
-        return {"items": memory.agent_notes()}
-
-    @app.put("/api/memory/agent-notes", dependencies=[human_dependency])
-    async def upsert_agent_note(body: MemoryFactBody) -> dict[str, Any]:
-        from ..instructions_cache import invalidate_instructions_cache
-
-        result = memory.remember_agent_note(body.key, body.value)
-        invalidate_instructions_cache()
-        return redact(result)
-
-    @app.delete("/api/memory/agent-notes/{key}", dependencies=[human_dependency])
-    async def delete_agent_note_route(key: str) -> dict[str, Any]:
-        from ..instructions_cache import invalidate_instructions_cache
-
-        result = memory.delete_agent_note(key)
-        invalidate_instructions_cache()
-        return redact(result)
-
-    @app.get("/api/memory/{contact}", dependencies=[human_dependency])
-    async def contact_memory(contact: str) -> dict[str, Any]:
-        return redact(memory.recall_contact(contact))
-
-    @app.get("/api/knowledge", dependencies=[human_dependency])
-    async def knowledge_index() -> dict[str, Any]:
-        return {
-            "docs": list_knowledge_docs(settings),
-            "budgets": {
-                "instructions": settings.knowledge_instructions_max_chars,
-                "memory": settings.knowledge_memory_max_chars,
-                "contact": settings.knowledge_contact_max_chars,
-            },
-        }
-
-    @app.get("/api/knowledge/instructions", dependencies=[human_dependency])
-    async def knowledge_instructions_get() -> dict[str, Any]:
-        docs = list_knowledge_docs(settings)
-        meta = docs[0] if docs else {}
-        return {"content": read_instructions_raw(settings), **meta}
-
-    @app.put("/api/knowledge/instructions", dependencies=[human_dependency])
-    async def knowledge_instructions_put(body: KnowledgeContentBody) -> dict[str, Any]:
-        meta = save_instructions(settings, body.content)
-        return {"ok": True, **meta}
-
-    @app.get("/api/knowledge/memory", dependencies=[human_dependency])
-    async def knowledge_memory_get() -> dict[str, Any]:
-        docs = list_knowledge_docs(settings)
-        meta = docs[1] if len(docs) > 1 else {}
-        return {"content": read_global_memory_raw(settings), **meta}
-
-    @app.put("/api/knowledge/memory", dependencies=[human_dependency])
-    async def knowledge_memory_put(body: KnowledgeContentBody) -> dict[str, Any]:
-        meta = save_global_memory(settings, body.content)
-        return {"ok": True, **meta}
-
-    @app.get("/api/knowledge/contacts", dependencies=[human_dependency])
-    async def knowledge_contacts() -> dict[str, Any]:
-        return {"contacts": memory.list_contacts_with_facts()}
-
-    @app.put("/api/memory/{contact}/facts", dependencies=[human_dependency])
-    async def upsert_contact_fact(contact: str, body: MemoryFactBody) -> dict[str, Any]:
-        result = memory.remember_contact_fact(
-            contact, body.key, body.value, source="dashboard"
-        )
-        return redact(result)
-
-    @app.delete("/api/memory/{contact}/facts/{key}", dependencies=[human_dependency])
-    async def delete_contact_fact_route(contact: str, key: str) -> dict[str, Any]:
-        return redact(memory.delete_contact_fact(contact, key))
-
-    @app.get("/api/runs", dependencies=[human_dependency])
-    async def recent_runs(limit: int = Query(default=20, ge=0, le=100)) -> list[dict[str, Any]]:
-        return memory.recent_runs(limit=limit)
 
     async def _build_initial_snapshot() -> dict[str, Any]:
         """Initial payload pushed when an SSE client connects.
