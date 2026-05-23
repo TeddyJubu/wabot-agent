@@ -101,7 +101,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             )
         else:
             apply_overrides(settings, overrides)
-    memory = MemoryStore(settings.db_path)
+    memory = MemoryStore(settings.db_path, settings)
     hub = EventHub()
     event_log = EventLog(settings.log_path, hub=hub)
     wabot = WabotClient(settings.wabot_endpoint, settings.resolved_wabot_token)

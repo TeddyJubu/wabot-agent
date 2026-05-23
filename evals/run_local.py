@@ -33,7 +33,7 @@ async def main() -> int:
         OPENROUTER_API_KEY=None,
         _env_file=None,
     )
-    memory = MemoryStore(settings.db_path)
+    memory = MemoryStore(settings.db_path, settings)
     event_log = EventLog(settings.log_path)
     fake_wabot = FakeWabotClient()
     RESULTS.parent.mkdir(parents=True, exist_ok=True)

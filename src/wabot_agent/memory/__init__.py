@@ -6,22 +6,29 @@ continue to work without changes.
 """
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ._db import get_thread_connection
 from ._helpers import now_iso
 from ._migrations import ensure_column, init_schema
+from ._seed import import_mcp_config_file, seed_builtin_subagents, seed_tools_catalog
 from .audit import AuditRepo
 from .contacts import ContactFactsRepo
 from .inbox import InboxRepo
 from .outbound import OutboundTasksRepo
 from .reminders import RemindersRepo
 from .research import WebResearchRepo
+
+if TYPE_CHECKING:
+    from ..config import Settings
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Dataclass and helper functions that callers import directly
@@ -103,14 +110,39 @@ class MemoryStore:
     callers keep working without changes.
     """
 
-    def __init__(self, path: Path | str) -> None:
+    def __init__(self, path: Path | str, settings: Settings | None = None) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
-        # Initialise schema on the main-thread connection
+        # Initialise schema on the main-thread connection, then run seeds.
         with self._lock:
             conn = get_thread_connection(self.path, self._lock)
             init_schema(conn)
+            conn.commit()
+
+            try:
+                seed_builtin_subagents(conn)
+                conn.commit()
+            except KeyboardInterrupt:
+                raise
+            except Exception:
+                logger.warning("seed_builtin_subagents failed; skipping", exc_info=True)
+
+            try:
+                seed_tools_catalog(conn)
+                conn.commit()
+            except KeyboardInterrupt:
+                raise
+            except Exception:
+                logger.warning("seed_tools_catalog failed; skipping", exc_info=True)
+
+            try:
+                import_mcp_config_file(conn, settings)
+                conn.commit()
+            except KeyboardInterrupt:
+                raise
+            except Exception:
+                logger.warning("import_mcp_config_file failed; skipping", exc_info=True)
 
         # Instantiate repos — each receives self.connect as its connection factory
         self._audit = AuditRepo(self.connect)
