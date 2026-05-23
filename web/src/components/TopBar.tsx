@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from "react";
-import { Smartphone, Clock, Settings, Users, BookOpen } from "lucide-react";
+import { Smartphone, Clock, Settings, Users, BookOpen, Bot, Wrench } from "lucide-react";
 import { ClerkNavAuth } from "./ClerkNavAuth";
 import StatusDot from "./StatusDot";
 import StatusPopover from "./StatusPopover";
@@ -33,6 +33,12 @@ export default function TopBar() {
           label="Knowledge base"
         >
           <BookOpen className="size-4" />
+        </IconBtn>
+        <IconBtn onClick={() => open("agents")} label="Agents">
+          <Bot className="size-4" />
+        </IconBtn>
+        <IconBtn onClick={() => open("tools")} label="Tools">
+          <Wrench className="size-4" />
         </IconBtn>
         <IconBtn onClick={() => open("qr")} label="WhatsApp pairing">
           <Smartphone className="size-4" />

@@ -6,6 +6,8 @@ import PairingPanel from "@/components/slide-overs/PairingPanel";
 import RunsPanel from "@/components/slide-overs/RunsPanel";
 import GroupsPanel from "@/components/slide-overs/GroupsPanel";
 import SettingsPanel from "@/components/slide-overs/SettingsPanel";
+import AgentsPanel from "@/components/slide-overs/AgentsPanel";
+import ToolsPanel from "@/components/slide-overs/ToolsPanel";
 import { matchSlash } from "@/hooks/useSlashCommands";
 import { usePairingStream } from "@/hooks/usePairingStream";
 import { fetchSettings } from "@/api/settings";
@@ -71,7 +73,14 @@ export default function App() {
     }
     if (trimmed.startsWith("__open_slide_over__:")) {
       const which = trimmed.split(":")[1] as Exclude<SlideOverId, null>;
-      if (which === "qr" || which === "runs" || which === "settings" || which === "groups") {
+      if (
+        which === "qr" ||
+        which === "runs" ||
+        which === "settings" ||
+        which === "groups" ||
+        which === "agents" ||
+        which === "tools"
+      ) {
         open(which);
       }
     }
@@ -153,6 +162,12 @@ export default function App() {
       </SlideOver>
       <SlideOver open={slideOver === "settings"} onClose={close} title="Settings">
         <SettingsPanel />
+      </SlideOver>
+      <SlideOver open={slideOver === "agents"} onClose={close} title="Agents">
+        <AgentsPanel />
+      </SlideOver>
+      <SlideOver open={slideOver === "tools"} onClose={close} title="Tools">
+        <ToolsPanel />
       </SlideOver>
     </div>
   );
