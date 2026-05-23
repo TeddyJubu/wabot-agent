@@ -120,6 +120,82 @@ def init_schema(conn: sqlite3.Connection) -> None:
     ensure_column(
         conn, "inbound_messages", "has_media", "integer not null default 0"
     )
+    # --- Phase 1: dynamic subagent + tool/skill/MCP catalog tables ---
+    conn.executescript(
+        """
+        create table if not exists subagents (
+            id              integer primary key autoincrement,
+            slug            text not null unique,
+            display_name    text not null,
+            description     text,
+            instructions    text not null,
+            is_builtin      integer not null default 0,
+            is_enabled      integer not null default 1,
+            parent_slug     text,
+            handoff_filter  text,
+            created_at      text not null default current_timestamp,
+            updated_at      text not null default current_timestamp
+        );
+
+        create table if not exists tools (
+            id              integer primary key autoincrement,
+            kind            text not null,
+            source_ref      text not null,
+            name            text not null,
+            description     text,
+            is_enabled      integer not null default 1,
+            metadata        text
+        );
+        create unique index if not exists idx_tools_kind_source on tools(kind, source_ref);
+
+        create table if not exists subagent_tools (
+            subagent_id     integer not null references subagents(id) on delete cascade,
+            tool_id         integer not null references tools(id) on delete cascade,
+            primary key (subagent_id, tool_id)
+        );
+
+        create table if not exists skills (
+            id              integer primary key autoincrement,
+            slug            text not null unique,
+            display_name    text not null,
+            description     text,
+            source          text not null,
+            install_path    text not null,
+            origin_url      text,
+            version         text,
+            installed_at    text not null default current_timestamp,
+            is_enabled      integer not null default 1
+        );
+        create table if not exists subagent_skills (
+            subagent_id     integer not null references subagents(id) on delete cascade,
+            skill_id        integer not null references skills(id) on delete cascade,
+            primary key (subagent_id, skill_id)
+        );
+
+        create table if not exists mcp_servers (
+            id              integer primary key autoincrement,
+            name            text not null unique,
+            transport       text not null,
+            config_json     text not null,
+            is_enabled      integer not null default 1,
+            health_status   text,
+            health_message  text,
+            last_checked_at text
+        );
+
+        create table if not exists composio_connections (
+            id              integer primary key autoincrement,
+            app_slug        text not null,
+            display_name    text not null,
+            status          text not null,
+            user_id         text,
+            last_checked_at text,
+            metadata        text
+        );
+        create unique index if not exists idx_composio_app_user
+            on composio_connections(app_slug, user_id);
+        """
+    )
     conn.commit()
 
 
