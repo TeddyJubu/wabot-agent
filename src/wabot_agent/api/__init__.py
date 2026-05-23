@@ -48,6 +48,7 @@ from .dependencies import (
     _verify_inbound_auth as _verify_inbound_auth,  # noqa: F401 (re-export)
 )
 from .deps import AppDeps, PairingState, SchedulerState, SnapshotCache
+from .routes.agents import register_agents_routes
 from .routes.auth import register_auth_routes
 from .routes.codex import register_codex_routes
 from .routes.groups import register_groups_routes
@@ -71,6 +72,7 @@ from .routes.pairing import (
 from .routes.settings import register_settings_routes
 from .routes.stream import _sse_frame as _sse_frame  # noqa: F401 (re-export)
 from .routes.stream import register_stream_routes
+from .routes.tools_catalog import register_tools_catalog_routes
 from .scheduler import scheduler_loop
 
 logger = logging.getLogger(__name__)
@@ -235,6 +237,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     _stream_router = APIRouter()
     register_stream_routes(_stream_router, deps)
     app.include_router(_stream_router)
+
+    # /api/agents/* — Phase 3a agents CRUD + test endpoint.
+    _agents_router = APIRouter()
+    register_agents_routes(_agents_router, deps)
+    app.include_router(_agents_router)
+
+    # /api/tools/* — Phase 3a tools catalog.
+    _tools_catalog_router = APIRouter()
+    register_tools_catalog_routes(_tools_catalog_router, deps)
+    app.include_router(_tools_catalog_router)
 
     return app
 
