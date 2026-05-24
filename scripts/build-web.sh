@@ -4,6 +4,14 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# Unset NODE_ENV so `npm ci` always installs devDependencies — tsc needs
+# @testing-library/jest-dom and vitest types per web/tsconfig.json. If the
+# user's shell has NODE_ENV=production set (a common gotcha when nvm /
+# pyenv / homebrew profile fragments leak it), npm ci silently skips
+# devDeps and the next `npm run build` fails with "Cannot find type
+# definition file" errors. Same root cause as the Phase 1 vitest fix.
+unset NODE_ENV
+
 if [[ ! -d web ]]; then
   echo "web/ not found" >&2
   exit 1
