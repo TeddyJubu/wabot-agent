@@ -182,19 +182,18 @@ describe("LeftRail — item routing", () => {
     expect(useRouteStore.getState().route).toBe("agents");
   });
 
-  it("Capabilities click opens the tools slide-over and sets route", () => {
+  it("Capabilities click sets route to 'capabilities' without opening a slide-over (C4: Capabilities is now a full page)", () => {
     render(<LeftRail />);
     fireEvent.click(screen.getByRole("button", { name: "Capabilities" }));
-    // C4 will merge Tools + Integrations; B1 reuses the Tools slide-over.
-    expect(useStore.getState().slideOver).toBe("tools");
     expect(useRouteStore.getState().route).toBe("capabilities");
+    expect(useStore.getState().slideOver).toBeNull();
   });
 
-  it("Settings click opens the settings slide-over and sets route", () => {
+  it("Settings click sets route to 'settings' without opening a slide-over (C1: Settings is now a full page)", () => {
     render(<LeftRail />);
     fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-    expect(useStore.getState().slideOver).toBe("settings");
     expect(useRouteStore.getState().route).toBe("settings");
+    expect(useStore.getState().slideOver).toBeNull();
   });
 });
 

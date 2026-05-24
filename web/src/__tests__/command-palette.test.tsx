@@ -1,8 +1,39 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { axe } from "jest-axe";
+
+// ---------------------------------------------------------------------------
+// Mock @/searchIndex so the lazy index fetch in CommandPalette never resolves
+// for the legacy assertions below — that keeps them looking at the sync
+// command-only fallback (the source of truth for the original tests). The
+// new grouped-results describe block at the bottom of this file overrides
+// `getSearchIndex` with a known fixture per-test using `mockResolvedValueOnce`.
+// ---------------------------------------------------------------------------
+
+// The default implementation is a never-resolving promise so the existing
+// command-only tests keep seeing the synchronous SLASH_COMMANDS fallback.
+// Typed as `Promise<unknown[]>` so a later `mockResolvedValue(FIXTURE)` —
+// where FIXTURE is `SearchResult[]` — doesn't fight the inferred `never`
+// return type. The mock factory runs hoisted before any imports, so the
+// concrete `SearchResult` type isn't in scope yet.
+const { getSearchIndexMock } = vi.hoisted(() => ({
+  getSearchIndexMock: vi.fn<() => Promise<unknown[]>>(
+    () => new Promise<unknown[]>(() => {}),
+  ),
+}));
+vi.mock("@/searchIndex", async () => {
+  const actual = await vi.importActual<typeof import("@/searchIndex")>(
+    "@/searchIndex",
+  );
+  return {
+    ...actual,
+    getSearchIndex: getSearchIndexMock,
+  };
+});
+
 import CommandPalette from "@/components/CommandPalette";
 import { SLASH_COMMANDS } from "@/hooks/useSlashCommands";
+import type { SearchResult } from "@/searchIndex";
 import type { SettingsView } from "@/api/settings";
 import type {
   OverviewResponse,
@@ -335,6 +366,13 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// Re-apply the never-resolving default for `getSearchIndex` after each test —
+// `vi.restoreAllMocks()` above clears the implementation, which would otherwise
+// leave the palette calling `.then` on `undefined` in the next test.
+beforeEach(() => {
+  getSearchIndexMock.mockImplementation(() => new Promise<never>(() => {}));
+});
+
 describe("App + CommandPalette wiring", () => {
   it("removes the bottom slash input under ?ui=v2", async () => {
     setSearch("ui=v2");
@@ -400,5 +438,139 @@ describe("App + CommandPalette wiring", () => {
         screen.queryByRole("dialog", { name: "Command palette" }),
       ).toBeNull();
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Epic C5 — Cross-cutting search: grouped result rendering, ranking-driven
+// ordering, keyboard navigation across group boundaries, and sentinel
+// dispatch from non-command results.
+// ---------------------------------------------------------------------------
+
+const FIXTURE_RESULTS: SearchResult[] = [
+  {
+    kind: "command",
+    id: "/qr",
+    label: "/qr",
+    description: "Open WhatsApp pairing QR",
+    sentinel: "__open_pair__",
+  },
+  {
+    kind: "knowledge",
+    id: "knowledge:model-notes",
+    label: "model-notes.md",
+    description: "model routing notes for the weekly brief",
+    sentinel: "__open_knowledge__",
+  },
+  {
+    kind: "agent",
+    id: "agent:router",
+    label: "Router",
+    description: "Default routing agent",
+    sentinel: "__open_slide_over__:agents",
+  },
+  {
+    kind: "tool",
+    id: "tool:model_pick",
+    label: "model_pick",
+    description: "Pick a model for a purpose",
+    sentinel: "__open_slide_over__:tools",
+  },
+  {
+    kind: "settings",
+    id: "settings:provider",
+    label: "Provider",
+    description: "Model provider (OpenAI, Codex, OpenRouter, Ollama)",
+    sentinel: "__open_slide_over__:settings",
+  },
+];
+
+describe("CommandPalette — grouped results from search index", () => {
+  beforeEach(() => {
+    getSearchIndexMock.mockReset();
+    getSearchIndexMock.mockResolvedValue(FIXTURE_RESULTS);
+  });
+
+  it("renders one group per kind with accessible names", async () => {
+    render(<CommandPalette open onClose={vi.fn()} onDispatch={vi.fn()} />);
+
+    // Wait for the index to resolve — first non-command group is a good marker.
+    await screen.findByRole("group", { name: "Knowledge" });
+
+    expect(screen.getByRole("group", { name: "Commands" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Knowledge" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Agents" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Tools" })).toBeInTheDocument();
+    expect(screen.getByRole("group", { name: "Settings" })).toBeInTheDocument();
+  });
+
+  it("typing 'model' surfaces Settings + tool + knowledge entries, with the highest-ranked result first", async () => {
+    render(<CommandPalette open onClose={vi.fn()} onDispatch={vi.fn()} />);
+    await screen.findByRole("group", { name: "Knowledge" });
+
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "model" } });
+
+    const options = screen.getAllByRole("option");
+    const labels = options.map((o) => o.textContent ?? "");
+
+    // The "model_pick" tool (label includes "model") and the
+    // "model-notes.md" knowledge doc (label starts with "model") both match.
+    // The Provider settings entry also matches via its description keywords.
+    expect(labels.some((l) => l.includes("model-notes.md"))).toBe(true);
+    expect(labels.some((l) => l.includes("model_pick"))).toBe(true);
+    expect(labels.some((l) => l.includes("Provider"))).toBe(true);
+
+    // "model-notes.md" starts with "model" (score 500) so it ranks above
+    // "model_pick" which only contains it via includes (score 100). The
+    // first visible option must therefore be the knowledge entry.
+    expect(options[0]?.textContent ?? "").toContain("model-notes.md");
+  });
+
+  it("ArrowDown traverses across group boundaries", async () => {
+    render(<CommandPalette open onClose={vi.fn()} onDispatch={vi.fn()} />);
+    await screen.findByRole("group", { name: "Knowledge" });
+
+    const input = screen.getByRole("combobox");
+    expect(input).toHaveAttribute("aria-activedescendant", "cmdp-item-0");
+
+    const dialog = screen.getByRole("dialog");
+    fireEvent.keyDown(dialog, { key: "ArrowDown" });
+    fireEvent.keyDown(dialog, { key: "ArrowDown" });
+
+    // After two ArrowDowns, the active descendant is item 2 — which lives in
+    // a different group than item 0 (the first command).
+    expect(input).toHaveAttribute("aria-activedescendant", "cmdp-item-2");
+    const options = screen.getAllByRole("option");
+    expect(options[2]).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("Enter on a knowledge result dispatches __open_knowledge__ and closes", async () => {
+    const onDispatch = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <CommandPalette open onClose={onClose} onDispatch={onDispatch} />,
+    );
+    await screen.findByRole("group", { name: "Knowledge" });
+
+    const input = screen.getByRole("combobox");
+    // Narrow to the knowledge entry only, so it lands at activeIdx=0.
+    fireEvent.change(input, { target: { value: "model-notes" } });
+
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Enter" });
+
+    expect(onDispatch).toHaveBeenCalledTimes(1);
+    expect(onDispatch).toHaveBeenCalledWith("__open_knowledge__");
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("remains axe-clean with grouped results rendered", async () => {
+    const { baseElement } = render(
+      <CommandPalette open onClose={vi.fn()} onDispatch={vi.fn()} />,
+    );
+    await screen.findByRole("group", { name: "Knowledge" });
+
+    const results = await axe(baseElement);
+    expect(results).toHaveNoViolations();
   });
 });

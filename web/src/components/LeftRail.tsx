@@ -52,8 +52,10 @@ const GROUPS: RailGroup[] = [
 /**
  * Resolve the click action for a rail item. Some destinations stay in the
  * shell (`setRoute`); others hand off to a separate surface (new tab or
- * full-page nav). `agents`/`capabilities`/`settings` also open the existing
- * slide-over as a stop-gap until C1/C4 promote them to dedicated pages.
+ * full-page nav). Settings (C1), Insights (C2), and Capabilities (C4) ship as
+ * full pages and only need a route change. Agents still opens the existing
+ * slide-over as a stop-gap until a later epic promotes it to a dedicated
+ * page.
  */
 function activate(id: Route): void {
   const setRoute = useRouteStore.getState().setRoute;
@@ -71,13 +73,12 @@ function activate(id: Route): void {
       openSlideOver("agents");
       return;
     case "capabilities":
-      // C4 will merge Tools + Integrations; for B1 we reuse the Tools slide-over.
+      // C4 promoted Capabilities to a full page; no slide-over hand-off here.
       setRoute("capabilities");
-      openSlideOver("tools");
       return;
     case "settings":
+      // C1 promoted Settings to a full page; no slide-over hand-off here.
       setRoute("settings");
-      openSlideOver("settings");
       return;
     case "home":
     case "insights":

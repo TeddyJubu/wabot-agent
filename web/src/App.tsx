@@ -13,12 +13,15 @@ import SettingsPanel from "@/components/slide-overs/SettingsPanel";
 import AgentsPanel from "@/components/slide-overs/AgentsPanel";
 import ToolsPanel from "@/components/slide-overs/ToolsPanel";
 import IntegrationsPanel from "@/components/slide-overs/IntegrationsPanel";
+import CapabilitiesPage from "@/pages/CapabilitiesPage";
+import InsightsPage from "@/pages/InsightsPage";
+import SettingsPage from "@/pages/SettingsPage";
 import { matchSlash } from "@/hooks/useSlashCommands";
 import { usePairingStream } from "@/hooks/usePairingStream";
 import { fetchSettings } from "@/api/settings";
 import { useStore, type SlideOverId } from "@/store";
 import { useUiFlag } from "@/store/uiFlag";
-import { useRoute } from "@/store/route";
+import { useRoute, useRouteStore } from "@/store/route";
 
 export default function App() {
   const slideOver = useStore((s) => s.slideOver);
@@ -67,6 +70,9 @@ export default function App() {
       });
   }, [setReadiness]);
 
+  const uiV2 = useUiFlag();
+  const route = useRoute();
+
   // Slash-command dispatch — resolves navigation targets (slide-overs, pages).
   // The dashboard is now status + slash-commands + slide-overs only; the in-dashboard
   // chat composer was removed in Phase 6 per plan.md P2. WhatsApp is the canonical
@@ -96,11 +102,30 @@ export default function App() {
           which === "integrations" ||
           which === "overview"
         ) {
+          // Under v2, the Phase C epics promoted several slide-overs to real
+          // pages: C1 -> Settings, C2 -> Insights (merges Overview + Runs),
+          // C4 -> Capabilities (merges Tools + Integrations). Route those
+          // sentinels to the route store instead of opening the deprecated
+          // slide-overs. Anything outside that set still rides the slide-over.
+          if (uiV2) {
+            if (which === "settings") {
+              useRouteStore.getState().setRoute("settings");
+              return;
+            }
+            if (which === "overview" || which === "runs") {
+              useRouteStore.getState().setRoute("insights");
+              return;
+            }
+            if (which === "tools" || which === "integrations") {
+              useRouteStore.getState().setRoute("capabilities");
+              return;
+            }
+          }
           open(which);
         }
       }
     },
-    [open],
+    [open, uiV2],
   );
 
   function onKey(e: KeyboardEvent<HTMLInputElement>) {
@@ -127,9 +152,6 @@ export default function App() {
       dispatchCommand(input);
     }
   }
-
-  const uiV2 = useUiFlag();
-  const route = useRoute();
 
   // Global keybindings for the command palette — Cmd-K / Ctrl-K always opens
   // it; "/" opens it ONLY when nothing typeable is focused (so it doesn't
@@ -159,16 +181,13 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  // When the v2 rail picks a destination that's really a slide-over (until
-  // C1/C4 ship full pages for them), open it via the existing store action.
-  // LeftRail already calls openSlideOver on click; this effect keeps the
-  // slide-over in sync if the route is changed programmatically (e.g. by a
-  // future command palette dispatch).
+  // When the v2 rail picks a destination that's still a slide-over (Agents is
+  // the last hold-out — Settings shipped as a page in C1, Insights in C2, and
+  // Capabilities in C4), open the slide-over via the existing store action so
+  // a programmatic route change keeps the panel in sync.
   useEffect(() => {
     if (!uiV2) return;
     if (route === "agents") open("agents");
-    else if (route === "capabilities") open("tools");
-    else if (route === "settings") open("settings");
   }, [uiV2, route, open]);
 
   return (
@@ -182,12 +201,12 @@ export default function App() {
               <StatusBar />
             </div>
             {route === "home" && <HomePanel />}
-            {route === "insights" && <OverviewPanel />}
-            {(route === "agents" ||
-              route === "capabilities" ||
-              route === "settings") && (
+            {route === "insights" && <InsightsPage />}
+            {route === "capabilities" && <CapabilitiesPage />}
+            {route === "settings" && <SettingsPage />}
+            {route === "agents" && (
               <div className="text-fg-muted text-sm">
-                Opening {route} — full page lands in Phase C.
+                Opening agents — full page lands in a later epic.
               </div>
             )}
           </main>
@@ -233,27 +252,37 @@ export default function App() {
         </div>
       )}
 
-      <SlideOver open={slideOver === "runs"} onClose={close} title="Activity">
-        <ActivityPanel />
-      </SlideOver>
-      <SlideOver open={slideOver === "overview"} onClose={close} title="Overview">
-        <OverviewPanel />
-      </SlideOver>
+      {!uiV2 && (
+        <SlideOver open={slideOver === "runs"} onClose={close} title="Activity">
+          <ActivityPanel />
+        </SlideOver>
+      )}
+      {!uiV2 && (
+        <SlideOver open={slideOver === "overview"} onClose={close} title="Overview">
+          <OverviewPanel />
+        </SlideOver>
+      )}
       <SlideOver open={slideOver === "groups"} onClose={close} title="WhatsApp groups">
         <GroupsPanel />
       </SlideOver>
-      <SlideOver open={slideOver === "settings"} onClose={close} title="Settings">
-        <SettingsPanel />
-      </SlideOver>
+      {!uiV2 && (
+        <SlideOver open={slideOver === "settings"} onClose={close} title="Settings">
+          <SettingsPanel />
+        </SlideOver>
+      )}
       <SlideOver open={slideOver === "agents"} onClose={close} title="Agents">
         <AgentsPanel />
       </SlideOver>
-      <SlideOver open={slideOver === "tools"} onClose={close} title="Tools">
-        <ToolsPanel />
-      </SlideOver>
-      <SlideOver open={slideOver === "integrations"} onClose={close} title="Integrations">
-        <IntegrationsPanel />
-      </SlideOver>
+      {!uiV2 && (
+        <SlideOver open={slideOver === "tools"} onClose={close} title="Tools">
+          <ToolsPanel />
+        </SlideOver>
+      )}
+      {!uiV2 && (
+        <SlideOver open={slideOver === "integrations"} onClose={close} title="Integrations">
+          <IntegrationsPanel />
+        </SlideOver>
+      )}
 
       <CommandPalette
         open={paletteOpen}
