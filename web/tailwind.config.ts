@@ -27,14 +27,64 @@ export default {
         ok: "hsl(var(--ok) / <alpha-value>)",
         warn: "hsl(var(--warn) / <alpha-value>)",
         bad: "hsl(var(--bad) / <alpha-value>)",
+        // New in Verdana — Info / new feature surfaces.
+        info: "hsl(var(--info) / <alpha-value>)",
       },
       fontFamily: {
-        sans: ["Geist Sans", "Inter", "system-ui", "sans-serif"],
-        mono: ["Geist Mono", "ui-monospace", "monospace"],
+        // Verdana Health typography stacks. Loaded via web/index.html
+        // <link>s; system fallbacks keep the UI readable before the web
+        // fonts arrive.
+        sans: [
+          "DM Sans",
+          "Inter",
+          "system-ui",
+          "-apple-system",
+          "Segoe UI",
+          "sans-serif",
+        ],
+        display: [
+          "Plus Jakarta Sans",
+          "DM Sans",
+          "Inter",
+          "system-ui",
+          "sans-serif",
+        ],
+        mono: [
+          "Fira Code",
+          "ui-monospace",
+          "SFMono-Regular",
+          "Menlo",
+          "monospace",
+        ],
       },
-      borderRadius: { card: "16px", pill: "999px" },
-      boxShadow: { sm: "0 1px 2px rgba(15,17,21,0.04)" },
+      borderRadius: {
+        // Verdana Health radius scale (design.md).
+        // DEFAULT drops from 16px → 8px so cards / buttons / inputs read
+        // as the calmer, more clinical pill-shape the spec calls for.
+        // `card` keeps the legacy 8px (was 16px) so existing className
+        // call-sites continue to resolve without per-component edits.
+        sm: "4px",
+        DEFAULT: "8px",
+        md: "12px",
+        lg: "16px",
+        card: "8px",
+        pill: "9999px",
+        full: "9999px",
+      },
+      boxShadow: {
+        // Verdana Health elevation — gentle, diffused. All shadows use the
+        // navy ink (#0F172A) at low opacity so the elevation feels clinical
+        // rather than dramatic. Matches the spec one-to-one.
+        sm: "0 1px 3px rgba(15, 23, 42, 0.03)",
+        DEFAULT: "0 2px 6px rgba(15, 23, 42, 0.05)",
+        md: "0 4px 16px rgba(15, 23, 42, 0.07)",
+        lg: "0 8px 32px rgba(15, 23, 42, 0.10)",
+      },
       transitionTimingFunction: { out: "cubic-bezier(0.22, 1, 0.36, 1)" },
+      letterSpacing: {
+        // Used on uppercase chip labels per spec ("polished, medical-grade").
+        chip: "0.05em",
+      },
     },
   },
   plugins: [],

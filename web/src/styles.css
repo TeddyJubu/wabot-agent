@@ -2,31 +2,45 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Verdana Health design tokens (light mode).
+ * Spec: design.md. Values are spec hex codes converted to HSL so Tailwind's
+ * `hsl(var(--token) / <alpha-value>)` opacity modifiers (bg-ok/10, text-bad/90)
+ * keep working unchanged across the v2 component library.
+ */
 :root {
-  --bg-app: 60 12% 97%;
-  --bg-card: 0 0% 100%;
-  --fg-default: 222 17% 9%;
-  --fg-muted: 225 5% 41%;
-  --border: 222 17% 9% / 0.08;
-  --accent: 262 83% 58%;
-  --accent-fg: 0 0% 100%;
-  --ok: 160 84% 39%;
-  --warn: 38 92% 50%;
-  --bad: 0 84% 60%;
+  --bg-app: 210 40% 98%;       /* #F8FAFC — page background */
+  --bg-card: 0 0% 100%;        /* #FFFFFF — surface default */
+  --fg-default: 222 47% 11%;   /* #0F172A — Primary Navy */
+  --fg-muted: 215 16% 47%;     /* #64748B — Secondary Slate */
+  --border: 214 32% 91%;       /* #E2E8F0 — default border */
+  --accent: 160 84% 31%;       /* #059669 — Tertiary Sage (links + CTAs) */
+  --accent-fg: 0 0% 100%;      /* #FFFFFF on sage */
+  --ok: 142 71% 45%;           /* #22C55E — Success / healthy range */
+  --warn: 48 96% 47%;          /* #EAB308 — Warning / pending */
+  --bad: 0 84% 60%;            /* #EF4444 — Error / critical */
+  --info: 199 89% 48%;         /* #0EA5E9 — Info / new feature */
 }
 
+/*
+ * Dark mode keeps the Verdana brand palette but inverts the surfaces:
+ * deep navy becomes the page background, slightly lighter navy the cards.
+ * Sage and the status colours stay close to their light-mode hues so the
+ * brand reads the same across themes.
+ */
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg-app: 222 17% 8%;
-    --bg-card: 222 17% 12%;
-    --fg-default: 226 15% 91%;
-    --fg-muted: 222 8% 64%;
-    --border: 0 0% 100% / 0.08;
-    --accent: 262 83% 65%;
+    --bg-app: 222 47% 11%;     /* #0F172A — navy as base */
+    --bg-card: 217 33% 17%;    /* #1E293B — slightly lighter navy */
+    --fg-default: 210 40% 98%; /* #F8FAFC inverted */
+    --fg-muted: 215 20% 65%;   /* #94A3B8 — slate-400 */
+    --border: 217 33% 22%;     /* slate-700 territory */
+    --accent: 160 84% 39%;     /* sage stays close to brand */
     --accent-fg: 0 0% 100%;
-    --ok: 160 84% 45%;
-    --warn: 38 92% 55%;
-    --bad: 0 84% 65%;
+    --ok: 142 71% 50%;
+    --warn: 48 96% 53%;
+    --bad: 0 84% 66%;
+    --info: 199 89% 53%;
   }
 }
 
