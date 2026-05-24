@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { McpServersSection } from "@/components/slide-overs/integrations/McpServersSection";
 import type { McpServerRow } from "@/api/mcp";
 
@@ -183,32 +183,36 @@ describe("McpServersSection — Check button", () => {
 });
 
 describe("McpServersSection — Delete", () => {
-  it("Delete cascades through API after confirm", async () => {
+  it("Delete opens the ConfirmDialog and cascades through API on confirm", async () => {
     vi.mocked(mcpApi.deleteMcpServer).mockResolvedValue(undefined);
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     const onRefresh = vi.fn();
 
     render(<McpServersSection servers={[SERVER_OK]} onRefresh={onRefresh} />);
     fireEvent.click(screen.getByRole("button", { name: /delete server brave-search/i }));
 
-    expect(confirmSpy).toHaveBeenCalled();
+    const dialog = await screen.findByRole("dialog", {
+      name: /delete mcp server/i,
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^delete$/i }));
+
     await waitFor(() => expect(mcpApi.deleteMcpServer).toHaveBeenCalledWith(SERVER_OK.id));
     expect(onRefresh).toHaveBeenCalledOnce();
-
-    confirmSpy.mockRestore();
   });
 
-  it("Delete does NOT call API when confirm is cancelled", () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+  it("Delete does NOT call API when the dialog is cancelled", async () => {
     const onRefresh = vi.fn();
 
     render(<McpServersSection servers={[SERVER_OK]} onRefresh={onRefresh} />);
     fireEvent.click(screen.getByRole("button", { name: /delete server brave-search/i }));
+
+    const dialog = await screen.findByRole("dialog", {
+      name: /delete mcp server/i,
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^cancel$/i }));
 
     expect(mcpApi.deleteMcpServer).not.toHaveBeenCalled();
     expect(onRefresh).not.toHaveBeenCalled();
-
-    confirmSpy.mockRestore();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
 

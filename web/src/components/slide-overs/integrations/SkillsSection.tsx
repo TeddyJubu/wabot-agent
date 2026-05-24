@@ -4,8 +4,9 @@ import {
   scanLocalSkills,
   installSkillFromZip,
   deleteSkill,
-  type SkillRow,
 } from "@/api/skills";
+import type { SkillRow } from "@/api/skills";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { RegistryBrowserModal } from "./RegistryBrowserModal";
 
 interface Props {
@@ -21,6 +22,7 @@ export function SkillsSection({ skills, onRefresh }: Props) {
   const [deletingSlug, setDeletingSlug] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [showRegistry, setShowRegistry] = useState(false);
+  const [pendingDeleteSlug, setPendingDeleteSlug] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   async function doScan() {
@@ -52,7 +54,6 @@ export function SkillsSection({ skills, onRefresh }: Props) {
   }
 
   async function doDelete(slug: string) {
-    if (!window.confirm(`Delete skill "${slug}"? This cannot be undone.`)) return;
     setDeletingSlug(slug);
     setDeleteError(null);
     try {
@@ -150,7 +151,7 @@ export function SkillsSection({ skills, onRefresh }: Props) {
               key={skill.slug}
               skill={skill}
               deleting={deletingSlug === skill.slug}
-              onDelete={() => void doDelete(skill.slug)}
+              onDelete={() => setPendingDeleteSlug(skill.slug)}
             />
           ))}
         </div>
@@ -167,6 +168,24 @@ export function SkillsSection({ skills, onRefresh }: Props) {
           }}
         />
       )}
+
+      <ConfirmDialog
+        open={pendingDeleteSlug !== null}
+        title="Delete skill?"
+        description={
+          pendingDeleteSlug
+            ? `"${pendingDeleteSlug}" will be removed. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => {
+          const slug = pendingDeleteSlug;
+          setPendingDeleteSlug(null);
+          if (slug) void doDelete(slug);
+        }}
+        onCancel={() => setPendingDeleteSlug(null)}
+      />
     </section>
   );
 }
@@ -224,8 +243,8 @@ interface SourcePillProps {
 function SourcePill({ source }: SourcePillProps) {
   const colours: Record<string, string> = {
     local: "border-border text-fg-muted",
-    zip: "border-blue-500/40 bg-blue-500/10 text-blue-400",
-    registry: "border-green-500/40 bg-green-500/10 text-green-400",
+    zip: "border-accent/40 bg-accent/10 text-accent",
+    registry: "border-ok/40 bg-ok/10 text-ok",
   };
   const cls = colours[source] ?? "border-border text-fg-muted";
   return (

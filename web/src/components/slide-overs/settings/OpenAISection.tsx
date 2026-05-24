@@ -47,7 +47,7 @@ export function OpenAISection({
         OpenAI API
       </legend>
       <div className="rounded-card border border-border bg-bg-card/60 p-3 text-xs">
-        <p className={view.openai.live ? "text-emerald-400/90" : "text-fg-muted"}>
+        <p className={view.openai.live ? "text-ok/90" : "text-fg-muted"}>
           {view.openai.live
             ? "OpenAI API is the active dashboard chat provider."
             : "Paste an OpenAI key, save, and dashboard chat will use OpenAI."}

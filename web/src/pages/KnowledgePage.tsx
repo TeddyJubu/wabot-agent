@@ -7,6 +7,7 @@ import {
   saveInstructions,
   saveMemory,
 } from "@/api/knowledge";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import AgentNotesEditor from "@/components/knowledge/AgentNotesEditor";
 import BlockNoteEditor from "@/components/knowledge/BlockNoteEditor";
 import ContactFactsEditor from "@/components/knowledge/ContactFactsEditor";
@@ -28,6 +29,8 @@ export default function KnowledgePage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [pendingTab, setPendingTab] = useState<TabId | null>(null);
+  const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -60,14 +63,33 @@ export default function KnowledgePage() {
   }, [dirty]);
 
   function navigateHome() {
-    if (dirty && !window.confirm("You have unsaved changes. Leave anyway?")) return;
+    if (dirty) {
+      setConfirmLeaveOpen(true);
+      return;
+    }
     window.location.href = "/";
   }
 
   function switchTab(next: TabId) {
-    if (dirty && !window.confirm("You have unsaved changes. Switch tabs anyway?")) return;
+    if (next === tab) return;
+    if (dirty) {
+      setPendingTab(next);
+      return;
+    }
     setTab(next);
     setDirty(false);
+  }
+
+  function confirmSwitchTab() {
+    if (!pendingTab) return;
+    setTab(pendingTab);
+    setPendingTab(null);
+    setDirty(false);
+  }
+
+  function confirmLeave() {
+    setConfirmLeaveOpen(false);
+    window.location.href = "/";
   }
 
   return (
@@ -140,6 +162,26 @@ export default function KnowledgePage() {
         {tab === "contacts" && <ContactFactsEditor />}
         {tab === "notes" && <AgentNotesEditor />}
       </main>
+
+      <ConfirmDialog
+        open={confirmLeaveOpen}
+        title="Discard unsaved changes?"
+        description="Leaving will lose your edits."
+        confirmLabel="Discard and leave"
+        variant="danger"
+        onConfirm={confirmLeave}
+        onCancel={() => setConfirmLeaveOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={pendingTab !== null}
+        title="Discard unsaved changes?"
+        description="Switching tabs will lose your edits."
+        confirmLabel="Discard and switch"
+        variant="danger"
+        onConfirm={confirmSwitchTab}
+        onCancel={() => setPendingTab(null)}
+      />
     </div>
   );
 }

@@ -2,8 +2,9 @@ import { useState } from "react";
 import {
   checkMcpServer,
   deleteMcpServer,
-  type McpServerRow,
 } from "@/api/mcp";
+import type { McpServerRow } from "@/api/mcp";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { AddMcpServerForm } from "./AddMcpServerForm";
 import { EditMcpServerForm } from "./EditMcpServerForm";
 import { RegistryBrowserModal } from "./RegistryBrowserModal";
@@ -20,6 +21,7 @@ export function McpServersSection({ servers, onRefresh }: Props) {
   const [checkingId, setCheckingId] = useState<number | null>(null);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<{ id: number; name: string } | null>(null);
   // local health override after a manual check
   const [healthOverrides, setHealthOverrides] = useState<
     Record<number, { health_status: string; health_message: string | null; last_checked_at: string }>
@@ -45,8 +47,7 @@ export function McpServersSection({ servers, onRefresh }: Props) {
     }
   }
 
-  async function doDelete(id: number, name: string) {
-    if (!window.confirm(`Delete MCP server "${name}"?`)) return;
+  async function doDelete(id: number) {
     setDeletingId(id);
     setError(null);
     try {
@@ -140,7 +141,7 @@ export function McpServersSection({ servers, onRefresh }: Props) {
                 deleting={deletingId === server.id}
                 onCheck={() => void doCheck(server.id)}
                 onEdit={() => { setEditingId(server.id); setShowAddForm(false); }}
-                onDelete={() => void doDelete(server.id, server.name)}
+                onDelete={() => setPendingDelete({ id: server.id, name: server.name })}
               />
             );
           })}
@@ -158,6 +159,23 @@ export function McpServersSection({ servers, onRefresh }: Props) {
           }}
         />
       )}
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title="Delete MCP server?"
+        description={
+          pendingDelete
+            ? `"${pendingDelete.name}" will be removed. This cannot be undone.`
+            : ""
+        }
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => {
+          if (pendingDelete) void doDelete(pendingDelete.id);
+          setPendingDelete(null);
+        }}
+        onCancel={() => setPendingDelete(null)}
+      />
     </section>
   );
 }
@@ -236,8 +254,8 @@ function ServerRow({
 function HealthDot({ status }: { status: string | null }) {
   let cls = "bg-fg-muted/40";
   let label = "unknown";
-  if (status === "ok") { cls = "bg-green-400"; label = "healthy"; }
-  else if (status === "error") { cls = "bg-red-400"; label = "error"; }
+  if (status === "ok") { cls = "bg-ok"; label = "healthy"; }
+  else if (status === "error") { cls = "bg-bad"; label = "error"; }
 
   return (
     <span

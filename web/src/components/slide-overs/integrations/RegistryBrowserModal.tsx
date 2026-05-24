@@ -242,8 +242,8 @@ export function SourcePill({ source }: SourcePillProps) {
     <span
       className={`inline-block rounded border px-1.5 py-0.5 text-[9px] font-medium ${
         source === "curated"
-          ? "border-green-500/40 bg-green-500/10 text-green-400"
-          : "border-blue-500/40 bg-blue-500/10 text-blue-400"
+          ? "border-ok/40 bg-ok/10 text-ok"
+          : "border-accent/40 bg-accent/10 text-accent"
       }`}
     >
       {source}

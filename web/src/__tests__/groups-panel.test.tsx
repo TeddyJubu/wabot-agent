@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import GroupsPanel from "@/components/slide-overs/GroupsPanel";
 import type { GroupDetail, GroupSummary } from "@/api/groups";
@@ -247,5 +247,68 @@ describe("GroupsPanel — editor participant actions", () => {
     expect(screen.getByRole("button", { name: /^remove$/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /^promote$/i })).toBeDisabled();
     expect(screen.getByRole("button", { name: /^demote$/i })).toBeDisabled();
+  });
+});
+
+describe("GroupsPanel — destructive confirms use ConfirmDialog", () => {
+  beforeEach(() => {
+    vi.mocked(groupsApi.fetchGroups).mockResolvedValue([ALPHA_SUMMARY]);
+    vi.mocked(groupsApi.fetchGroup).mockResolvedValue(ALPHA_DETAIL);
+  });
+
+  async function openEditor() {
+    render(<GroupsPanel />);
+    await waitFor(() => screen.getByText("Alpha Squad"));
+    fireEvent.click(screen.getByText("Alpha Squad"));
+    await waitFor(() => screen.getByText(/Manage Alpha Squad/i));
+  }
+
+  it("Remove photo opens the confirm dialog and calls removeGroupPicture on confirm", async () => {
+    vi.mocked(groupsApi.removeGroupPicture).mockResolvedValue({});
+    await openEditor();
+
+    fireEvent.click(screen.getByRole("button", { name: /^remove photo$/i }));
+
+    const dialog = await screen.findByRole("dialog", {
+      name: /remove profile photo/i,
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: /^remove photo$/i }),
+    );
+
+    await waitFor(() =>
+      expect(groupsApi.removeGroupPicture).toHaveBeenCalledWith(ALPHA_SUMMARY.jid),
+    );
+  });
+
+  it("Remove photo cancel does not call removeGroupPicture", async () => {
+    await openEditor();
+
+    fireEvent.click(screen.getByRole("button", { name: /^remove photo$/i }));
+    const dialog = await screen.findByRole("dialog", {
+      name: /remove profile photo/i,
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^cancel$/i }));
+
+    expect(groupsApi.removeGroupPicture).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("Leave group opens the confirm dialog and calls leaveGroup on confirm", async () => {
+    vi.mocked(groupsApi.leaveGroup).mockResolvedValue({});
+    await openEditor();
+
+    fireEvent.click(screen.getByRole("button", { name: /^leave group$/i }));
+
+    const dialog = await screen.findByRole("dialog", {
+      name: /leave this group/i,
+    });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: /^leave group$/i }),
+    );
+
+    await waitFor(() =>
+      expect(groupsApi.leaveGroup).toHaveBeenCalledWith(ALPHA_SUMMARY.jid),
+    );
   });
 });

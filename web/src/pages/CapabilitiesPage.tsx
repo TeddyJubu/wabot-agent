@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 
+import { HelpPopover } from "@/components/HelpPopover";
 import IntegrationsPanel from "@/components/slide-overs/IntegrationsPanel";
 import ToolsPanel from "@/components/slide-overs/ToolsPanel";
 
@@ -186,6 +187,19 @@ export default function CapabilitiesPage() {
           aria-labelledby="capabilities-tab-sources"
           className="pt-6"
         >
+          <p className="mb-4 text-sm text-fg-muted">
+            Sources install capabilities — like{" "}
+            <HelpPopover term="MCP">
+              Model Context Protocol — a server-to-LLM standard for exposing
+              tools and data.
+            </HelpPopover>{" "}
+            servers and{" "}
+            <HelpPopover term="Composio">
+              Composio is a hosted directory of pre-built integrations (Slack,
+              Notion, Drive, etc.) you can authorize and use via the agent.
+            </HelpPopover>{" "}
+            apps — that the agent then exposes as tools.
+          </p>
           <IntegrationsPanel />
         </div>
       )}
@@ -196,6 +210,15 @@ export default function CapabilitiesPage() {
           aria-labelledby="capabilities-tab-tools"
           className="pt-6"
         >
+          <p className="mb-4 text-sm text-fg-muted">
+            Tools are the concrete callable functions the agent has access to —
+            including{" "}
+            <HelpPopover term="skill_action">
+              A skill_action is a single callable function inside an installed
+              skill (e.g. "search_emails" inside the gmail skill).
+            </HelpPopover>
+            .
+          </p>
           {sourceFilter && (
             <div className="mb-4 flex items-center gap-2 rounded-pill border border-border bg-bg-card px-3 py-1.5 text-xs w-fit">
               <span className="text-fg-muted">

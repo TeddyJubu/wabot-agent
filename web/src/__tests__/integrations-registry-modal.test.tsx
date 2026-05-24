@@ -174,8 +174,10 @@ describe("RegistryBrowserModal — MCP mode", () => {
     const curatedPill = screen.getByText("curated");
     const composioPill = screen.getByText("composio");
 
-    expect(curatedPill.className).toContain("green");
-    expect(composioPill.className).toContain("blue");
+    // Phase D L5 moved these from hard-coded green/blue to the semantic
+    // ok/accent tokens. Assert on the new contract.
+    expect(curatedPill.className).toContain("text-ok");
+    expect(composioPill.className).toContain("text-accent");
   });
 
   it("search input calls searchMcpRegistry in MCP mode", async () => {

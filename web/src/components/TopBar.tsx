@@ -52,7 +52,7 @@ export default function TopBar() {
           rel="noopener"
           aria-label="WhatsApp pairing"
           title="WhatsApp pairing"
-          className="grid size-9 place-items-center rounded-pill text-fg-muted transition hover:bg-bg-card hover:text-fg"
+          className="grid size-11 place-items-center rounded-pill text-fg-muted transition hover:bg-bg-card hover:text-fg"
         >
           <Smartphone className="size-4" />
         </a>
@@ -82,7 +82,7 @@ function IconBtn({ children, onClick, label }: IconBtnProps) {
       onClick={onClick}
       aria-label={label}
       title={label}
-      className="grid size-9 place-items-center rounded-pill text-fg-muted transition hover:bg-bg-card hover:text-fg"
+      className="grid size-11 place-items-center rounded-pill text-fg-muted transition hover:bg-bg-card hover:text-fg"
     >
       {children}
     </button>

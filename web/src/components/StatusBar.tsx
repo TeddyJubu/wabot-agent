@@ -103,7 +103,7 @@ export default function StatusBar() {
           aria-label={`${label}: ${row.label}`}
           onClick={onClick}
           className={clsx(
-            "inline-flex items-center gap-2 rounded-pill border px-3 py-2 text-xs",
+            "inline-flex min-h-[44px] items-center gap-2 rounded-pill border px-3 py-2 text-xs",
             "transition hover:bg-bg-card focus-visible:outline-none",
             "focus-visible:ring-2 focus-visible:ring-accent",
             VARIANT_CLASSES[row.variant],

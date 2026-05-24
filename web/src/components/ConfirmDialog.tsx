@@ -104,8 +104,8 @@ export function ConfirmDialog({
 
   const primaryClasses =
     variant === "danger"
-      ? "bg-red-600 hover:bg-red-500 text-white"
-      : "bg-accent text-white hover:opacity-90";
+      ? "bg-bad text-white hover:bg-bad/90"
+      : "bg-accent text-accent-fg hover:opacity-90";
 
   return createPortal(
     <div
@@ -146,7 +146,7 @@ export function ConfirmDialog({
             ref={cancelButtonRef}
             type="button"
             onClick={onCancel}
-            className="rounded-pill border border-border px-3 py-1.5 text-sm text-fg hover:bg-bg-app"
+            className="min-h-[44px] rounded-pill border border-border px-4 py-2 text-sm text-fg hover:bg-bg-app"
           >
             {cancelLabel}
           </button>
@@ -154,7 +154,7 @@ export function ConfirmDialog({
             type="button"
             onClick={onConfirm}
             disabled={confirmDisabled}
-            className={`rounded-pill px-3 py-1.5 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${primaryClasses}`}
+            className={`min-h-[44px] rounded-pill px-4 py-2 text-sm font-medium transition disabled:cursor-not-allowed disabled:opacity-50 ${primaryClasses}`}
           >
             {confirmLabel}
           </button>

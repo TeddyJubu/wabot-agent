@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import PairView from "@/components/PairView";
 import { useStore } from "@/store";
@@ -97,8 +97,7 @@ describe("PairView (public /pair page)", () => {
     expect(link).toHaveAttribute("href", "/");
   });
 
-  it("can disconnect the linked WhatsApp account", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+  it("can disconnect the linked WhatsApp account via the confirm dialog", async () => {
     vi.mocked(disconnectWhatsappConnection).mockResolvedValue({
       qr_available: true,
       logged_in: false,
@@ -119,7 +118,36 @@ describe("PairView (public /pair page)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /disconnect whatsapp/i }));
 
+    // The ConfirmDialog opens — click its primary "Disconnect" button.
+    const dialog = await screen.findByRole("dialog", {
+      name: /disconnect whatsapp/i,
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^disconnect$/i }));
+
     await waitFor(() => expect(disconnectWhatsappConnection).toHaveBeenCalledTimes(1));
     expect(useStore.getState().pairing?.qr_available).toBe(true);
+  });
+
+  it("cancelling the disconnect dialog does not call the API", async () => {
+    act(() => {
+      useStore.setState({
+        pairing: {
+          qr_available: false,
+          logged_in: true,
+          connected: true,
+          reachable: true,
+        },
+      });
+    });
+    render(<PairView />);
+
+    fireEvent.click(screen.getByRole("button", { name: /disconnect whatsapp/i }));
+    const dialog = await screen.findByRole("dialog", {
+      name: /disconnect whatsapp/i,
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^cancel$/i }));
+
+    expect(disconnectWhatsappConnection).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });

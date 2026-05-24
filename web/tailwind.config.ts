@@ -6,13 +6,27 @@ export default {
   theme: {
     extend: {
       colors: {
-        bg: { app: "hsl(var(--bg-app))", card: "hsl(var(--bg-card))" },
-        fg: { DEFAULT: "hsl(var(--fg-default))", muted: "hsl(var(--fg-muted))" },
-        border: "hsl(var(--border))",
-        accent: { DEFAULT: "hsl(var(--accent))", fg: "hsl(var(--accent-fg))" },
-        ok: "hsl(var(--ok))",
-        warn: "hsl(var(--warn))",
-        bad: "hsl(var(--bad))",
+        // <alpha-value> placeholders let Tailwind's opacity modifiers
+        // (`bg-ok/10`, `text-bad/90`, `border-warn/40`, …) compose against
+        // every semantic token. Phase D · L5 leans on this so destructive /
+        // status surfaces can drop ad-hoc red/green/yellow utilities for the
+        // semantic ones.
+        bg: {
+          app: "hsl(var(--bg-app) / <alpha-value>)",
+          card: "hsl(var(--bg-card) / <alpha-value>)",
+        },
+        fg: {
+          DEFAULT: "hsl(var(--fg-default) / <alpha-value>)",
+          muted: "hsl(var(--fg-muted) / <alpha-value>)",
+        },
+        border: "hsl(var(--border) / <alpha-value>)",
+        accent: {
+          DEFAULT: "hsl(var(--accent) / <alpha-value>)",
+          fg: "hsl(var(--accent-fg) / <alpha-value>)",
+        },
+        ok: "hsl(var(--ok) / <alpha-value>)",
+        warn: "hsl(var(--warn) / <alpha-value>)",
+        bad: "hsl(var(--bad) / <alpha-value>)",
       },
       fontFamily: {
         sans: ["Geist Sans", "Inter", "system-ui", "sans-serif"],

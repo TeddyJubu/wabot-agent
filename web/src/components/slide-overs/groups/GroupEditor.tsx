@@ -6,8 +6,9 @@ import {
   setGroupPicture,
   updateGroup,
   updateGroupParticipants,
-  type GroupDetail,
 } from "@/api/groups";
+import type { GroupDetail } from "@/api/groups";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 function parsePhones(raw: string): string[] {
   return raw
@@ -39,6 +40,8 @@ export function GroupEditor({
   const [editTopic, setEditTopic] = useState(group.topic ?? "");
   const [memberPhones, setMemberPhones] = useState("");
   const [inviteLink, setInviteLink] = useState<string | null>(null);
+  const [confirmRemovePhotoOpen, setConfirmRemovePhotoOpen] = useState(false);
+  const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
 
   // Keep local edits in sync if the parent reloads a different detail.
   useEffect(() => {
@@ -146,12 +149,7 @@ export function GroupEditor({
           type="button"
           disabled={busy}
           className="rounded-pill border border-border px-3 py-1 text-xs"
-          onClick={() =>
-            void run(async () => {
-              if (!confirm("Remove this group's profile photo?")) return;
-              await removeGroupPicture(jid);
-            })
-          }
+          onClick={() => setConfirmRemovePhotoOpen(true)}
         >
           Remove photo
         </button>
@@ -172,13 +170,7 @@ export function GroupEditor({
           type="button"
           disabled={busy}
           className="rounded-pill border border-border px-3 py-1 text-xs"
-          onClick={() =>
-            void run(async () => {
-              if (!confirm("Leave this group on the linked device?")) return;
-              await leaveGroup(jid);
-              onLeft();
-            })
-          }
+          onClick={() => setConfirmLeaveOpen(true)}
         >
           Leave group
         </button>
@@ -188,6 +180,37 @@ export function GroupEditor({
           {inviteLink}
         </p>
       )}
+
+      <ConfirmDialog
+        open={confirmRemovePhotoOpen}
+        title="Remove profile photo?"
+        description="The group will revert to the default avatar on the linked device."
+        confirmLabel="Remove photo"
+        variant="danger"
+        onConfirm={() => {
+          setConfirmRemovePhotoOpen(false);
+          void run(async () => {
+            await removeGroupPicture(jid);
+          });
+        }}
+        onCancel={() => setConfirmRemovePhotoOpen(false)}
+      />
+
+      <ConfirmDialog
+        open={confirmLeaveOpen}
+        title="Leave this group?"
+        description="You'll be removed from the group on the linked device."
+        confirmLabel="Leave group"
+        variant="danger"
+        onConfirm={() => {
+          setConfirmLeaveOpen(false);
+          void run(async () => {
+            await leaveGroup(jid);
+            onLeft();
+          });
+        }}
+        onCancel={() => setConfirmLeaveOpen(false)}
+      />
     </section>
   );
 }

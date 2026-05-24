@@ -46,7 +46,7 @@ export function OpenRouterSection({
         OpenRouter
       </legend>
       <div className="rounded-card border border-border bg-bg-card/60 p-3 text-xs">
-        <p className={view.openrouter.live ? "text-emerald-400/90" : "text-fg-muted"}>
+        <p className={view.openrouter.live ? "text-ok/90" : "text-fg-muted"}>
           {view.openrouter.live
             ? "OpenRouter is the active dashboard chat provider."
             : "Paste an OpenRouter key, save, and dashboard chat will use OpenRouter."}

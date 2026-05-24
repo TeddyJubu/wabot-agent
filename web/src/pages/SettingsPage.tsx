@@ -15,6 +15,7 @@ import {
   type SettingsView,
 } from "@/api/settings";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
+import { HelpPopover } from "@/components/HelpPopover";
 import { CodexSection } from "@/components/slide-overs/settings/CodexSection";
 import { ModelRoutingSection } from "@/components/slide-overs/settings/ModelRoutingSection";
 import { OllamaSection } from "@/components/slide-overs/settings/OllamaSection";
@@ -351,21 +352,28 @@ export default function SettingsPage() {
         <legend className="text-xs font-medium uppercase tracking-wider text-fg-muted">
           Experimental
         </legend>
-        <label className="flex items-start gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            className="mt-0.5"
-            checked={subagentsEnabled}
-            onChange={(e) => setSubagentsEnabled(e.target.checked)}
-          />
-          <span className="text-xs">
-            <span className="font-medium">Use multi-agent orchestrator</span>
-            <span className="text-fg-muted ml-1">
-              — routes each request to a specialist subagent (scraper, memory,
-              comms, scheduler, inboxer). Opt-in. Default: off.
+        <div className="flex items-start gap-2">
+          <label className="flex items-start gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              className="mt-0.5"
+              checked={subagentsEnabled}
+              onChange={(e) => setSubagentsEnabled(e.target.checked)}
+            />
+            <span className="text-xs">
+              <span className="font-medium">Use multi-agent orchestrator</span>
+              <span className="text-fg-muted ml-1">
+                — routes each request to a specialist subagent (scraper, memory,
+                comms, scheduler, inboxer). Opt-in. Default: off.
+              </span>
             </span>
-          </span>
-        </label>
+          </label>
+          <HelpPopover term="subagents">
+            Routes each WhatsApp request to a specialist subagent (scraper,
+            memory, comms, scheduler, inboxer) instead of one general agent.
+            Opt-in; default off.
+          </HelpPopover>
+        </div>
       </fieldset>
     );
   }
