@@ -51,6 +51,11 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     description: "Open integrations (skills + MCP)",
     expand: () => "__open_slide_over__:integrations",
   },
+  {
+    name: "/overview",
+    description: "Open overview dashboard",
+    expand: () => "__open_slide_over__:overview",
+  },
 ];
 
 export function matchSlash(input: string): SlashCommand[] {

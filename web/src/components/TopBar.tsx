@@ -1,5 +1,5 @@
 import { type ReactNode, useState } from "react";
-import { Smartphone, Clock, Settings, Users, BookOpen, Bot, Wrench, Plug } from "lucide-react";
+import { Smartphone, Clock, Settings, Users, BookOpen, Bot, Wrench, Plug, BarChart3 } from "lucide-react";
 import { ClerkNavAuth } from "./ClerkNavAuth";
 import StatusDot from "./StatusDot";
 import StatusPopover from "./StatusPopover";
@@ -42,6 +42,9 @@ export default function TopBar() {
         </IconBtn>
         <IconBtn onClick={() => open("integrations")} label="Integrations">
           <Plug className="size-4" />
+        </IconBtn>
+        <IconBtn onClick={() => open("overview")} label="Overview dashboard">
+          <BarChart3 className="size-4" />
         </IconBtn>
         <IconBtn onClick={() => open("qr")} label="WhatsApp pairing">
           <Smartphone className="size-4" />

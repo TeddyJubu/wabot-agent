@@ -57,6 +57,7 @@ from .routes.health import register_health_routes
 from .routes.inbound import register_inbound_routes
 from .routes.mcp_admin import register_mcp_admin_routes
 from .routes.memory import register_memory_routes
+from .routes.metrics import register_metrics_routes
 from .routes.pages import register_pages_routes
 from .routes.pairing import (
     _pairing_payload as _pairing_payload,  # noqa: F401 (re-export — used by SSE snapshot builder)
@@ -134,8 +135,60 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     snapshot_cache = SnapshotCache()
     scheduler_state = SchedulerState()
 
+    async def _health_check_loop() -> None:
+        """Background task: re-check MCP servers + Composio connections every 10 min.
+
+        Gated by WABOT_AGENT_BACKGROUND_HEALTH_CHECKS_ENABLED (default True).
+        The first iteration sleeps 10 minutes to avoid blocking startup.
+        """
+        if not getattr(settings, "background_health_checks_enabled", True):
+            return
+        try:
+            await asyncio.sleep(600)  # Wait 10 min before first check
+        except asyncio.CancelledError:
+            return
+        while True:
+            try:
+                from ..composio_service import list_connections, refresh_connection
+                from ..mcp_service import check_server, list_servers
+
+                servers = list_servers(memory)
+                for srv in servers:
+                    if not srv.get("is_enabled", True):
+                        continue
+                    try:
+                        await check_server(memory, settings, srv["id"])
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "health_check_loop: MCP server %s check failed: %s",
+                            srv.get("name"),
+                            exc,
+                        )
+
+                connections = list_connections(memory)
+                for conn_row in connections:
+                    try:
+                        refresh_connection(memory, settings, conn_row["id"])
+                    except Exception as exc:  # noqa: BLE001
+                        logger.warning(
+                            "health_check_loop: Composio connection %s refresh failed: %s",
+                            conn_row.get("id"),
+                            exc,
+                        )
+            except asyncio.CancelledError:
+                return
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("health_check_loop: unexpected error: %s", exc)
+            try:
+                await asyncio.sleep(600)
+            except asyncio.CancelledError:
+                return
+
+    _health_task: asyncio.Task | None = None
+
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        nonlocal _health_task
         # Capture the running uvicorn loop so sync publishers (EventLog.write
         # called from inside tools, threads, etc.) can dispatch safely via
         # call_soon_threadsafe. Then drive pairing state through the hub so
@@ -145,6 +198,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         maybe_prune_audit_tables(memory, settings, force=True)
         pairing_state.task = asyncio.create_task(pairing_poll_loop(deps))
         scheduler_state.task = asyncio.create_task(scheduler_loop(deps))
+        if getattr(settings, "background_health_checks_enabled", True):
+            _health_task = asyncio.create_task(_health_check_loop())
         try:
             yield
         finally:
@@ -160,6 +215,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 sched_task.cancel()
                 try:
                     await sched_task
+                except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                    pass
+            if _health_task is not None:
+                _health_task.cancel()
+                try:
+                    await _health_task
                 except (asyncio.CancelledError, Exception):  # noqa: BLE001
                     pass
             await wabot.aclose()
@@ -265,6 +326,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     _composio_router = APIRouter()
     register_composio_routes(_composio_router, deps)
     app.include_router(_composio_router)
+
+    # /api/metrics/* — Phase 6 metrics + activity dashboard.
+    _metrics_router = APIRouter()
+    register_metrics_routes(_metrics_router, deps)
+    app.include_router(_metrics_router)
 
     return app
 

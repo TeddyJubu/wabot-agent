@@ -196,6 +196,14 @@ def init_schema(conn: sqlite3.Connection) -> None:
             on composio_connections(app_slug, user_id);
         """
     )
+    # --- Phase 6: metrics + cost tracking columns on runs ---
+    ensure_column(conn, "runs", "subagent_slug", "TEXT")
+    ensure_column(conn, "runs", "model", "TEXT")
+    ensure_column(conn, "runs", "provider", "TEXT")
+    ensure_column(conn, "runs", "prompt_tokens", "INTEGER")
+    ensure_column(conn, "runs", "completion_tokens", "INTEGER")
+    ensure_column(conn, "runs", "cost_usd", "REAL")
+    ensure_column(conn, "runs", "latency_ms", "INTEGER")
     conn.commit()
 
 

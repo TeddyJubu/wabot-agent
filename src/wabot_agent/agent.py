@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
@@ -53,6 +54,7 @@ from .redaction import redact
 from .task_progress import looks_like_multi_step_task
 from .tools import RuntimeContext, core_tools, maybe_send_task_started_ack
 from .ui_envelopes import build_ui_envelope
+from .usage_tracking import record_run_metrics
 from .vision_input import prepare_runner_input
 from .wabot import WabotClient
 
@@ -519,6 +521,9 @@ async def _finalize_turn_state(
     final_output: str,
     person_memory_id: str | None,
     inbound: InboundMessage | None,
+    latency_ms: int | None = None,
+    result: Any | None = None,
+    subagent_slug: str | None = None,
 ) -> None:
     """Post-run bookkeeping shared by ``run_agent`` and ``run_agent_streamed``.
 
@@ -527,7 +532,8 @@ async def _finalize_turn_state(
       2. ``maybe_prune_codex_session_storage`` — codex per-session sqlite.
       3. ``maybe_prune_audit_tables`` — runs / tool_events / session_summaries.
       4. ``memory.record_run`` — persist the run row.
-      5. Best-effort ``capture_turn_mem0`` — never blocks the turn on mem0 errors.
+      5. Phase-6 usage metrics — extract tokens + cost from result.
+      6. Best-effort ``capture_turn_mem0`` — never blocks the turn on mem0 errors.
 
     Callers do their own ``event_log.write`` afterwards (the streamed and
     non-streamed paths emit different event shapes intentionally) and their
@@ -537,6 +543,43 @@ async def _finalize_turn_state(
     maybe_prune_codex_session_storage(settings, session_key)
     maybe_prune_audit_tables(memory, settings)
     memory.record_run(run_id, inbound.sender if inbound else None, prompt, final_output)
+
+    # --- Phase 6: record token usage + cost ---
+    try:
+        prompt_tokens: int | None = None
+        completion_tokens: int | None = None
+        last_slug: str | None = subagent_slug
+        if result is not None:
+            # SDK exposes usage on result.raw_responses or result.usage
+            usage_obj = getattr(result, "usage", None)
+            if usage_obj is not None:
+                prompt_tokens = getattr(usage_obj, "input_tokens", None) or getattr(
+                    usage_obj, "prompt_tokens", None
+                )
+                completion_tokens = getattr(usage_obj, "output_tokens", None) or getattr(
+                    usage_obj, "completion_tokens", None
+                )
+            if last_slug is None:
+                last_agent = getattr(result, "last_agent", None)
+                if last_agent is not None:
+                    last_slug = getattr(last_agent, "name", None)
+        from .llm_provider import active_model_id
+
+        model_id = active_model_id(settings)
+        provider = settings.model_provider
+        record_run_metrics(
+            memory,
+            run_id,
+            subagent_slug=last_slug,
+            model=model_id,
+            provider=provider,
+            prompt_tokens=int(prompt_tokens) if prompt_tokens is not None else None,
+            completion_tokens=int(completion_tokens) if completion_tokens is not None else None,
+            latency_ms=latency_ms,
+        )
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Phase-6 metrics extraction failed (run=%s): %s", run_id, exc)
+
     if mem0_enabled(settings):
         try:
             await capture_turn_mem0(
@@ -615,7 +658,13 @@ async def run_agent(
     final_output = ""
     partial_error: Exception | None = None
     max_attempts = _codex_max_attempts(settings)
+    # Phase 6 review SHOULD FIX 1: latency clock starts inside the
+    # retry loop so codex 503/session-reset retries don't inflate the
+    # reported LLM latency. Only the last (successful or final) attempt
+    # is measured.
+    _run_start = time.perf_counter()
     for attempt in range(max_attempts):
+        _run_start = time.perf_counter()
         try:
             result = await _execute_run()
         except Exception as exc:
@@ -656,6 +705,13 @@ async def run_agent(
             )
             final_output = fallback
 
+    _run_latency_ms = int((time.perf_counter() - _run_start) * 1000)
+    # Extract subagent slug from result for metrics
+    _last_slug: str | None = None
+    if result is not None:
+        _last_agent = getattr(result, "last_agent", None)
+        if _last_agent is not None:
+            _last_slug = getattr(_last_agent, "name", None)
     await _finalize_turn_state(
         settings=settings,
         memory=memory,
@@ -665,6 +721,9 @@ async def run_agent(
         final_output=final_output,
         person_memory_id=person_memory_id,
         inbound=inbound,
+        latency_ms=_run_latency_ms,
+        result=result,
+        subagent_slug=_last_slug,
     )
     event_payload = {
         "run_id": run_id,
@@ -736,8 +795,12 @@ async def run_agent_streamed(
     final_output = ""
     errored: Exception | None = None
     max_attempts = _codex_max_attempts(settings)
+    # Phase 6 review SHOULD FIX 1: see run_agent above — reassign the
+    # start clock inside the loop so retries don't inflate latency.
+    _stream_start = time.perf_counter()
 
     for attempt in range(max_attempts):
+        _stream_start = time.perf_counter()
         final_output = ""
         errored = None
         async with connected_mcp_servers(
@@ -849,6 +912,20 @@ async def run_agent_streamed(
         yield {"type": "error", "message": message}
         return
 
+    _stream_latency_ms = int((time.perf_counter() - _stream_start) * 1000)
+    # Phase 6 review BLOCKER 1: the streaming path previously omitted the
+    # SDK result object from _finalize_turn_state, which silently dropped
+    # all token + cost metrics for every streamed run (the majority of
+    # production traffic). Pick whichever result variable was set — either
+    # stream_result (Runner.run_streamed) or result (non-streaming
+    # fallback). Both are inside try blocks above and may not be in scope
+    # if both failed, so use locals().get() rather than risk NameError.
+    _result_for_metrics = locals().get("result") or locals().get("stream_result")
+    _last_slug: str | None = None
+    if _result_for_metrics is not None:
+        _last_agent = getattr(_result_for_metrics, "last_agent", None)
+        if _last_agent is not None:
+            _last_slug = getattr(_last_agent, "name", None)
     await _finalize_turn_state(
         settings=settings,
         memory=memory,
@@ -858,6 +935,9 @@ async def run_agent_streamed(
         final_output=final_output,
         person_memory_id=person_memory_id,
         inbound=inbound,
+        latency_ms=_stream_latency_ms,
+        result=_result_for_metrics,
+        subagent_slug=_last_slug,
     )
     event_log.write(
         "agent_run_complete",

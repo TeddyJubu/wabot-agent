@@ -700,6 +700,14 @@ class Settings(BaseSettings):
         ),
     )
 
+    # Phase 6 — background health checks (default True; disable in tests)
+    background_health_checks_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices(
+            "WABOT_AGENT_BACKGROUND_HEALTH_CHECKS_ENABLED",
+        ),
+    )
+
     cf_access_team_domain: str | None = Field(
         default=None,
         validation_alias=AliasChoices(
