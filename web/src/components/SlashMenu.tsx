@@ -6,6 +6,15 @@ interface Props {
   onPick: (c: SlashCommand) => void;
 }
 
+/**
+ * @deprecated Phase B replaced this with the Cmd-K CommandPalette
+ * (`@/components/CommandPalette`). SlashMenu is still rendered in the
+ * `?ui=v2`-OFF branch of `App.tsx` for the one-release flag-deprecation
+ * window. Remove this file once the v2 flag is flipped on by default and
+ * the bottom slash input is gone from `App.tsx`.
+ *
+ * Tracking: UX-IMPLEMENTATION-PLAN.md -> Phase D - L6.
+ */
 export default function SlashMenu({ commands, activeIdx, onPick }: Props) {
   if (commands.length === 0) return null;
   return (

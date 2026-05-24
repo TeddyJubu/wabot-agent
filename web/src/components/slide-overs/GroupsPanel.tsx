@@ -1,25 +1,14 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  createGroup,
   fetchGroup,
-  fetchGroupInvite,
   fetchGroups,
   joinGroup,
-  leaveGroup,
-  removeGroupPicture,
-  setGroupPicture,
-  updateGroup,
-  updateGroupParticipants,
   type GroupDetail,
   type GroupSummary,
 } from "@/api/groups";
-
-function parsePhones(raw: string): string[] {
-  return raw
-    .split(/[\n,;]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
+import { GroupCreateForm } from "./groups/GroupCreateForm";
+import { GroupEditor } from "./groups/GroupEditor";
+import { GroupList } from "./groups/GroupList";
 
 export default function GroupsPanel() {
   const [groups, setGroups] = useState<GroupSummary[]>([]);
@@ -28,14 +17,13 @@ export default function GroupsPanel() {
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [inviteLink, setInviteLink] = useState<string | null>(null);
-
-  const [createName, setCreateName] = useState("");
-  const [createMembers, setCreateMembers] = useState("");
   const [joinLink, setJoinLink] = useState("");
-  const [editName, setEditName] = useState("");
-  const [editTopic, setEditTopic] = useState("");
-  const [memberPhones, setMemberPhones] = useState("");
+
+  // Monotonic counter for in-flight `loadDetail` calls. A fast click sequence
+  // can start overlapping fetchGroup() calls; the older response would
+  // otherwise clobber the newer one and leave `selected` and `detail` out of
+  // sync. We track the most recent request id and ignore stale responses.
+  const detailRequestSeq = useRef(0);
 
   const reload = useCallback(async () => {
     setState("loading");
@@ -53,28 +41,33 @@ export default function GroupsPanel() {
     void reload();
   }, [reload]);
 
-  async function loadDetail(jid: string) {
+  const loadDetail = useCallback(async (jid: string) => {
+    const seq = ++detailRequestSeq.current;
     setSelected(jid);
-    setInviteLink(null);
     setError(null);
     try {
       const g = await fetchGroup(jid);
+      if (seq !== detailRequestSeq.current) return; // a newer call is in flight
       setDetail(g);
-      setEditName(g.name ?? "");
-      setEditTopic(g.topic ?? "");
     } catch (err) {
+      if (seq !== detailRequestSeq.current) return;
       setDetail(null);
       setError(err instanceof Error ? err.message : "Could not load group");
     }
-  }
+  }, []);
 
-  async function run(action: () => Promise<void>) {
+  const refreshAll = useCallback(async () => {
+    await reload();
+    if (selected) await loadDetail(selected);
+  }, [reload, loadDetail, selected]);
+
+  async function joinViaInvite() {
     setBusy(true);
     setError(null);
     try {
-      await action();
+      await joinGroup(joinLink.trim());
+      setJoinLink("");
       await reload();
-      if (selected) await loadDetail(selected);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Action failed");
     } finally {
@@ -94,40 +87,12 @@ export default function GroupsPanel() {
         </p>
       )}
 
-      <section className="space-y-2 rounded-card border border-border p-3">
-        <p className="text-xs font-medium uppercase tracking-wider text-fg-muted">
-          Create group
-        </p>
-        <input
-          className="w-full rounded-card border border-border bg-bg-app px-3 py-2 text-sm"
-          placeholder="Group name"
-          value={createName}
-          onChange={(e) => setCreateName(e.target.value)}
-          disabled={busy}
-        />
-        <textarea
-          className="w-full rounded-card border border-border bg-bg-app px-3 py-2 text-sm"
-          placeholder="Members (+65…, one per line)"
-          rows={2}
-          value={createMembers}
-          onChange={(e) => setCreateMembers(e.target.value)}
-          disabled={busy}
-        />
-        <button
-          type="button"
-          disabled={busy || !createName.trim()}
-          className="rounded-pill bg-accent px-4 py-1.5 text-xs font-medium text-bg-app disabled:opacity-50"
-          onClick={() =>
-            void run(async () => {
-              await createGroup(createName.trim(), parsePhones(createMembers));
-              setCreateName("");
-              setCreateMembers("");
-            })
-          }
-        >
-          Create
-        </button>
-      </section>
+      <GroupCreateForm
+        busy={busy}
+        setBusy={setBusy}
+        onCreated={refreshAll}
+        onError={setError}
+      />
 
       <section className="space-y-2 rounded-card border border-border p-3">
         <p className="text-xs font-medium uppercase tracking-wider text-fg-muted">
@@ -144,12 +109,7 @@ export default function GroupsPanel() {
           type="button"
           disabled={busy || !joinLink.trim()}
           className="rounded-pill border border-border px-4 py-1.5 text-xs disabled:opacity-50"
-          onClick={() =>
-            void run(async () => {
-              await joinGroup(joinLink.trim());
-              setJoinLink("");
-            })
-          }
+          onClick={() => void joinViaInvite()}
         >
           Join
         </button>
@@ -169,159 +129,26 @@ export default function GroupsPanel() {
         </button>
       </div>
 
-      <ul className="max-h-40 space-y-1 overflow-y-auto">
-        {groups.map((g) => (
-          <li key={g.jid}>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={() => void loadDetail(g.jid)}
-              className={`w-full rounded-card border px-3 py-2 text-left text-xs transition ${
-                selected === g.jid
-                  ? "border-accent bg-bg-card"
-                  : "border-border hover:bg-bg-card"
-              }`}
-            >
-              <span className="block font-medium">{g.name || g.jid}</span>
-              <span className="text-fg-muted">
-                {g.participant_count ?? "?"} members
-              </span>
-            </button>
-          </li>
-        ))}
-      </ul>
+      <GroupList
+        groups={groups}
+        selectedJid={selected}
+        busy={busy}
+        onSelect={(jid) => void loadDetail(jid)}
+      />
 
       {detail && selected && (
-        <section className="space-y-2 rounded-card border border-border p-3">
-          <p className="text-xs font-medium uppercase tracking-wider text-fg-muted">
-            Manage {detail.name || selected}
-          </p>
-          <p className="break-all font-mono text-[10px] text-fg-muted">{selected}</p>
-          <input
-            className="w-full rounded-card border border-border bg-bg-app px-3 py-2 text-sm"
-            placeholder="Group name"
-            value={editName}
-            onChange={(e) => setEditName(e.target.value)}
-            disabled={busy}
-          />
-          <input
-            className="w-full rounded-card border border-border bg-bg-app px-3 py-2 text-sm"
-            placeholder="Description / topic"
-            value={editTopic}
-            onChange={(e) => setEditTopic(e.target.value)}
-            disabled={busy}
-          />
-          <button
-            type="button"
-            disabled={busy}
-            className="w-full rounded-pill border border-border px-3 py-1.5 text-xs"
-            onClick={() =>
-              void run(async () => {
-                await updateGroup(selected, {
-                  name: editName.trim() || undefined,
-                  topic: editTopic.trim() || undefined,
-                });
-              })
-            }
-          >
-            Save name & topic
-          </button>
-          <textarea
-            className="w-full rounded-card border border-border bg-bg-app px-3 py-2 text-sm"
-            placeholder="Phone numbers to add/remove"
-            rows={2}
-            value={memberPhones}
-            onChange={(e) => setMemberPhones(e.target.value)}
-            disabled={busy}
-          />
-          <div className="flex flex-wrap gap-2">
-            {(["add", "remove", "promote", "demote"] as const).map((action) => (
-              <button
-                key={action}
-                type="button"
-                disabled={busy || !memberPhones.trim()}
-                className="rounded-pill border border-border px-3 py-1 text-xs capitalize disabled:opacity-50"
-                onClick={() =>
-                  void run(async () => {
-                    await updateGroupParticipants(
-                      selected,
-                      parsePhones(memberPhones),
-                      action,
-                    );
-                    setMemberPhones("");
-                  })
-                }
-              >
-                {action}
-              </button>
-            ))}
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <label className="rounded-pill border border-border px-3 py-1 text-xs cursor-pointer">
-              Set group photo
-              <input
-                type="file"
-                accept="image/jpeg,image/png,image/webp"
-                className="hidden"
-                disabled={busy}
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  e.target.value = "";
-                  if (!file) return;
-                  void run(async () => {
-                    await setGroupPicture(selected, file);
-                  });
-                }}
-              />
-            </label>
-            <button
-              type="button"
-              disabled={busy}
-              className="rounded-pill border border-border px-3 py-1 text-xs"
-              onClick={() =>
-                void run(async () => {
-                  if (!confirm("Remove this group's profile photo?")) return;
-                  await removeGroupPicture(selected);
-                })
-              }
-            >
-              Remove photo
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              className="rounded-pill border border-border px-3 py-1 text-xs"
-              onClick={() =>
-                void run(async () => {
-                  const res = await fetchGroupInvite(selected, false);
-                  setInviteLink(res.invite_link ?? null);
-                })
-              }
-            >
-              Invite link
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              className="rounded-pill border border-border px-3 py-1 text-xs"
-              onClick={() =>
-                void run(async () => {
-                  if (!confirm("Leave this group on the linked device?")) return;
-                  await leaveGroup(selected);
-                  setSelected(null);
-                  setDetail(null);
-                })
-              }
-            >
-              Leave group
-            </button>
-          </div>
-          {inviteLink && (
-            <p className="break-all rounded-card bg-bg-card p-2 text-xs text-fg-muted">
-              {inviteLink}
-            </p>
-          )}
-        </section>
+        <GroupEditor
+          group={detail}
+          jid={selected}
+          busy={busy}
+          setBusy={setBusy}
+          onMutate={refreshAll}
+          onError={setError}
+          onLeft={() => {
+            setSelected(null);
+            setDetail(null);
+          }}
+        />
       )}
     </div>
   );

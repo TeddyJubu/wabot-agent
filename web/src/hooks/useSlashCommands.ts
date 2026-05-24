@@ -1,6 +1,13 @@
 export interface SlashCommand {
   name: string;
   description: string;
+  /**
+   * Optional shortcut hint shown by the command palette. Purely cosmetic for
+   * now — there is no keybinding wiring behind the chip. Leaving the field
+   * optional lets the palette and the legacy bottom slash menu share one
+   * source of truth without forcing every entry to declare a shortcut.
+   */
+  shortcut?: string;
   /** Expand into either a chat message or a sentinel ("__open_slide_over__:<id>"). */
   expand: () => string;
 }
@@ -9,7 +16,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   {
     name: "/qr",
     description: "Open WhatsApp pairing QR",
-    expand: () => "__open_slide_over__:qr",
+    expand: () => "__open_pair__",
   },
   {
     name: "/runs",
@@ -34,6 +41,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   {
     name: "/knowledge",
     description: "Open knowledge editor",
+    shortcut: "g k",
     expand: () => "__open_knowledge__",
   },
   {

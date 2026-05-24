@@ -29,7 +29,7 @@ export default function PairingQrCard({ data, actions, onAction }: Props) {
                 style={{ imageRendering: "pixelated" }}
               />
             ) : (
-              <p className="text-xs text-neutral-600">No QR available right now.</p>
+              <p className="text-xs text-fg-muted">No QR available right now.</p>
             )}
           </div>
           {actions.length > 0 && (

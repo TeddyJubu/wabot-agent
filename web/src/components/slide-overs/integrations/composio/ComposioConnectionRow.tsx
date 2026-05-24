@@ -2,9 +2,12 @@ import { useState } from "react";
 import {
   refreshComposioConnection,
   deleteComposioConnection,
-  type ComposioConnection,
-  type ComposioConnectionStatus,
 } from "@/api/composio";
+import type {
+  ComposioConnection,
+  ComposioConnectionStatus,
+} from "@/api/composio";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 
 interface Props {
   connection: ComposioConnection;
@@ -26,9 +29,9 @@ function relativeTime(iso: string | null): string {
 
 function StatusPill({ status }: { status: ComposioConnectionStatus }) {
   const variants: Record<ComposioConnectionStatus, string> = {
-    connected: "border-green-500/40 bg-green-500/10 text-green-400",
-    pending: "border-yellow-500/40 bg-yellow-500/10 text-yellow-400",
-    error: "border-red-500/40 bg-red-500/10 text-red-400",
+    connected: "border-ok/40 bg-ok/10 text-ok",
+    pending: "border-warn/40 bg-warn/10 text-warn",
+    error: "border-bad/40 bg-bad/10 text-bad",
     disconnected: "border-border bg-transparent text-fg-muted",
   };
   return (
@@ -43,6 +46,7 @@ export function ComposioConnectionRow({ connection, onRefreshed, onDeleted }: Pr
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [localConnection, setLocalConnection] = useState<ComposioConnection>(connection);
+  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
   async function doRefresh() {
     setRefreshing(true);
@@ -59,7 +63,6 @@ export function ComposioConnectionRow({ connection, onRefreshed, onDeleted }: Pr
   }
 
   async function doDelete() {
-    if (!window.confirm(`Disconnect "${localConnection.display_name}"?`)) return;
     setDeleting(true);
     setError(null);
     try {
@@ -91,7 +94,7 @@ export function ComposioConnectionRow({ connection, onRefreshed, onDeleted }: Pr
           <button
             type="button"
             disabled={deleting}
-            onClick={() => void doDelete()}
+            onClick={() => setConfirmDeleteOpen(true)}
             aria-label={`Disconnect ${localConnection.display_name}`}
             className="rounded-pill border border-bad/40 bg-bad/10 px-2 py-1 text-[10px] text-bad hover:bg-bad/20 disabled:opacity-50"
           >
@@ -105,6 +108,19 @@ export function ComposioConnectionRow({ connection, onRefreshed, onDeleted }: Pr
       {error && (
         <p className="text-[10px] text-bad">{error}</p>
       )}
+
+      <ConfirmDialog
+        open={confirmDeleteOpen}
+        title={`Disconnect from ${localConnection.display_name}?`}
+        description="This Composio connection will be removed. You can re-add it anytime."
+        confirmLabel="Disconnect"
+        variant="danger"
+        onConfirm={() => {
+          setConfirmDeleteOpen(false);
+          void doDelete();
+        }}
+        onCancel={() => setConfirmDeleteOpen(false)}
+      />
     </div>
   );
 }

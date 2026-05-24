@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import AgentsPanel from "@/components/slide-overs/AgentsPanel";
 import type { AgentSummary, AgentDetail } from "@/api/agents";
@@ -375,8 +375,6 @@ describe("AgentsPanel — dirty-state guards", () => {
   });
 
   it("test_back_with_unsaved_changes_shows_confirm", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
-
     vi.mocked(agentsApi.listAgents).mockResolvedValue([SCRAPER_SUMMARY]);
     vi.mocked(agentsApi.getAgent).mockResolvedValue(SCRAPER_DETAIL);
 
@@ -389,16 +387,45 @@ describe("AgentsPanel — dirty-state guards", () => {
     const nameInput = screen.getByDisplayValue("Scraper");
     fireEvent.change(nameInput, { target: { value: "Scraper Changed" } });
 
-    // Click Back
+    // Click Back — opens the ConfirmDialog instead of falling back to navigation.
     const backBtn = screen.getByRole("button", { name: /← back/i });
     fireEvent.click(backBtn);
 
-    // confirm should have been called
-    expect(confirmSpy).toHaveBeenCalledWith("Discard unsaved changes?");
+    const dialog = await screen.findByRole("dialog", {
+      name: /discard unsaved changes/i,
+    });
 
-    // Since confirm returned false, we should still be in the editor
+    // Cancel — should still be in the editor with edits intact.
+    fireEvent.click(within(dialog).getByRole("button", { name: /^cancel$/i }));
+
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByDisplayValue("Scraper Changed")).toBeInTheDocument();
+  });
 
-    confirmSpy.mockRestore();
+  it("test_back_with_unsaved_changes_confirmed_returns_to_list", async () => {
+    vi.mocked(agentsApi.listAgents).mockResolvedValue([SCRAPER_SUMMARY]);
+    vi.mocked(agentsApi.getAgent).mockResolvedValue(SCRAPER_DETAIL);
+
+    render(<AgentsPanel />);
+    await waitFor(() => screen.getByText("scraper"));
+    fireEvent.click(screen.getByText("scraper"));
+    await waitFor(() => screen.getByDisplayValue("Scraper"));
+
+    const nameInput = screen.getByDisplayValue("Scraper");
+    fireEvent.change(nameInput, { target: { value: "Scraper Changed" } });
+
+    fireEvent.click(screen.getByRole("button", { name: /← back/i }));
+    const dialog = await screen.findByRole("dialog", {
+      name: /discard unsaved changes/i,
+    });
+
+    // Confirm — should drop edits and return to list view.
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: /discard and go back/i }),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "+ New" })).toBeInTheDocument(),
+    );
   });
 });

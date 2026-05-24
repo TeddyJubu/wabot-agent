@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { SkillsSection } from "@/components/slide-overs/integrations/SkillsSection";
 import type { SkillRow } from "@/api/skills";
 
@@ -140,33 +140,33 @@ describe("SkillsSection — Upload", () => {
 });
 
 describe("SkillsSection — Delete", () => {
-  it("Delete prompts confirm and calls deleteSkill", async () => {
+  it("Delete opens the ConfirmDialog and calls deleteSkill on confirm", async () => {
     vi.mocked(skillsApi.deleteSkill).mockResolvedValue(undefined);
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     const onRefresh = vi.fn();
 
     render(<SkillsSection skills={[SKILL_LOCAL]} onRefresh={onRefresh} />);
 
     fireEvent.click(screen.getByRole("button", { name: /delete skill web-research/i }));
 
-    expect(confirmSpy).toHaveBeenCalled();
+    const dialog = await screen.findByRole("dialog", { name: /delete skill/i });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^delete$/i }));
+
     await waitFor(() => expect(skillsApi.deleteSkill).toHaveBeenCalledWith("web-research"));
     expect(onRefresh).toHaveBeenCalledOnce();
-
-    confirmSpy.mockRestore();
   });
 
-  it("Delete does NOT call deleteSkill when confirm is cancelled", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+  it("Delete does NOT call deleteSkill when the dialog is cancelled", async () => {
     const onRefresh = vi.fn();
 
     render(<SkillsSection skills={[SKILL_LOCAL]} onRefresh={onRefresh} />);
     fireEvent.click(screen.getByRole("button", { name: /delete skill web-research/i }));
+
+    const dialog = await screen.findByRole("dialog", { name: /delete skill/i });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^cancel$/i }));
 
     expect(skillsApi.deleteSkill).not.toHaveBeenCalled();
     expect(onRefresh).not.toHaveBeenCalled();
-
-    confirmSpy.mockRestore();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
 

@@ -1,3 +1,6 @@
+import { useState } from "react";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
+
 type Policy = "dry_run" | "allowlist" | "allow_all" | "owner";
 
 interface PolicySectionProps {
@@ -15,7 +18,7 @@ const POLICY_CHOICES: readonly Policy[] = ["dry_run", "allowlist", "owner", "all
  * Send-policy chooser + owner numbers + extra allowlist. The "allow_all"
  * radio prompts for confirmation in the browser before flipping —
  * the server-side guard (``SettingsPatch.confirm_allow_all``) is the
- * real enforcement; this confirm() is just UX defense-in-depth.
+ * real enforcement; this confirm dialog is just UX defense-in-depth.
  */
 export function PolicySection({
   policy,
@@ -25,6 +28,8 @@ export function PolicySection({
   recipients,
   setRecipients,
 }: PolicySectionProps) {
+  const [pendingAllowAll, setPendingAllowAll] = useState(false);
+
   return (
     <fieldset className="space-y-2">
       <legend className="text-xs font-medium uppercase tracking-wider text-fg-muted">
@@ -44,10 +49,10 @@ export function PolicySection({
               className="sr-only"
               checked={policy === p}
               onChange={() => {
-                if (
-                  p === "allow_all" &&
-                  !window.confirm("Allow-all removes the recipient guard. Continue?")
-                ) {
+                if (p === "allow_all") {
+                  if (policy !== "allow_all") {
+                    setPendingAllowAll(true);
+                  }
                   return;
                 }
                 setPolicy(p);
@@ -81,6 +86,25 @@ export function PolicySection({
           className="mt-1 w-full rounded-card border border-border bg-bg-card px-3 py-2 text-sm font-mono"
         />
       </label>
+      <ConfirmDialog
+        open={pendingAllowAll}
+        title="Switch send policy to allow_all?"
+        description={
+          <p>
+            Allow-all removes the recipient guard. Every outbound number is permitted. The
+            server requires <span className="font-mono">confirm_allow_all</span> on save; this
+            dialog is your last UI checkpoint.
+          </p>
+        }
+        requireTyped="ALLOW ALL"
+        variant="danger"
+        confirmLabel="Switch to allow_all"
+        onConfirm={() => {
+          setPolicy("allow_all");
+          setPendingAllowAll(false);
+        }}
+        onCancel={() => setPendingAllowAll(false)}
+      />
     </fieldset>
   );
 }

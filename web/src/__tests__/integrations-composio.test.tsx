@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { ComposioSection } from "@/components/slide-overs/integrations/ComposioSection";
 
 // ---------------------------------------------------------------------------
@@ -194,10 +194,9 @@ describe("ComposioSection — enabled state with connections", () => {
     );
   });
 
-  it("Disconnect prompts confirm and calls deleteComposioConnection", async () => {
+  it("Disconnect opens the ConfirmDialog and calls deleteComposioConnection on confirm", async () => {
     mockEnabledState([CONN_GMAIL_CONNECTED]);
     vi.mocked(composioApi.deleteComposioConnection).mockResolvedValue(undefined);
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
 
     render(<ComposioSection />);
 
@@ -205,26 +204,31 @@ describe("ComposioSection — enabled state with connections", () => {
 
     fireEvent.click(screen.getByLabelText(/Disconnect Gmail/i));
 
-    expect(confirmSpy).toHaveBeenCalled();
+    const dialog = await screen.findByRole("dialog", {
+      name: /disconnect from gmail/i,
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^disconnect$/i }));
+
     await waitFor(() =>
       expect(composioApi.deleteComposioConnection).toHaveBeenCalledWith(CONN_GMAIL_CONNECTED.id),
     );
-
-    confirmSpy.mockRestore();
   });
 
-  it("Disconnect does NOT call API when confirm is cancelled", async () => {
+  it("Disconnect does NOT call API when the dialog is cancelled", async () => {
     mockEnabledState([CONN_GMAIL_CONNECTED]);
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
 
     render(<ComposioSection />);
 
     await waitFor(() => screen.getByLabelText(/Disconnect Gmail/i));
     fireEvent.click(screen.getByLabelText(/Disconnect Gmail/i));
 
-    expect(composioApi.deleteComposioConnection).not.toHaveBeenCalled();
+    const dialog = await screen.findByRole("dialog", {
+      name: /disconnect from gmail/i,
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^cancel$/i }));
 
-    confirmSpy.mockRestore();
+    expect(composioApi.deleteComposioConnection).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
 

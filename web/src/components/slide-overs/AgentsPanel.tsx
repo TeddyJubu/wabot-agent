@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { listAgents, getAgent, type AgentSummary, type AgentDetail } from "@/api/agents";
+import { listAgents, getAgent } from "@/api/agents";
+import type { AgentSummary, AgentDetail } from "@/api/agents";
+import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { AgentList } from "./agents/AgentList";
 import { AgentEditor } from "./agents/AgentEditor";
 import { AgentCreateForm } from "./agents/AgentCreateForm";
@@ -13,6 +15,7 @@ export default function AgentsPanel() {
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
   const [editorDirty, setEditorDirty] = useState(false);
+  const [confirmBackOpen, setConfirmBackOpen] = useState(false);
 
   useEffect(() => {
     void load();
@@ -71,7 +74,17 @@ export default function AgentsPanel() {
   }
 
   function handleBack() {
-    if (editorDirty && !window.confirm("Discard unsaved changes?")) return;
+    if (editorDirty) {
+      setConfirmBackOpen(true);
+      return;
+    }
+    setEditorDirty(false);
+    setView("list");
+    setSelected(null);
+  }
+
+  function confirmBack() {
+    setConfirmBackOpen(false);
     setEditorDirty(false);
     setView("list");
     setSelected(null);
@@ -151,6 +164,16 @@ export default function AgentsPanel() {
           onCancel={() => setView("list")}
         />
       )}
+
+      <ConfirmDialog
+        open={confirmBackOpen}
+        title="Discard unsaved changes?"
+        description="Going back will lose your edits to this agent."
+        confirmLabel="Discard and go back"
+        variant="danger"
+        onConfirm={confirmBack}
+        onCancel={() => setConfirmBackOpen(false)}
+      />
     </div>
   );
 }

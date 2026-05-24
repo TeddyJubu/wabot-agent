@@ -50,7 +50,7 @@ export function CodexSection({
       </legend>
       <div className="rounded-card border border-border bg-bg-card/60 p-3 text-xs">
         {signedIn ? (
-          <p className="text-emerald-400/90">
+          <p className="text-ok/90">
             Connected via ChatGPT subscription
             {codexLogin?.auth_mode ? ` (${codexLogin.auth_mode})` : ""}.
           </p>
@@ -87,7 +87,7 @@ export function CodexSection({
           </ol>
         )}
         {failed && (
-          <p className="mt-2 rounded border border-red-500/30 bg-red-500/10 px-2 py-1.5 text-red-300">
+          <p className="mt-2 rounded border border-bad/30 bg-bad/10 px-2 py-1.5 text-bad">
             {codexLogin.session.detail}
           </p>
         )}
@@ -115,7 +115,7 @@ export function CodexSection({
             <button
               type="button"
               disabled={codexBusy}
-              className="rounded-pill border border-red-400/40 px-2.5 py-1 text-xs text-red-300 transition hover:bg-red-500/10 disabled:opacity-50"
+              className="rounded-pill border border-bad/40 px-2.5 py-1 text-xs text-bad transition hover:bg-bad/10 disabled:opacity-50"
               onClick={() => void disconnect()}
             >
               Disconnect ChatGPT

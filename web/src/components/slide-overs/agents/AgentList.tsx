@@ -16,7 +16,7 @@ function AgentRow({ agent, onSelect }: { agent: AgentSummary; onSelect: (s: stri
         <span className="flex items-center gap-1.5 font-medium text-sm">
           <span
             className={`inline-block size-1.5 rounded-full flex-shrink-0 ${
-              agent.is_enabled ? "bg-green-400" : "bg-fg-muted"
+              agent.is_enabled ? "bg-ok" : "bg-fg-muted"
             }`}
           />
           {agent.slug}

@@ -55,7 +55,7 @@ function ToolRowItem({ tool, onToggle, toggling }: ToolRowItemProps) {
         onClick={() => onToggle(tool.id, !tool.is_enabled)}
         className={`flex-shrink-0 rounded-pill border px-2.5 py-1 text-[10px] font-medium transition disabled:opacity-50 ${
           tool.is_enabled
-            ? "border-green-500/40 bg-green-500/10 text-green-400"
+            ? "border-ok/40 bg-ok/10 text-ok"
             : "border-border text-fg-muted"
         }`}
       >
