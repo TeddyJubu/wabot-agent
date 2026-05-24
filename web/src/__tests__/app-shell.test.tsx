@@ -8,7 +8,6 @@ import type {
   HealthResponse,
 } from "@/api/metrics";
 import { useStore, type Readiness } from "@/store";
-import { useUiFlagStore } from "@/store/uiFlag";
 import { useRouteStore } from "@/store/route";
 import App from "@/App";
 
@@ -128,7 +127,9 @@ vi.mock("@/api/metrics", () => ({
 }));
 
 // ---------------------------------------------------------------------------
-// Setup — flip the URL flag to ?ui=v2 and reset every relevant store.
+// Setup — reset every relevant store between tests. The ?ui=v2 URL flag was
+// removed once v2 became the only shell; the rail / palette / pages now ship
+// unconditionally.
 // ---------------------------------------------------------------------------
 
 const PENDING_ROW = { label: "Checking…", variant: "pending" as const };
@@ -140,17 +141,7 @@ const PRISTINE_READINESS: Readiness = {
   memory: PENDING_ROW,
 };
 
-function setSearch(search: string) {
-  window.history.replaceState(
-    {},
-    "",
-    search ? `/?${search.replace(/^\?/, "")}` : "/",
-  );
-  useUiFlagStore.getState().resetUiFlagFromUrl();
-}
-
 beforeEach(() => {
-  setSearch("ui=v2");
   useStore.setState({
     readiness: PRISTINE_READINESS,
     slideOver: null,
@@ -163,8 +154,8 @@ beforeEach(() => {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe("App shell (v2)", () => {
-  it("renders the primary navigation rail behind ?ui=v2", async () => {
+describe("App shell", () => {
+  it("renders the primary navigation rail", async () => {
     render(<App />);
     expect(
       await screen.findByRole("navigation", { name: "Primary" }),
