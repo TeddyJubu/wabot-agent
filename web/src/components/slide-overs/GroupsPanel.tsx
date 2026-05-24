@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   fetchGroup,
   fetchGroups,
@@ -19,6 +19,12 @@ export default function GroupsPanel() {
   const [error, setError] = useState<string | null>(null);
   const [joinLink, setJoinLink] = useState("");
 
+  // Monotonic counter for in-flight `loadDetail` calls. A fast click sequence
+  // can start overlapping fetchGroup() calls; the older response would
+  // otherwise clobber the newer one and leave `selected` and `detail` out of
+  // sync. We track the most recent request id and ignore stale responses.
+  const detailRequestSeq = useRef(0);
+
   const reload = useCallback(async () => {
     setState("loading");
     setError(null);
@@ -36,12 +42,15 @@ export default function GroupsPanel() {
   }, [reload]);
 
   const loadDetail = useCallback(async (jid: string) => {
+    const seq = ++detailRequestSeq.current;
     setSelected(jid);
     setError(null);
     try {
       const g = await fetchGroup(jid);
+      if (seq !== detailRequestSeq.current) return; // a newer call is in flight
       setDetail(g);
     } catch (err) {
+      if (seq !== detailRequestSeq.current) return;
       setDetail(null);
       setError(err instanceof Error ? err.message : "Could not load group");
     }

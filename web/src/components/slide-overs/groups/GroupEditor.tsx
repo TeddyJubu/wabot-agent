@@ -50,11 +50,23 @@ export function GroupEditor({
     setInviteLink(null);
   }, [group]);
 
-  async function run(action: () => Promise<void>) {
+  /**
+   * Run a side-effectful action and let the parent refetch by default.
+   * Pass `{ mutate: false }` for read-only operations (e.g. fetching the
+   * invite link) — without that guard, `onMutate()` would re-fetch the
+   * detail and `useEffect` above would reset `inviteLink` to null, making
+   * the link flicker / disappear after click.
+   */
+  async function run(
+    action: () => Promise<void>,
+    opts?: { mutate?: boolean },
+  ) {
     setBusy(true);
     try {
       await action();
-      await onMutate();
+      if (opts?.mutate !== false) {
+        await onMutate();
+      }
     } catch (err) {
       onError(err instanceof Error ? err.message : "Action failed");
     } finally {
@@ -69,6 +81,7 @@ export function GroupEditor({
       </p>
       <p className="break-all font-mono text-[10px] text-fg-muted">{jid}</p>
       <input
+        aria-label="Group name"
         className="w-full rounded-card border border-border bg-bg-app px-3 py-2 text-sm"
         placeholder="Group name"
         value={editName}
@@ -76,6 +89,7 @@ export function GroupEditor({
         disabled={busy}
       />
       <input
+        aria-label="Description / topic"
         className="w-full rounded-card border border-border bg-bg-app px-3 py-2 text-sm"
         placeholder="Description / topic"
         value={editTopic}
@@ -98,6 +112,7 @@ export function GroupEditor({
         Save name & topic
       </button>
       <textarea
+        aria-label="Phone numbers to add, remove, promote, or demote"
         className="w-full rounded-card border border-border bg-bg-app px-3 py-2 text-sm"
         placeholder="Phone numbers to add/remove"
         rows={2}
@@ -158,10 +173,13 @@ export function GroupEditor({
           disabled={busy}
           className="rounded-pill border border-border px-3 py-1 text-xs"
           onClick={() =>
-            void run(async () => {
-              const res = await fetchGroupInvite(jid, false);
-              setInviteLink(res.invite_link ?? null);
-            })
+            void run(
+              async () => {
+                const res = await fetchGroupInvite(jid, false);
+                setInviteLink(res.invite_link ?? null);
+              },
+              { mutate: false },
+            )
           }
         >
           Invite link

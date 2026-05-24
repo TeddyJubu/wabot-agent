@@ -120,6 +120,14 @@ export default function App() {
               useRouteStore.getState().setRoute("capabilities");
               return;
             }
+            if (which === "agents") {
+              // Agents stays a slide-over for now (no page yet), but we still
+              // mirror the route so LeftRail's aria-current="page" doesn't lie.
+              // The route→openSlideOver useEffect below picks the slide-over
+              // back up from the route change.
+              useRouteStore.getState().setRoute("agents");
+              return;
+            }
           }
           open(which);
         }

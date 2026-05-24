@@ -2,6 +2,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
   type ReactNode,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -129,18 +130,30 @@ export default function SettingsPage() {
   // we only steal focus in that case so a mouse click doesn't yank focus away.
   const focusAfterChange = useRef(false);
 
+  /**
+   * Snap the controlled form fields back to the server's truth. After a save
+   * we re-fetch and call this so every dirty-comparison field starts fresh —
+   * not just provider + subagents. Without it, the server's normalisation of
+   * recipients/owners ("a,b" → "a, b") leaves `isDirty` stuck true even
+   * though the save succeeded.
+   */
+  const resetDraftFromView = useCallback((v: SettingsView) => {
+    setProvider(v.llm.provider);
+    setPolicy(v.send_policy);
+    setRecipients(v.allowed_recipients.join(", "));
+    setOwners(v.owner_numbers.join(", "));
+    setSubagentsEnabled(v.subagents_enabled ?? false);
+    setDraft({});
+  }, []);
+
   useEffect(() => {
     fetchSettings()
       .then((v) => {
         setView(v);
-        setProvider(v.llm.provider);
-        setPolicy(v.send_policy);
-        setRecipients(v.allowed_recipients.join(", "));
-        setOwners(v.owner_numbers.join(", "));
-        setSubagentsEnabled(v.subagents_enabled ?? false);
+        resetDraftFromView(v);
       })
       .catch((err) => setStatus(`Couldn't load: ${String(err)}`));
-  }, []);
+  }, [resetDraftFromView]);
 
   useEffect(() => {
     if (!focusAfterChange.current) return;
@@ -164,7 +177,12 @@ export default function SettingsPage() {
   }
 
   const refetchSettings = () => {
-    void fetchSettings().then(setView);
+    void fetchSettings()
+      .then((next) => {
+        setView(next);
+        resetDraftFromView(next);
+      })
+      .catch((err) => setStatus(`Couldn't refresh: ${String(err)}`));
   };
 
   const submit = async (e: FormEvent) => {
@@ -199,23 +217,15 @@ export default function SettingsPage() {
     try {
       await patchSettings(body);
       setStatus("Saved.");
-      setDraft({});
       const next = await fetchSettings();
       setView(next);
-      setProvider(next.llm.provider);
-      setSubagentsEnabled(next.subagents_enabled ?? false);
+      // Re-derive EVERY form field from the new server view so isDirty
+      // settles to false (matches CodeRabbit finding #9). Without this,
+      // server-normalised strings like recipients leave isDirty stuck true.
+      resetDraftFromView(next);
     } catch (err) {
       setStatus(`Error: ${String(err)}`);
     }
-  };
-
-  const resetDraftFromView = (v: SettingsView) => {
-    setDraft({});
-    setProvider(v.llm.provider);
-    setPolicy(v.send_policy);
-    setRecipients(v.allowed_recipients.join(", "));
-    setOwners(v.owner_numbers.join(", "));
-    setSubagentsEnabled(v.subagents_enabled ?? false);
   };
 
   const requestTab = (next: TabId) => {

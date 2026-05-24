@@ -6,6 +6,20 @@ import { fetchKnowledgeIndex } from "@/api/knowledge";
 
 export type StepStatus = "done" | "active" | "pending";
 
+/**
+ * Append the current URL's query string (typically `?ui=v2`) to outbound
+ * navigation so the user doesn't accidentally drop the new-UI flag when
+ * the checklist redirects to /sign-in, /pair, /knowledge, etc. Tests pass
+ * a bare path; production carries the flag through.
+ */
+function withCurrentSearch(path: string): string {
+  if (typeof window === "undefined") return path;
+  const qs = window.location.search;
+  if (!qs) return path;
+  // Don't double-add if the path already has its own query string.
+  return path.includes("?") ? path : `${path}${qs}`;
+}
+
 interface ChecklistStep {
   id: string;
   title: string;
@@ -77,7 +91,7 @@ export default function SetupChecklist({
         signInStatus === "done"
           ? undefined
           : () => {
-              window.location.href = "/sign-in";
+              window.location.href = withCurrentSearch("/sign-in");
             },
     },
     {
@@ -90,7 +104,7 @@ export default function SetupChecklist({
         pairingStatus === "done"
           ? undefined
           : () => {
-              window.open("/pair", "_blank", "noopener");
+              window.open(withCurrentSearch("/pair"), "_blank", "noopener");
             },
     },
     {
@@ -116,7 +130,7 @@ export default function SetupChecklist({
         knowledgeStatus === "done"
           ? undefined
           : () => {
-              window.location.href = "/knowledge";
+              window.location.href = withCurrentSearch("/knowledge");
             },
     },
   ];

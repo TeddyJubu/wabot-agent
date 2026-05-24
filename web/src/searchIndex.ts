@@ -199,11 +199,18 @@ let cachePromise: Promise<SearchResult[]> | null = null;
 export async function getSearchIndex(): Promise<SearchResult[]> {
   if (cached) return cached;
   if (cachePromise) return cachePromise;
-  cachePromise = buildSearchIndex().then((r) => {
-    cached = r;
-    cachePromise = null;
-    return r;
-  });
+  // `.finally` ensures cachePromise is cleared whether the build resolves OR
+  // rejects. Without the failure path, a single rejection (e.g. transient
+  // network blip) would poison the cache for the rest of the session — every
+  // subsequent palette open would re-receive the same rejected promise.
+  cachePromise = buildSearchIndex()
+    .then((r) => {
+      cached = r;
+      return r;
+    })
+    .finally(() => {
+      cachePromise = null;
+    });
   return cachePromise;
 }
 
