@@ -8,7 +8,12 @@ __pycache__/
 .ruff_cache/
 .playwright-mcp/
 .mypy_cache/
-.claude/
+# Ignore everything in .claude/ EXCEPT the project-scoped subagent
+# definitions, which are part of the repo so anyone cloning picks them up.
+# (Per gitignore rules, you can't re-include children of an ignored parent —
+# so we ignore .claude/* and then re-include the agents subtree explicitly.)
+.claude/*
+!.claude/agents/
 .DS_Store
 
 # Runtime state and secrets

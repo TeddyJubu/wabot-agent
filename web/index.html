@@ -6,6 +6,20 @@
     <meta name="color-scheme" content="light dark" />
     <title>wabot-agent</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" />
+
+    <!--
+      Verdana Health typography:
+      - Plus Jakarta Sans -> headlines (Display, H1-H4)
+      - DM Sans            -> body copy
+      - Fira Code          -> tabular numerals / code (lab values, metrics)
+      Preconnect first to land the TLS handshake before the CSS request.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500&family=Plus+Jakarta+Sans:wght@500;600;700&display=swap"
+    />
   </head>
   <body class="bg-bg-app text-fg font-sans">
     <div id="root"></div>
