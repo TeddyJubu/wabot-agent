@@ -1,7 +1,6 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 
-import PairingPanel from "@/components/slide-overs/PairingPanel";
 import PairView from "@/components/PairView";
 import { useStore } from "@/store";
 import { disconnectWhatsappConnection } from "@/api/pairing";
@@ -28,85 +27,6 @@ beforeEach(() => {
   };
   useStore.setState({ pairing: null });
   vi.clearAllMocks();
-});
-
-describe("PairingPanel (slide-over)", () => {
-  it("renders 'Checking…' when pairing is null", () => {
-    render(<PairingPanel />);
-    expect(screen.getByText(/checking/i)).toBeInTheDocument();
-  });
-
-  it("renders 'Linked & connected' when the bot is linked and online", () => {
-    act(() => {
-      useStore.setState({
-        pairing: {
-          qr_available: false,
-          logged_in: true,
-          connected: true,
-          reachable: true,
-        },
-      });
-    });
-    render(<PairingPanel />);
-    expect(screen.getByText(/linked & connected/i)).toBeInTheDocument();
-  });
-
-  it("can disconnect the linked WhatsApp account", async () => {
-    vi.spyOn(window, "confirm").mockReturnValue(true);
-    vi.mocked(disconnectWhatsappConnection).mockResolvedValue({
-      qr_available: true,
-      logged_in: false,
-      connected: true,
-      reachable: true,
-    });
-    act(() => {
-      useStore.setState({
-        pairing: {
-          qr_available: false,
-          logged_in: true,
-          connected: true,
-          reachable: true,
-        },
-      });
-    });
-    render(<PairingPanel />);
-
-    fireEvent.click(screen.getByRole("button", { name: /disconnect whatsapp/i }));
-
-    await waitFor(() => expect(disconnectWhatsappConnection).toHaveBeenCalledTimes(1));
-    expect(useStore.getState().pairing?.qr_available).toBe(true);
-  });
-
-  it("shows the disconnect action even when a linked WhatsApp account is offline", () => {
-    act(() => {
-      useStore.setState({
-        pairing: {
-          qr_available: false,
-          logged_in: true,
-          connected: false,
-          reachable: true,
-        },
-      });
-    });
-    render(<PairingPanel />);
-
-    expect(screen.getByRole("button", { name: /disconnect whatsapp/i })).toBeInTheDocument();
-  });
-
-  it("renders 'wabot unreachable' when pairing.reachable is false", () => {
-    act(() => {
-      useStore.setState({
-        pairing: {
-          qr_available: false,
-          logged_in: false,
-          connected: false,
-          reachable: false,
-        },
-      });
-    });
-    render(<PairingPanel />);
-    expect(screen.getByText(/unreachable/i)).toBeInTheDocument();
-  });
 });
 
 describe("PairView (public /pair page)", () => {
@@ -175,5 +95,31 @@ describe("PairView (public /pair page)", () => {
     const link = screen.getByRole("link", { name: /open full dashboard/i });
     expect(link).toBeInTheDocument();
     expect(link).toHaveAttribute("href", "/");
+  });
+
+  it("can disconnect the linked WhatsApp account", async () => {
+    vi.spyOn(window, "confirm").mockReturnValue(true);
+    vi.mocked(disconnectWhatsappConnection).mockResolvedValue({
+      qr_available: true,
+      logged_in: false,
+      connected: true,
+      reachable: true,
+    });
+    act(() => {
+      useStore.setState({
+        pairing: {
+          qr_available: false,
+          logged_in: true,
+          connected: true,
+          reachable: true,
+        },
+      });
+    });
+    render(<PairView />);
+
+    fireEvent.click(screen.getByRole("button", { name: /disconnect whatsapp/i }));
+
+    await waitFor(() => expect(disconnectWhatsappConnection).toHaveBeenCalledTimes(1));
+    expect(useStore.getState().pairing?.qr_available).toBe(true);
   });
 });

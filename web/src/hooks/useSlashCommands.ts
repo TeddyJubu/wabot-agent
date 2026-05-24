@@ -9,7 +9,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   {
     name: "/qr",
     description: "Open WhatsApp pairing QR",
-    expand: () => "__open_slide_over__:qr",
+    expand: () => "__open_pair__",
   },
   {
     name: "/runs",

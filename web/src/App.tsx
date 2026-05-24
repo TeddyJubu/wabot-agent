@@ -2,7 +2,7 @@ import { type KeyboardEvent, useEffect, useState } from "react";
 import TopBar from "@/components/TopBar";
 import SlideOver from "@/components/SlideOver";
 import SlashMenu from "@/components/SlashMenu";
-import PairingPanel from "@/components/slide-overs/PairingPanel";
+import StatusBar from "@/components/StatusBar";
 import ActivityPanel from "@/components/slide-overs/ActivityPanel";
 import OverviewPanel from "@/components/slide-overs/OverviewPanel";
 import GroupsPanel from "@/components/slide-overs/GroupsPanel";
@@ -14,6 +14,7 @@ import { matchSlash } from "@/hooks/useSlashCommands";
 import { usePairingStream } from "@/hooks/usePairingStream";
 import { fetchSettings } from "@/api/settings";
 import { useStore, type SlideOverId } from "@/store";
+import { useUiFlag } from "@/store/uiFlag";
 
 export default function App() {
   const slideOver = useStore((s) => s.slideOver);
@@ -27,8 +28,9 @@ export default function App() {
   const firstToken = input.split(/\s/)[0] ?? "";
   const slashMatches = matchSlash(firstToken);
 
-  // Live pairing — feeds the Zustand pairing slice so PairingPanel re-renders
-  // whenever wabot rotates the QR or transitions linked/unlinked.
+  // Live pairing — feeds the Zustand pairing slice so the StatusBar and the
+  // /pair page re-render whenever wabot rotates the QR or transitions
+  // linked/unlinked.
   usePairingStream();
 
   useEffect(() => {
@@ -73,10 +75,13 @@ export default function App() {
       window.location.href = "/knowledge";
       return;
     }
+    if (trimmed === "__open_pair__") {
+      window.open("/pair", "_blank", "noopener");
+      return;
+    }
     if (trimmed.startsWith("__open_slide_over__:")) {
       const which = trimmed.split(":")[1] as Exclude<SlideOverId, null>;
       if (
-        which === "qr" ||
         which === "runs" ||
         which === "settings" ||
         which === "groups" ||
@@ -115,10 +120,17 @@ export default function App() {
     }
   }
 
+  const uiV2 = useUiFlag();
+
   return (
     <div className="flex min-h-full flex-col">
       <TopBar />
       <main className="mx-auto flex w-full max-w-[720px] flex-1 flex-col items-center justify-center px-4 pt-16 text-center">
+        {uiV2 && (
+          <div className="w-full mb-6">
+            <StatusBar />
+          </div>
+        )}
         <p className="text-fg-muted text-sm">
           Use WhatsApp to chat with the bot. Use <kbd>/</kbd> commands below to manage settings.
         </p>
@@ -155,9 +167,6 @@ export default function App() {
         </div>
       </div>
 
-      <SlideOver open={slideOver === "qr"} onClose={close} title="WhatsApp pairing">
-        <PairingPanel />
-      </SlideOver>
       <SlideOver open={slideOver === "runs"} onClose={close} title="Activity">
         <ActivityPanel />
       </SlideOver>
