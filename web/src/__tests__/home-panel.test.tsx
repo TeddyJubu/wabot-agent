@@ -48,7 +48,7 @@ vi.mock("@/api/knowledge", () => ({
   fetchKnowledgeIndex: vi.fn(() =>
     Promise.resolve({
       docs: [],
-      budgets: { instructions: 0, memory: 0, contact: 0 },
+      budgets: { instructions: 0, contact: 0 },
     }),
   ),
 }));

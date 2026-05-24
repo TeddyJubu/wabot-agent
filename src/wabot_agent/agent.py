@@ -33,7 +33,6 @@ from .inbound_media import build_inbound_file_context, voice_transcript_from_con
 from .instructions_cache import cached_build_agent_instructions, cached_render_skill_summary
 from .knowledge_store import (
     format_contact_facts,
-    load_global_memory,
     load_instructions,
 )
 from .mcp import connected_mcp_servers
@@ -260,11 +259,8 @@ def build_agent_instructions(settings: Settings, skill_summary: str) -> str:
         f"\nInstalled local skills:\n{skill_summary}\n",
     ]
     custom = load_instructions(settings)
-    global_mem = load_global_memory(settings)
     if custom:
         parts.append(f"\n## Client instructions\n{custom}\n")
-    if global_mem:
-        parts.append(f"\n## Operator knowledge\n{global_mem}\n")
     return "".join(parts)
 
 

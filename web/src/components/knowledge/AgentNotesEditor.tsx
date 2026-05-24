@@ -64,8 +64,8 @@ export default function AgentNotesEditor() {
   return (
     <div className="space-y-3">
       <p className="text-sm text-fg-muted">
-        Structured global notes stored in SQLite. Use the Memory tab for free-form operator
-        knowledge in markdown.
+        Structured global notes stored in SQLite. Use the Instructions tab for free-form
+        operator knowledge in markdown.
       </p>
       {error && <p className="text-sm text-bad">{error}</p>}
       {loading && <p className="text-sm text-fg-muted">Loading…</p>}

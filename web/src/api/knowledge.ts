@@ -10,9 +10,26 @@ export interface KnowledgeIndex {
   docs: KnowledgeDocMeta[];
   budgets: {
     instructions: number;
-    memory: number;
     contact: number;
   };
+}
+
+/**
+ * Error thrown when the server rejects a save because the content exceeds the
+ * configured budget. The backend returns HTTP 413 with a JSON body containing
+ * the budget and the actual content length so callers can surface a precise
+ * inline message instead of falling back to the generic save-failed text.
+ */
+export class KnowledgeBudgetExceededError extends Error {
+  readonly status = 413 as const;
+  readonly budget: number;
+  readonly actual: number;
+  constructor(budget: number, actual: number) {
+    super(`Content exceeds budget (${actual} > ${budget})`);
+    this.name = "KnowledgeBudgetExceededError";
+    this.budget = budget;
+    this.actual = actual;
+  }
 }
 
 export interface KnowledgeDoc {
@@ -44,6 +61,22 @@ export interface AgentNote {
 async function apiJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, { credentials: "include", ...init });
   if (!res.ok) {
+    // Phase 2a: the knowledge PUT endpoint enforces the character budget and
+    // returns 413 with `{ detail, budget, actual }`. Surface that as a typed
+    // error so the editor can render a precise inline message and stop the
+    // autosave retry loop. Be defensive: the body shape may be nested under
+    // FastAPI's `detail` envelope, or it may arrive flat — accept both.
+    if (res.status === 413) {
+      const body = (await res
+        .json()
+        .catch(() => null)) as
+        | { budget?: number; actual?: number; detail?: { budget?: number; actual?: number } }
+        | null;
+      const payload = body?.detail && typeof body.detail === "object" ? body.detail : body;
+      const budget = typeof payload?.budget === "number" ? payload.budget : 0;
+      const actual = typeof payload?.actual === "number" ? payload.actual : 0;
+      throw new KnowledgeBudgetExceededError(budget, actual);
+    }
     const detail = await res.text().catch(() => "");
     throw new Error(`${url}: ${res.status}${detail ? ` — ${detail}` : ""}`);
   }
@@ -60,18 +93,6 @@ export async function fetchInstructions(): Promise<KnowledgeDoc> {
 
 export async function saveInstructions(content: string): Promise<KnowledgeDocMeta> {
   return apiJson("/api/knowledge/instructions", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ content }),
-  });
-}
-
-export async function fetchMemory(): Promise<KnowledgeDoc> {
-  return apiJson("/api/knowledge/memory");
-}
-
-export async function saveMemory(content: string): Promise<KnowledgeDocMeta> {
-  return apiJson("/api/knowledge/memory", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ content }),

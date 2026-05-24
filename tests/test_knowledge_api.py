@@ -42,8 +42,11 @@ def test_knowledge_crud_and_memory_extensions(tmp_path: Path) -> None:
     headers = auth_headers(settings)
 
     index = client.get("/api/knowledge", headers=headers).json()
-    assert len(index["docs"]) == 2
-    assert index["budgets"]["instructions"] == 6000
+    # Phase 1: single consolidated instructions doc, no memory doc.
+    assert len(index["docs"]) == 1
+    assert index["docs"][0]["id"] == "instructions"
+    assert index["budgets"]["instructions"] == 10000
+    assert "memory" not in index["budgets"]
 
     put_ins = client.put(
         "/api/knowledge/instructions",
@@ -56,13 +59,14 @@ def test_knowledge_crud_and_memory_extensions(tmp_path: Path) -> None:
     get_ins = client.get("/api/knowledge/instructions", headers=headers).json()
     assert "Be polite" in get_ins["content"]
 
-    client.put(
-        "/api/knowledge/memory",
-        headers=headers,
-        json={"content": "Operator prefers bullet replies."},
+    # Legacy /api/knowledge/memory routes are gone — both verbs return 404.
+    assert client.get("/api/knowledge/memory", headers=headers).status_code == 404
+    assert (
+        client.put(
+            "/api/knowledge/memory", headers=headers, json={"content": "x"}
+        ).status_code
+        == 404
     )
-    mem = client.get("/api/knowledge/memory", headers=headers).json()
-    assert "bullet replies" in mem["content"]
 
     contact = "15550001111@s.whatsapp.net"
     upsert = client.put(
@@ -99,3 +103,79 @@ def test_knowledge_crud_and_memory_extensions(tmp_path: Path) -> None:
 
     removed = client.delete("/api/memory/agent-notes/send_policy_hint", headers=headers)
     assert removed.json()["deleted"] is True
+
+
+def test_knowledge_instructions_put_enforces_budget(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path).model_copy(
+        update={"operator_token": "secret", "knowledge_instructions_max_chars": 50}
+    )
+    client = TestClient(create_app(settings))
+    headers = auth_headers(settings)
+
+    resp = client.put(
+        "/api/knowledge/instructions",
+        headers=headers,
+        json={"content": "x" * 100},
+    )
+    assert resp.status_code == 413
+    body = resp.json()["detail"]
+    assert body["budget"] == 50
+    assert body["actual"] == 100
+
+    # Boundary: exactly at budget is accepted.
+    ok = client.put(
+        "/api/knowledge/instructions",
+        headers=headers,
+        json={"content": "y" * 50},
+    )
+    assert ok.status_code == 200
+
+
+def test_knowledge_instructions_put_budget_boundaries(tmp_path: Path) -> None:
+    """Boundary matrix for the 413 budget guard.
+
+    - budget chars         -> 200
+    - budget+1 chars       -> 413 with {detail, budget, actual}
+    - budget*10 chars      -> 413, actual reflects real length (not truncated
+      before the check)
+    """
+    budget = 100
+    settings = make_settings(tmp_path).model_copy(
+        update={
+            "operator_token": "secret",
+            "knowledge_instructions_max_chars": budget,
+        }
+    )
+    client = TestClient(create_app(settings))
+    headers = auth_headers(settings)
+
+    at_budget = client.put(
+        "/api/knowledge/instructions",
+        headers=headers,
+        json={"content": "a" * budget},
+    )
+    assert at_budget.status_code == 200
+
+    over = client.put(
+        "/api/knowledge/instructions",
+        headers=headers,
+        json={"content": "b" * (budget + 1)},
+    )
+    assert over.status_code == 413
+    detail = over.json()["detail"]
+    assert set(detail.keys()) >= {"detail", "budget", "actual"}
+    assert detail["detail"] == "Content exceeds budget"
+    assert detail["budget"] == budget
+    assert detail["actual"] == budget + 1
+
+    huge = client.put(
+        "/api/knowledge/instructions",
+        headers=headers,
+        json={"content": "c" * (budget * 10)},
+    )
+    assert huge.status_code == 413
+    huge_detail = huge.json()["detail"]
+    assert huge_detail["budget"] == budget
+    # Real length must reach the response — proves the server did not silently
+    # truncate the input before length-checking.
+    assert huge_detail["actual"] == budget * 10

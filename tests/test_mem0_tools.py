@@ -178,6 +178,9 @@ def test_build_agent_instructions_omit_mem0_when_disabled() -> None:
 def test_build_agent_instructions_include_client_knowledge(tmp_path) -> None:
     knowledge_dir = tmp_path / "knowledge"
     knowledge_dir.mkdir(parents=True)
+    # Phase 1 consolidation: legacy memory.md is auto-merged into instructions
+    # on first read, so a single ## Client instructions block in the prompt
+    # now contains both client guidance and operator knowledge.
     (knowledge_dir / "instructions.md").write_text(
         "Always use the company name Acme Corp.",
         encoding="utf-8",
@@ -195,5 +198,8 @@ def test_build_agent_instructions_include_client_knowledge(tmp_path) -> None:
     text = build_agent_instructions(settings, "")
     assert "## Client instructions" in text
     assert "Acme Corp" in text
-    assert "## Operator knowledge" in text
     assert "US/Pacific" in text
+    # Memory content is folded in under Client instructions — there is no
+    # longer a separate ## Operator knowledge top-level block.
+    assert text.count("## Client instructions") == 1
+    assert (knowledge_dir / "memory.md.migrated").exists()

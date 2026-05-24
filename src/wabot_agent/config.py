@@ -152,17 +152,11 @@ class Settings(BaseSettings):
         ),
     )
     knowledge_instructions_max_chars: int = Field(
-        default=6000,
+        # Phase 1: consolidated budget (was 6000 instructions + 4000 memory).
+        default=10000,
         validation_alias=AliasChoices(
             "WABOT_AGENT_KNOWLEDGE_INSTRUCTIONS_MAX_CHARS",
             "VIGNESH_KNOWLEDGE_INSTRUCTIONS_MAX_CHARS",
-        ),
-    )
-    knowledge_memory_max_chars: int = Field(
-        default=4000,
-        validation_alias=AliasChoices(
-            "WABOT_AGENT_KNOWLEDGE_MEMORY_MAX_CHARS",
-            "VIGNESH_KNOWLEDGE_MEMORY_MAX_CHARS",
         ),
     )
     knowledge_contact_max_chars: int = Field(

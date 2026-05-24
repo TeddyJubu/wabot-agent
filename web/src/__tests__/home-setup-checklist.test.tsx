@@ -13,7 +13,7 @@ vi.mock("@/api/knowledge", () => ({
   fetchKnowledgeIndex: vi.fn(() =>
     Promise.resolve({
       docs: [],
-      budgets: { instructions: 0, memory: 0, contact: 0 },
+      budgets: { instructions: 0, contact: 0 },
     }),
   ),
 }));
@@ -55,7 +55,7 @@ beforeEach(() => {
   localStorage.clear();
   vi.mocked(knowledgeApi.fetchKnowledgeIndex).mockResolvedValue({
     docs: [],
-    budgets: { instructions: 0, memory: 0, contact: 0 },
+    budgets: { instructions: 0, contact: 0 },
   });
 });
 
@@ -205,7 +205,7 @@ describe("SetupChecklist — Add knowledge step", () => {
           truncated_preview: "Hello",
         },
       ],
-      budgets: { instructions: 0, memory: 0, contact: 0 },
+      budgets: { instructions: 0, contact: 0 },
     });
 
     render(<SetupChecklist isSignedIn={true} />);

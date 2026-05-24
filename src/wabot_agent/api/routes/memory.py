@@ -4,22 +4,22 @@ the MemoryStore facade and the knowledge file store.
 Carved out of api/__init__.py as part of MASTER ME-1 Part 6. All routes
 gate on dependencies=[human_dependency]. Memory routes go through the
 MemoryStore facade (post-ME-3 split — contacts, audit, etc.). Knowledge
-routes read/write the operator's instructions.md and memory.md under
-data/knowledge/ via the knowledge_store helpers.
+routes read/write the operator's consolidated instructions.md under
+data/knowledge/ via the knowledge_store helpers. (Phase 1: the legacy
+``memory.md`` file was merged into instructions; its routes are gone.)
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from ...auth import verify_human_factory
 from ...knowledge_store import (
+    get_write_lock,
     list_knowledge_docs,
-    read_global_memory_raw,
     read_instructions_raw,
-    save_global_memory,
     save_instructions,
 )
 from ...redaction import redact
@@ -63,7 +63,6 @@ def register_memory_routes(router: APIRouter, deps: AppDeps) -> None:
             "docs": list_knowledge_docs(settings),
             "budgets": {
                 "instructions": settings.knowledge_instructions_max_chars,
-                "memory": settings.knowledge_memory_max_chars,
                 "contact": settings.knowledge_contact_max_chars,
             },
         }
@@ -76,18 +75,21 @@ def register_memory_routes(router: APIRouter, deps: AppDeps) -> None:
 
     @router.put("/api/knowledge/instructions", dependencies=[human_dependency])
     async def knowledge_instructions_put(body: KnowledgeContentBody) -> dict[str, Any]:
-        meta = save_instructions(settings, body.content)
-        return {"ok": True, **meta}
+        budget = settings.knowledge_instructions_max_chars
+        actual = len(body.content)
+        if actual > budget:
+            raise HTTPException(
+                status_code=413,
+                detail={
+                    "detail": "Content exceeds budget",
+                    "budget": budget,
+                    "actual": actual,
+                },
+            )
+        from ...knowledge_store import _instructions_path
 
-    @router.get("/api/knowledge/memory", dependencies=[human_dependency])
-    async def knowledge_memory_get() -> dict[str, Any]:
-        docs = list_knowledge_docs(settings)
-        meta = docs[1] if len(docs) > 1 else {}
-        return {"content": read_global_memory_raw(settings), **meta}
-
-    @router.put("/api/knowledge/memory", dependencies=[human_dependency])
-    async def knowledge_memory_put(body: KnowledgeContentBody) -> dict[str, Any]:
-        meta = save_global_memory(settings, body.content)
+        async with get_write_lock(_instructions_path(settings)):
+            meta = save_instructions(settings, body.content)
         return {"ok": True, **meta}
 
     @router.get("/api/knowledge/contacts", dependencies=[human_dependency])

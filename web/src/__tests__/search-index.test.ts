@@ -44,15 +44,8 @@ const KNOWLEDGE_FIXTURE: KnowledgeIndex = {
       char_count: 12,
       truncated_preview: "qr pairing notes",
     },
-    {
-      id: "memory",
-      path: "knowledge/memory.md",
-      updated_at: null,
-      char_count: 8,
-      truncated_preview: "weekly brief template",
-    },
   ],
-  budgets: { instructions: 1000, memory: 1000, contact: 1000 },
+  budgets: { instructions: 1000, contact: 1000 },
 };
 
 const AGENTS_FIXTURE: AgentSummary[] = [

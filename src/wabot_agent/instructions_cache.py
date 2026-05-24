@@ -62,17 +62,14 @@ def _skills_mtime_max(skills_dir: Path) -> float:
 
 def _knowledge_mtime_max(settings: Settings) -> float:
     try:
-        from .knowledge_store import _instructions_path, _memory_path
+        from .knowledge_store import _instructions_path
     except ImportError:
         return 0.0
-    latest = 0.0
-    for path_fn in (_instructions_path, _memory_path):
-        path = path_fn(settings)
-        try:
-            latest = max(latest, path.stat().st_mtime)
-        except OSError:
-            continue
-    return latest
+    path = _instructions_path(settings)
+    try:
+        return path.stat().st_mtime
+    except OSError:
+        return 0.0
 
 
 def _agent_notes_version(memory: MemoryStore | None) -> str:

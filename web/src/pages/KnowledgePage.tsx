@@ -3,29 +3,31 @@ import { ArrowLeft, BookOpen } from "lucide-react";
 import {
   fetchInstructions,
   fetchKnowledgeIndex,
-  fetchMemory,
   saveInstructions,
-  saveMemory,
 } from "@/api/knowledge";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import AgentNotesEditor from "@/components/knowledge/AgentNotesEditor";
 import BlockNoteEditor from "@/components/knowledge/BlockNoteEditor";
 import ContactFactsEditor from "@/components/knowledge/ContactFactsEditor";
 
-type TabId = "instructions" | "memory" | "contacts" | "notes";
+type TabId = "instructions" | "contacts" | "notes";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "instructions", label: "Instructions" },
-  { id: "memory", label: "Memory" },
   { id: "contacts", label: "Contacts" },
   { id: "notes", label: "Notes" },
 ];
 
+// Phase 2a: a single 10000-char instructions budget replaced the old split
+// (6000 instructions + 4000 memory). The number here is only a fallback for
+// the brief window before /api/knowledge resolves — the live budget always
+// wins via setBudgets() below.
+const DEFAULT_BUDGETS = { instructions: 10000, contact: 2000 };
+
 export default function KnowledgePage() {
   const [tab, setTab] = useState<TabId>("instructions");
-  const [budgets, setBudgets] = useState({ instructions: 6000, memory: 4000, contact: 2000 });
+  const [budgets, setBudgets] = useState(DEFAULT_BUDGETS);
   const [instructions, setInstructions] = useState("");
-  const [memory, setMemory] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -38,9 +40,8 @@ export default function KnowledgePage() {
     try {
       const index = await fetchKnowledgeIndex();
       setBudgets(index.budgets);
-      const [ins, mem] = await Promise.all([fetchInstructions(), fetchMemory()]);
+      const ins = await fetchInstructions();
       setInstructions(ins.content);
-      setMemory(mem.content);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load knowledge");
     } finally {
@@ -143,18 +144,6 @@ export default function KnowledgePage() {
             onSave={async (content) => {
               await saveInstructions(content);
               setInstructions(content);
-            }}
-            onDirtyChange={setDirty}
-          />
-        )}
-        {tab === "memory" && !loading && (
-          <BlockNoteEditor
-            label="Operator memory"
-            initialMarkdown={memory}
-            maxChars={budgets.memory}
-            onSave={async (content) => {
-              await saveMemory(content);
-              setMemory(content);
             }}
             onDirtyChange={setDirty}
           />
