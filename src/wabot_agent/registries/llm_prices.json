@@ -1,0 +1,16 @@
+[
+  {"provider": "openai", "model": "gpt-4o", "prompt_per_1m_usd": 2.50, "completion_per_1m_usd": 10.00},
+  {"provider": "openai", "model": "gpt-4o-mini", "prompt_per_1m_usd": 0.15, "completion_per_1m_usd": 0.60},
+  {"provider": "openai", "model": "gpt-4.1", "prompt_per_1m_usd": 2.00, "completion_per_1m_usd": 8.00},
+  {"provider": "openai", "model": "gpt-4.1-mini", "prompt_per_1m_usd": 0.40, "completion_per_1m_usd": 1.60},
+  {"provider": "anthropic", "model": "claude-sonnet-4-6", "prompt_per_1m_usd": 3.00, "completion_per_1m_usd": 15.00},
+  {"provider": "anthropic", "model": "claude-haiku-4-5-20251001", "prompt_per_1m_usd": 0.80, "completion_per_1m_usd": 4.00},
+  {"provider": "anthropic", "model": "claude-3-5-sonnet-20241022", "prompt_per_1m_usd": 3.00, "completion_per_1m_usd": 15.00},
+  {"provider": "anthropic", "model": "claude-3-5-haiku-20241022", "prompt_per_1m_usd": 0.80, "completion_per_1m_usd": 4.00},
+  {"provider": "openrouter", "model": "anthropic/claude-3.5-sonnet", "prompt_per_1m_usd": 3.00, "completion_per_1m_usd": 15.00},
+  {"provider": "openrouter", "model": "openai/gpt-4o", "prompt_per_1m_usd": 2.50, "completion_per_1m_usd": 10.00},
+  {"provider": "openrouter", "model": "openai/gpt-4.1-mini", "prompt_per_1m_usd": 0.40, "completion_per_1m_usd": 1.60},
+  {"provider": "ollama", "model": "*", "prompt_per_1m_usd": 0.0, "completion_per_1m_usd": 0.0},
+  {"provider": "ollama_cloud", "model": "*", "prompt_per_1m_usd": 0.0, "completion_per_1m_usd": 0.0},
+  {"provider": "codex", "model": "*", "prompt_per_1m_usd": 0.0, "completion_per_1m_usd": 0.0}
+]

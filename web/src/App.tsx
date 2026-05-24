@@ -3,7 +3,8 @@ import TopBar from "@/components/TopBar";
 import SlideOver from "@/components/SlideOver";
 import SlashMenu from "@/components/SlashMenu";
 import PairingPanel from "@/components/slide-overs/PairingPanel";
-import RunsPanel from "@/components/slide-overs/RunsPanel";
+import ActivityPanel from "@/components/slide-overs/ActivityPanel";
+import OverviewPanel from "@/components/slide-overs/OverviewPanel";
 import GroupsPanel from "@/components/slide-overs/GroupsPanel";
 import SettingsPanel from "@/components/slide-overs/SettingsPanel";
 import AgentsPanel from "@/components/slide-overs/AgentsPanel";
@@ -81,7 +82,8 @@ export default function App() {
         which === "groups" ||
         which === "agents" ||
         which === "tools" ||
-        which === "integrations"
+        which === "integrations" ||
+        which === "overview"
       ) {
         open(which);
       }
@@ -156,8 +158,11 @@ export default function App() {
       <SlideOver open={slideOver === "qr"} onClose={close} title="WhatsApp pairing">
         <PairingPanel />
       </SlideOver>
-      <SlideOver open={slideOver === "runs"} onClose={close} title="Recent runs">
-        <RunsPanel />
+      <SlideOver open={slideOver === "runs"} onClose={close} title="Activity">
+        <ActivityPanel />
+      </SlideOver>
+      <SlideOver open={slideOver === "overview"} onClose={close} title="Overview">
+        <OverviewPanel />
       </SlideOver>
       <SlideOver open={slideOver === "groups"} onClose={close} title="WhatsApp groups">
         <GroupsPanel />
