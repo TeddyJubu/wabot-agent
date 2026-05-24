@@ -42,7 +42,6 @@ import type {
   HealthResponse,
 } from "@/api/metrics";
 import { useStore, type Readiness } from "@/store";
-import { useUiFlagStore } from "@/store/uiFlag";
 import { useRouteStore } from "@/store/route";
 import App from "@/App";
 
@@ -344,15 +343,6 @@ const PRISTINE_READINESS: Readiness = {
   memory: PENDING_ROW,
 };
 
-function setSearch(search: string) {
-  window.history.replaceState(
-    {},
-    "",
-    search ? `/?${search.replace(/^\?/, "")}` : "/",
-  );
-  useUiFlagStore.getState().resetUiFlagFromUrl();
-}
-
 beforeEach(() => {
   useStore.setState({
     readiness: PRISTINE_READINESS,
@@ -374,11 +364,10 @@ beforeEach(() => {
 });
 
 describe("App + CommandPalette wiring", () => {
-  it("removes the bottom slash input under ?ui=v2", async () => {
-    setSearch("ui=v2");
+  it("does not render a bottom slash input (palette replaces it)", async () => {
     render(<App />);
 
-    // Wait for the rail to mount so we know the v2 shell is up.
+    // Wait for the rail to mount so we know the shell is up.
     await screen.findByRole("navigation", { name: "Primary" });
 
     expect(
@@ -386,16 +375,7 @@ describe("App + CommandPalette wiring", () => {
     ).toBeNull();
   });
 
-  it("keeps the bottom slash input mounted with the flag off", async () => {
-    setSearch("");
-    render(<App />);
-    expect(
-      await screen.findByPlaceholderText("Type / for commands"),
-    ).toBeInTheDocument();
-  });
-
   it("opens the palette on Cmd-K", async () => {
-    setSearch("ui=v2");
     render(<App />);
     await screen.findByRole("navigation", { name: "Primary" });
 
@@ -407,7 +387,6 @@ describe("App + CommandPalette wiring", () => {
   });
 
   it("opens the palette on '/' when no input is focused", async () => {
-    setSearch("ui=v2");
     render(<App />);
     await screen.findByRole("navigation", { name: "Primary" });
 
@@ -422,7 +401,6 @@ describe("App + CommandPalette wiring", () => {
   });
 
   it("ESC closes the palette once opened", async () => {
-    setSearch("ui=v2");
     render(<App />);
     await screen.findByRole("navigation", { name: "Primary" });
 
