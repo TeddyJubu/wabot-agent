@@ -171,6 +171,19 @@ export default function BlockNoteEditor({
     [persist],
   );
 
+  // Cancel any pending autosave when the editor unmounts (tab switch,
+  // navigation, parent re-render that swaps key). Without this the
+  // debounced timer fires against a stale closure and either no-ops or
+  // throws on a unmounted component during the fetch.
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
+    };
+  }, []);
+
   const handleChange = useCallback(async () => {
     if (!loadedRef.current) return;
     const text = await editor.blocksToMarkdownLossy(editor.document);

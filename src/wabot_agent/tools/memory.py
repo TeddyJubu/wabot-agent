@@ -8,7 +8,7 @@ from agents import RunContextWrapper, function_tool
 
 from ..mem0_store import mem0_enabled, mem0_health
 from ..redaction import looks_sensitive, redact
-from ._common import RuntimeContext, _mem0_user_id, _mem0_user_ids
+from ._common import RuntimeContext, _is_owner_session, _mem0_user_id, _mem0_user_ids
 
 # `add_memory_sync` and `search_memories_sync` are reached via the parent
 # `wabot_agent.tools` package (which re-exports them from mem0_store) instead
@@ -55,7 +55,18 @@ async def recall_agent_notes(ctx: RunContextWrapper[RuntimeContext]) -> list[dic
 async def remember_agent_note(
     ctx: RunContextWrapper[RuntimeContext], key: str, value: str
 ) -> dict[str, Any]:
-    """Store a durable, non-secret operating note for this agent."""
+    """Store a durable, non-secret operating note for this agent.
+
+    Owner-gated: only sessions identified as the operator can write
+    agent notes. Non-owner senders get a no-op response that's still
+    recorded as a tool event for auditability. This prevents arbitrary
+    inbound contacts from poisoning the operator's durable knowledge
+    via crafted messages that trick the agent into calling this tool.
+    """
+    if not _is_owner_session(ctx.context.settings, ctx.context.inbound):
+        payload = {"ok": False, "reason": "owner_session_required"}
+        ctx.context.memory.record_tool_event(ctx.context.run_id, "remember_agent_note", payload)
+        return redact(payload)
     payload = ctx.context.memory.remember_agent_note(key=key, value=value)
     ctx.context.memory.record_tool_event(ctx.context.run_id, "remember_agent_note", payload)
     return redact(payload)
