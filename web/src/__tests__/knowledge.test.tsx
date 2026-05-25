@@ -5,7 +5,10 @@ import { truncateForPrompt } from "../components/knowledge/charUtils";
 import ContactFactsEditor from "@/components/knowledge/ContactFactsEditor";
 import KnowledgePage from "@/pages/KnowledgePage";
 import BlockNoteEditor from "@/components/knowledge/BlockNoteEditor";
-import { KnowledgeBudgetExceededError } from "@/api/knowledge";
+import {
+  KnowledgeBudgetExceededError,
+  KnowledgeStaleVersionError,
+} from "@/api/knowledge";
 
 // ---------------------------------------------------------------------------
 // Module-level mocks. Each suite resets / re-stubs as needed.
@@ -35,6 +38,7 @@ vi.mock("@/api/knowledge", async () => {
       id: "instructions",
       char_count: 5,
       updated_at: null,
+      version: "0000000000000000",
     })),
     saveInstructions: vi.fn(async () => ({
       id: "instructions",
@@ -42,6 +46,7 @@ vi.mock("@/api/knowledge", async () => {
       updated_at: null,
       char_count: 5,
       truncated_preview: "hello",
+      version: "0000000000000000",
     })),
   };
 });
@@ -70,26 +75,36 @@ vi.mock("@blocknote/mantine", () => ({
 
 vi.mock("@blocknote/mantine/style.css", () => ({}));
 
-vi.mock("@blocknote/react", () => ({
-  useCreateBlockNote: () => {
-    // Minimal editor stand-in: holds the current string, exposes the same
-    // async API surface BlockNoteEditor calls. `document` is opaque to us.
-    const state = { __value: "", document: {} } as {
-      __value: string;
-      document: unknown;
-      tryParseMarkdownToBlocks: (md: string) => Promise<unknown>;
-      replaceBlocks: (doc: unknown, blocks: unknown) => void;
-      blocksToMarkdownLossy: (doc: unknown) => Promise<string>;
-    };
-    state.tryParseMarkdownToBlocks = async (md: string) => {
-      state.__value = md;
-      return md;
-    };
-    state.replaceBlocks = () => {};
-    state.blocksToMarkdownLossy = async () => state.__value;
-    return state;
-  },
-}));
+vi.mock("@blocknote/react", async () => {
+  const React = await vi.importActual<typeof import("react")>("react");
+  return {
+    // The real `useCreateBlockNote` returns a stable editor instance across
+    // re-renders. Our stand-in MUST do the same: BlockNoteEditor's load
+    // useEffect lists `editor` in its deps and resets `staleConflict` to
+    // null inside the effect — if `editor` is a new object every render,
+    // the effect re-runs on every state update and silently undoes the
+    // banner we're trying to assert against.
+    useCreateBlockNote: () => {
+      const [state] = React.useState(() => {
+        const s = { __value: "", document: {} } as {
+          __value: string;
+          document: unknown;
+          tryParseMarkdownToBlocks: (md: string) => Promise<unknown>;
+          replaceBlocks: (doc: unknown, blocks: unknown) => void;
+          blocksToMarkdownLossy: (doc: unknown) => Promise<string>;
+        };
+        s.tryParseMarkdownToBlocks = async (md: string) => {
+          s.__value = md;
+          return md;
+        };
+        s.replaceBlocks = () => {};
+        s.blocksToMarkdownLossy = async () => s.__value;
+        return s;
+      });
+      return state;
+    },
+  };
+});
 
 // ---------------------------------------------------------------------------
 // charUtils — unchanged from the original suite, kept for coverage parity.
@@ -214,7 +229,99 @@ describe("BlockNoteEditor 413 handling", () => {
     await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2), {
       timeout: 4000,
     });
-    expect(onSave).toHaveBeenLastCalledWith("x".repeat(5000));
+    // The editor now also forwards the loaded version as `ifMatch`. No
+    // initialVersion was provided in this test, so undefined is sent.
+    expect(onSave).toHaveBeenLastCalledWith("x".repeat(5000), undefined);
     expect(screen.queryByTestId("budget-error")).not.toBeInTheDocument();
+  }, 15000);
+});
+
+// ---------------------------------------------------------------------------
+// BlockNoteEditor — 409 optimistic-concurrency conflict banner.
+// ---------------------------------------------------------------------------
+
+describe("BlockNoteEditor 409 stale-version handling", () => {
+  it("renders the conflict banner with both action buttons when the server returns 409", async () => {
+    const onSave = vi
+      .fn<
+        (md: string, ifMatch?: string) => Promise<{ version?: string } | void>
+      >()
+      .mockRejectedValue(
+        new KnowledgeStaleVersionError(
+          "newversion000000",
+          "server content",
+          "oldversion000000",
+        ),
+      );
+
+    render(
+      <BlockNoteEditor
+        label="Client instructions"
+        initialMarkdown=""
+        initialVersion="oldversion000000"
+        maxChars={10000}
+        onSave={onSave}
+      />,
+    );
+
+    const textarea = await screen.findByTestId("blocknote-textarea");
+    fireEvent.change(textarea, { target: { value: "local edits" } });
+
+    // Wait past the debounce + reject — banner should render.
+    const banner = await screen.findByTestId("stale-conflict-banner", undefined, {
+      timeout: 4000,
+    });
+    expect(banner.textContent).toContain("This document was modified elsewhere");
+    expect(screen.getByTestId("stale-conflict-reload")).toBeInTheDocument();
+    expect(screen.getByTestId("stale-conflict-overwrite")).toBeInTheDocument();
+
+    // Save was attempted exactly once with the stale If-Match.
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave).toHaveBeenLastCalledWith("local edits", "oldversion000000");
+  }, 15000);
+
+  it("re-sends the save with the server's current_version when 'Overwrite anyway' is clicked", async () => {
+    const onSave = vi
+      .fn<
+        (md: string, ifMatch?: string) => Promise<{ version?: string } | void>
+      >()
+      .mockRejectedValueOnce(
+        new KnowledgeStaleVersionError(
+          "newversion000000",
+          "server content",
+          "oldversion000000",
+        ),
+      )
+      .mockResolvedValue({ version: "winnerversion000" });
+
+    render(
+      <BlockNoteEditor
+        label="Client instructions"
+        initialMarkdown=""
+        initialVersion="oldversion000000"
+        maxChars={10000}
+        onSave={onSave}
+      />,
+    );
+
+    const textarea = await screen.findByTestId("blocknote-textarea");
+    fireEvent.change(textarea, { target: { value: "local edits" } });
+
+    await screen.findByTestId("stale-conflict-banner", undefined, { timeout: 4000 });
+    expect(onSave).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByTestId("stale-conflict-overwrite"));
+
+    // Second call: same content, If-Match = the server's current_version
+    // returned in the 409.
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(2), {
+      timeout: 4000,
+    });
+    expect(onSave).toHaveBeenLastCalledWith("local edits", "newversion000000");
+
+    // After success, the conflict banner clears.
+    await waitFor(() =>
+      expect(screen.queryByTestId("stale-conflict-banner")).not.toBeInTheDocument(),
+    );
   }, 15000);
 });

@@ -13,14 +13,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from ...auth import verify_human_factory
 from ...knowledge_store import (
-    get_write_lock,
+    StaleVersionError,
     list_knowledge_docs,
     read_instructions_raw,
-    save_instructions,
+    save_instructions_checked,
 )
 from ...redaction import redact
 from ..deps import AppDeps
@@ -74,9 +74,14 @@ def register_memory_routes(router: APIRouter, deps: AppDeps) -> None:
         return {"content": read_instructions_raw(settings), **meta}
 
     @router.put("/api/knowledge/instructions", dependencies=[human_dependency])
-    async def knowledge_instructions_put(body: KnowledgeContentBody) -> dict[str, Any]:
+    async def knowledge_instructions_put(
+        body: KnowledgeContentBody, request: Request
+    ) -> dict[str, Any]:
         budget = settings.knowledge_instructions_max_chars
         actual = len(body.content)
+        # 413 takes precedence over 409 — budget is enforced before the
+        # version check so an over-size payload always reports the same
+        # reason regardless of whether the doc was concurrently edited.
         if actual > budget:
             raise HTTPException(
                 status_code=413,
@@ -86,10 +91,23 @@ def register_memory_routes(router: APIRouter, deps: AppDeps) -> None:
                     "actual": actual,
                 },
             )
-        from ...knowledge_store import _instructions_path
-
-        async with get_write_lock(_instructions_path(settings)):
-            meta = save_instructions(settings, body.content)
+        # If-Match is optional — absent → save proceeds (preserves CLI /
+        # curl / script callers). Present → compared against the current
+        # on-disk version inside save_instructions_checked, which acquires
+        # the per-path write lock so the read-then-write is atomic.
+        if_match = request.headers.get("if-match")
+        try:
+            meta = await save_instructions_checked(settings, body.content, if_match)
+        except StaleVersionError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "detail": "Stale version",
+                    "current_version": exc.current_version,
+                    "current_content": exc.current_content,
+                    "submitted_version": exc.submitted_version,
+                },
+            ) from exc
         return {"ok": True, **meta}
 
     @router.get("/api/knowledge/contacts", dependencies=[human_dependency])

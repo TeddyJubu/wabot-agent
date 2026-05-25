@@ -3,19 +3,23 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from wabot_agent.config import Settings
 from wabot_agent.knowledge_store import (
     _MIGRATION_MARKER,
+    StaleVersionError,
     atomic_write_text,
+    compute_version,
     ensure_knowledge_files,
     format_contact_facts,
     get_write_lock,
     load_instructions,
     read_instructions_raw,
     save_instructions,
+    save_instructions_checked,
     truncate_for_prompt,
 )
 
@@ -218,6 +222,131 @@ def test_legacy_memory_md_migration_merges_and_renames(tmp_path: Path) -> None:
     after_second = (knowledge_dir / "instructions.md").read_text(encoding="utf-8")
     assert after_first == after_second
     assert second.count(_MIGRATION_MARKER) == 1
+
+
+# ---------------------------------------------------------------------------
+# Optimistic-concurrency / If-Match guard.
+# ---------------------------------------------------------------------------
+
+
+def test_compute_version_is_deterministic_and_stable() -> None:
+    """Same input → same 16-hex-char hash; empty string has the known
+    SHA-256 prefix; different inputs produce different tokens."""
+    a = compute_version("hello world")
+    b = compute_version("hello world")
+    assert a == b
+    assert len(a) == 16
+    assert all(c in "0123456789abcdef" for c in a)
+
+    # Empty string -> known SHA-256("") prefix.
+    empty = compute_version("")
+    assert empty == "e3b0c44298fc1c14"
+
+    # Different inputs -> different tokens.
+    assert compute_version("hello world!") != a
+
+
+def test_save_instructions_checked_succeeds_without_if_match(tmp_path: Path) -> None:
+    """Backward compat: callers without an If-Match always succeed and
+    overwrite whatever's on disk."""
+    settings = make_settings(tmp_path)
+    save_instructions(settings, "seed")
+
+    meta = asyncio.run(
+        save_instructions_checked(settings, "no-if-match", if_match=None)
+    )
+    assert read_instructions_raw(settings) == "no-if-match"
+    assert meta["version"] == compute_version("no-if-match")
+
+
+def test_save_instructions_checked_succeeds_with_matching_if_match(
+    tmp_path: Path,
+) -> None:
+    """Happy path: client sends the current version, save proceeds."""
+    settings = make_settings(tmp_path)
+    save_instructions(settings, "v1")
+    current = compute_version("v1")
+
+    meta = asyncio.run(save_instructions_checked(settings, "v2", if_match=current))
+    assert read_instructions_raw(settings) == "v2"
+    assert meta["version"] == compute_version("v2")
+
+
+def test_save_instructions_checked_raises_on_stale_if_match(tmp_path: Path) -> None:
+    """If-Match does not match → StaleVersionError carrying all three
+    attributes."""
+    settings = make_settings(tmp_path)
+    save_instructions(settings, "current")
+    current_version = compute_version("current")
+
+    stale = "0" * 16
+    with pytest.raises(StaleVersionError) as exc_info:
+        asyncio.run(save_instructions_checked(settings, "would-clobber", if_match=stale))
+    err = exc_info.value
+    assert err.current_version == current_version
+    assert err.current_content == "current"
+    assert err.submitted_version == stale
+
+
+def test_save_instructions_checked_does_not_write_on_stale(tmp_path: Path) -> None:
+    """File content must be untouched after a StaleVersionError raise."""
+    settings = make_settings(tmp_path)
+    save_instructions(settings, "untouched")
+    instructions_path = settings.knowledge_dir / "instructions.md"
+    mtime_before = instructions_path.stat().st_mtime
+
+    with pytest.raises(StaleVersionError):
+        asyncio.run(
+            save_instructions_checked(
+                settings, "would-clobber", if_match="deadbeefdeadbeef"
+            )
+        )
+
+    assert instructions_path.read_text(encoding="utf-8") == "untouched"
+    assert instructions_path.stat().st_mtime == mtime_before
+
+
+def test_concurrent_save_one_wins_other_gets_stale(tmp_path: Path) -> None:
+    """Two coroutines read version V, both submit If-Match=V — exactly
+    one wins, the other raises StaleVersionError. This is the race the
+    guard exists to prevent (CLI tab + browser tab against the same
+    file)."""
+    settings = make_settings(tmp_path)
+    save_instructions(settings, "shared-seed")
+    shared_version = compute_version("shared-seed")
+
+    results: list[tuple[str, dict[str, Any] | StaleVersionError]] = []
+
+    async def _writer(label: str, content: str) -> None:
+        try:
+            meta = await save_instructions_checked(settings, content, if_match=shared_version)
+            results.append((label, meta))
+        except StaleVersionError as exc:
+            results.append((label, exc))
+
+    async def _run() -> None:
+        await asyncio.gather(_writer("A", "from-A"), _writer("B", "from-B"))
+
+    asyncio.run(_run())
+
+    successes = [r for r in results if not isinstance(r[1], StaleVersionError)]
+    failures = [r for r in results if isinstance(r[1], StaleVersionError)]
+    assert len(successes) == 1, results
+    assert len(failures) == 1, results
+
+    # Winner's content landed on disk; failure carries the post-winner
+    # version (i.e. the loser saw the freshly-updated state).
+    winner_label, winner_meta = successes[0]
+    final = (settings.knowledge_dir / "instructions.md").read_text(encoding="utf-8")
+    expected = "from-A" if winner_label == "A" else "from-B"
+    assert final == expected
+    assert isinstance(winner_meta, dict)
+    assert winner_meta["version"] == compute_version(expected)
+
+    _, loser_exc = failures[0]
+    assert isinstance(loser_exc, StaleVersionError)
+    assert loser_exc.submitted_version == shared_version
+    assert loser_exc.current_version == compute_version(expected)
 
 
 def test_post_migration_state_is_a_noop(tmp_path: Path) -> None:

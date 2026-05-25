@@ -28,6 +28,11 @@ export default function KnowledgePage() {
   const [tab, setTab] = useState<TabId>("instructions");
   const [budgets, setBudgets] = useState(DEFAULT_BUDGETS);
   const [instructions, setInstructions] = useState("");
+  // Version token paired with `instructions`. Passed to BlockNoteEditor as
+  // `initialVersion` and sent back to the server as `If-Match` on save.
+  const [instructionsVersion, setInstructionsVersion] = useState<string | undefined>(
+    undefined,
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -42,6 +47,7 @@ export default function KnowledgePage() {
       setBudgets(index.budgets);
       const ins = await fetchInstructions();
       setInstructions(ins.content);
+      setInstructionsVersion(ins.version);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load knowledge");
     } finally {
@@ -140,10 +146,19 @@ export default function KnowledgePage() {
           <BlockNoteEditor
             label="Client instructions"
             initialMarkdown={instructions}
+            initialVersion={instructionsVersion}
             maxChars={budgets.instructions}
-            onSave={async (content) => {
-              await saveInstructions(content);
+            onSave={async (content, ifMatch) => {
+              const meta = await saveInstructions(content, ifMatch);
               setInstructions(content);
+              setInstructionsVersion(meta.version);
+              return { version: meta.version };
+            }}
+            onReloadFromServer={(currentContent, currentVersion) => {
+              // Adopt the server's view: editor re-mounts (initialMarkdown
+              // changed), conflict clears, version baseline resets.
+              setInstructions(currentContent);
+              setInstructionsVersion(currentVersion);
             }}
             onDirtyChange={setDirty}
           />

@@ -203,6 +203,7 @@ describe("SetupChecklist — Add knowledge step", () => {
           updated_at: null,
           char_count: 10,
           truncated_preview: "Hello",
+          version: "0000000000000000",
         },
       ],
       budgets: { instructions: 0, contact: 0 },

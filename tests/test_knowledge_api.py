@@ -131,6 +131,148 @@ def test_knowledge_instructions_put_enforces_budget(tmp_path: Path) -> None:
     assert ok.status_code == 200
 
 
+# ---------------------------------------------------------------------------
+# Optimistic-concurrency / If-Match guard.
+# ---------------------------------------------------------------------------
+
+
+def test_put_instructions_without_if_match_succeeds(tmp_path: Path) -> None:
+    """Backward compat: a PUT with no If-Match header always saves."""
+    settings = make_settings(tmp_path).model_copy(update={"operator_token": "secret"})
+    client = TestClient(create_app(settings))
+    headers = auth_headers(settings)
+
+    resp = client.put(
+        "/api/knowledge/instructions",
+        headers=headers,
+        json={"content": "no if-match"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["ok"] is True
+    assert isinstance(body.get("version"), str)
+    assert len(body["version"]) == 16
+
+
+def test_put_instructions_with_matching_if_match_succeeds(tmp_path: Path) -> None:
+    """Happy path: client sends the current version, save succeeds and
+    the response carries the new version."""
+    settings = make_settings(tmp_path).model_copy(update={"operator_token": "secret"})
+    client = TestClient(create_app(settings))
+    headers = auth_headers(settings)
+
+    first = client.put(
+        "/api/knowledge/instructions",
+        headers=headers,
+        json={"content": "first"},
+    )
+    assert first.status_code == 200
+    first_version = first.json()["version"]
+
+    second = client.put(
+        "/api/knowledge/instructions",
+        headers={**headers, "If-Match": first_version},
+        json={"content": "second"},
+    )
+    assert second.status_code == 200
+    body = second.json()
+    assert body["ok"] is True
+    assert isinstance(body["version"], str)
+    assert body["version"] != first_version
+
+
+def test_put_instructions_with_stale_if_match_returns_409(tmp_path: Path) -> None:
+    """Stale If-Match → 409 with current_version, current_content,
+    submitted_version. The on-disk content is NOT overwritten."""
+    settings = make_settings(tmp_path).model_copy(update={"operator_token": "secret"})
+    client = TestClient(create_app(settings))
+    headers = auth_headers(settings)
+
+    seed = client.put(
+        "/api/knowledge/instructions",
+        headers=headers,
+        json={"content": "on-disk"},
+    )
+    assert seed.status_code == 200
+    current_version = seed.json()["version"]
+
+    stale = "0" * 16
+    resp = client.put(
+        "/api/knowledge/instructions",
+        headers={**headers, "If-Match": stale},
+        json={"content": "would-clobber"},
+    )
+    assert resp.status_code == 409
+    detail = resp.json()["detail"]
+    assert detail["detail"] == "Stale version"
+    assert detail["current_version"] == current_version
+    assert detail["current_content"] == "on-disk"
+    assert detail["submitted_version"] == stale
+
+    # On-disk content was NOT modified.
+    after = client.get("/api/knowledge/instructions", headers=headers).json()
+    assert after["content"] == "on-disk"
+    assert after["version"] == current_version
+
+
+def test_put_instructions_overwrite_with_new_if_match_succeeds(tmp_path: Path) -> None:
+    """Full client conflict-resolution flow: stale PUT → 409 → retry
+    with the returned current_version → 200."""
+    settings = make_settings(tmp_path).model_copy(update={"operator_token": "secret"})
+    client = TestClient(create_app(settings))
+    headers = auth_headers(settings)
+
+    client.put(
+        "/api/knowledge/instructions",
+        headers=headers,
+        json={"content": "v1"},
+    )
+
+    conflict = client.put(
+        "/api/knowledge/instructions",
+        headers={**headers, "If-Match": "1" * 16},
+        json={"content": "v2-from-stale-client"},
+    )
+    assert conflict.status_code == 409
+    fresh_version = conflict.json()["detail"]["current_version"]
+
+    overwrite = client.put(
+        "/api/knowledge/instructions",
+        headers={**headers, "If-Match": fresh_version},
+        json={"content": "v2-from-stale-client"},
+    )
+    assert overwrite.status_code == 200
+    assert overwrite.json()["version"] != fresh_version
+
+    final = client.get("/api/knowledge/instructions", headers=headers).json()
+    assert final["content"] == "v2-from-stale-client"
+
+
+def test_get_knowledge_index_includes_version_field(tmp_path: Path) -> None:
+    """The /api/knowledge index and /api/knowledge/instructions GET both
+    expose the 16-hex-char version token."""
+    settings = make_settings(tmp_path).model_copy(update={"operator_token": "secret"})
+    client = TestClient(create_app(settings))
+    headers = auth_headers(settings)
+
+    client.put(
+        "/api/knowledge/instructions",
+        headers=headers,
+        json={"content": "anything"},
+    )
+
+    index = client.get("/api/knowledge", headers=headers).json()
+    doc = index["docs"][0]
+    assert "version" in doc
+    assert isinstance(doc["version"], str)
+    assert len(doc["version"]) == 16
+    assert all(c in "0123456789abcdef" for c in doc["version"])
+
+    instructions = client.get("/api/knowledge/instructions", headers=headers).json()
+    assert "version" in instructions
+    assert instructions["version"] == doc["version"]
+
+
 def test_knowledge_instructions_put_budget_boundaries(tmp_path: Path) -> None:
     """Boundary matrix for the 413 budget guard.
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
 import os
 import shutil
 import tempfile
@@ -118,6 +119,41 @@ def atomic_write_text(path: Path, content: str) -> None:
             os.close(dir_fd)
 
 
+def compute_version(text: str) -> str:
+    """Return the first 16 hex chars of SHA-256(text.encode('utf-8')).
+
+    Used as an optimistic-concurrency version token for instructions.md.
+    Deterministic, ~64 bits of entropy — plenty for collision-safety on a
+    single-document store. The empty string hashes to a known fixed value
+    (``e3b0c44298fc1c14``).
+    """
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+
+
+class StaleVersionError(Exception):
+    """Raised by :func:`save_instructions_checked` when the supplied
+    ``if_match`` token does not match the current on-disk version.
+
+    The attached fields let callers (and the HTTP layer) return a 409
+    response carrying the current content so the client can offer a
+    "reload" or "overwrite anyway" choice without re-fetching.
+    """
+
+    def __init__(
+        self,
+        current_version: str,
+        current_content: str,
+        submitted_version: str | None,
+    ) -> None:
+        super().__init__(
+            f"Stale version: submitted={submitted_version!r}, "
+            f"current={current_version!r}"
+        )
+        self.current_version = current_version
+        self.current_content = current_content
+        self.submitted_version = submitted_version
+
+
 def truncate_for_prompt(text: str, max_chars: int) -> str:
     stripped = text.strip()
     if not stripped:
@@ -213,7 +249,11 @@ def load_instructions(settings: Settings) -> str:
     )
 
 
-def save_instructions(settings: Settings, content: str) -> dict[str, Any]:
+def _write_instructions_unlocked(settings: Settings, content: str) -> dict[str, Any]:
+    """Internal write helper. Assumes the caller holds the per-path write
+    lock when concurrent writers are possible. Performs the atomic write,
+    cache invalidation, and returns fresh doc metadata.
+    """
     from .instructions_cache import invalidate_instructions_cache
 
     ensure_knowledge_files(settings)
@@ -224,6 +264,50 @@ def save_instructions(settings: Settings, content: str) -> dict[str, Any]:
     return _doc_meta(path, settings.knowledge_instructions_max_chars)
 
 
+def save_instructions(settings: Settings, content: str) -> dict[str, Any]:
+    """Write ``content`` to instructions.md without a version check.
+
+    Kept for in-process callers (CLI, tests, scripts) that need a simple
+    synchronous save and do not care about cross-tab races. HTTP routes
+    must use :func:`save_instructions_checked` instead so concurrent
+    edits get a 409 instead of silently clobbering each other.
+    """
+    return _write_instructions_unlocked(settings, content)
+
+
+async def save_instructions_checked(
+    settings: Settings,
+    content: str,
+    if_match: str | None,
+) -> dict[str, Any]:
+    """Optimistic-concurrency save for instructions.md.
+
+    Acquires the per-path write lock and, under that lock, computes the
+    current on-disk version. If ``if_match`` is provided and does not
+    match the current version, raises :class:`StaleVersionError` without
+    writing. Otherwise performs the atomic write and returns fresh doc
+    metadata (which includes the new version).
+
+    Read-then-write happens entirely inside the lock so two concurrent
+    writers cannot both observe the same version and both succeed.
+    """
+    ensure_knowledge_files(settings)
+    path = _instructions_path(settings)
+    async with get_write_lock(path):
+        try:
+            current_content = path.read_text(encoding="utf-8")
+        except OSError:
+            current_content = ""
+        current_version = compute_version(current_content)
+        if if_match is not None and if_match != current_version:
+            raise StaleVersionError(
+                current_version=current_version,
+                current_content=current_content,
+                submitted_version=if_match,
+            )
+        return _write_instructions_unlocked(settings, content)
+
+
 @dataclass(frozen=True)
 class KnowledgeDocMeta:
     id: str
@@ -231,6 +315,7 @@ class KnowledgeDocMeta:
     updated_at: str | None
     char_count: int
     truncated_preview: str
+    version: str
 
 
 def _doc_meta(path: Path, preview_max: int) -> dict[str, Any]:
@@ -249,6 +334,7 @@ def _doc_meta(path: Path, preview_max: int) -> dict[str, Any]:
         "updated_at": updated_at,
         "char_count": len(text),
         "truncated_preview": preview,
+        "version": compute_version(text),
     }
 
 

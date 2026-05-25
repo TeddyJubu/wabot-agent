@@ -43,6 +43,7 @@ const KNOWLEDGE_FIXTURE: KnowledgeIndex = {
       updated_at: null,
       char_count: 12,
       truncated_preview: "qr pairing notes",
+      version: "0000000000000000",
     },
   ],
   budgets: { instructions: 1000, contact: 1000 },
